@@ -18,16 +18,16 @@ import (
 )
 
 type serviceFixture struct {
-	repo   *mocks.UserRepository
-	tokens *mocks.TokenManager
+	repo   *mocks.MockUserRepository
+	tokens *mocks.MockTokenManager
 	svc    *service.Service
 }
 
 func newServiceFixture(t *testing.T) serviceFixture {
 	t.Helper()
 
-	repo := mocks.NewUserRepository(t)
-	tokens := mocks.NewTokenManager(t)
+	repo := mocks.NewMockUserRepository(t)
+	tokens := mocks.NewMockTokenManager(t)
 	hasher := service.NewArgon2idHasher(fastParams)
 
 	svc, err := service.NewService(repo, hasher, tokens, slog.Default())
