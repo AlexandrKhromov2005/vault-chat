@@ -1,0 +1,18 @@
+# Binaries
+/bin/
+*.exe
+
+# Environment and secrets — never commit real values
+.env
+secrets/
+
+# Coverage artifacts
+coverage.out
+coverage.html
+cover_*.out
+
+# Fuzz corpus written by go test (local cache)
+fuzzcache/
+
+# OS artifacts
+.DS_Store
