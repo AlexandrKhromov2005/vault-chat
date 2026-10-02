@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1;authv1";
+
+import "google/protobuf/timestamp.proto";
+
+// AuthService provides identity operations: registration, login, and
+// token validation for the API Gateway.
+service AuthService {
+  // Register creates a new user account.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Login authenticates a user and issues an access/refresh token pair.
+  rpc Login(LoginRequest) returns (LoginResponse);
+  // ValidateToken verifies a JWT and returns the associated identity.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+  string user_id = 1;
+  string email = 2;
+  string username = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string user_id = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  google.protobuf.Timestamp access_expires_at = 4;
+  google.protobuf.Timestamp refresh_expires_at = 5;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string email = 3;
+  string username = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
