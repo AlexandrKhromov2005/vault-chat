@@ -112,6 +112,8 @@ A modular monolith would be easier for 3 people short-term, but:
 
 Used for request/response operations requiring immediate consistency.
 
+**Implementation:** the official [`google.golang.org/grpc`](https://pkg.go.dev/google.golang.org/grpc) (grpc-go) library for servers and clients; `.proto` sources in `api/proto/`, code generated with [`buf`](https://buf.build). Connect-RPC was considered and rejected: grpc-go is the reference implementation with the most mature interceptor / mTLS / load-balancing ecosystem, and the team already knows it.
+
 | Call | From | To | Purpose |
 |------|------|-----|---------|
 | `ValidateToken` | Gateway | Auth | JWT verification on every request |
@@ -324,7 +326,7 @@ Developer Machine:
 |-------|-----------|
 | Language | Go 1.23+ |
 | API (external) | HTTP/2, REST, WebSocket |
-| API (internal) | gRPC + Protocol Buffers |
+| API (internal) | gRPC (grpc-go) + Protocol Buffers (codegen via buf) |
 | Message Bus | NATS (or Redis Streams as fallback) |
 | Primary DB | PostgreSQL 16+ |
 | Cache | Redis 7+ |
