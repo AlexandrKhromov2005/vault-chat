@@ -11,9 +11,50 @@ import (
 
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
+	for _, key := range []string{
+		"AUTH_GRPC_ADDR", "AUTH_JWT_ACCESS_TTL", "AUTH_JWT_REFRESH_TTL",
+		"AUTH_ARGON2_MEMORY_KIB", "AUTH_ARGON2_TIME", "AUTH_ARGON2_PARALLELISM", "AUTH_LOG_LEVEL",
+	} {
+		t.Setenv(key, "")
+	}
 	t.Setenv("AUTH_DATABASE_URL", "postgres://auth:auth@localhost:5432/auth_db")
 	t.Setenv("AUTH_JWT_PRIVATE_KEY_PATH", "secrets/private.pem")
 	t.Setenv("AUTH_JWT_PUBLIC_KEY_PATH", "secrets/public.pem")
+}
+
+func TestLoad_InvalidNumericValues(t *testing.T) {
+	for _, key := range []string{"AUTH_JWT_ACCESS_TTL", "AUTH_JWT_REFRESH_TTL"} {
+		for _, value := range []string{"0s", "-1s"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				setRequiredEnv(t)
+				t.Setenv(key, value)
+				_, err := config.Load()
+				require.ErrorContains(t, err, key)
+			})
+		}
+	}
+	for _, key := range []string{"AUTH_ARGON2_MEMORY_KIB", "AUTH_ARGON2_TIME", "AUTH_ARGON2_PARALLELISM"} {
+		values := []string{"0", "-1", "invalid", "4294967296"}
+		if key == "AUTH_ARGON2_PARALLELISM" {
+			values = append(values, "256", "257")
+		}
+		for _, value := range values {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				setRequiredEnv(t)
+				t.Setenv(key, value)
+				_, err := config.Load()
+				require.ErrorContains(t, err, key)
+			})
+		}
+	}
+}
+
+func TestLoad_ParallelismBoundary(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("AUTH_ARGON2_PARALLELISM", "255")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	require.Equal(t, uint8(255), cfg.Argon2Parallelism)
 }
 
 func TestLoad(t *testing.T) {

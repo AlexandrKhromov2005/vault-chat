@@ -52,13 +52,13 @@ func Load() (*Config, error) {
 	if cfg.JWTRefreshTTL, err = durationEnv("AUTH_JWT_REFRESH_TTL", cfg.JWTRefreshTTL); err != nil {
 		return nil, err
 	}
-	if cfg.Argon2MemoryKiB, err = uint32Env("AUTH_ARGON2_MEMORY_KIB", cfg.Argon2MemoryKiB); err != nil {
+	if cfg.Argon2MemoryKiB, err = uintEnv("AUTH_ARGON2_MEMORY_KIB", cfg.Argon2MemoryKiB, 32); err != nil {
 		return nil, err
 	}
-	if cfg.Argon2Time, err = uint32Env("AUTH_ARGON2_TIME", cfg.Argon2Time); err != nil {
+	if cfg.Argon2Time, err = uintEnv("AUTH_ARGON2_TIME", cfg.Argon2Time, 32); err != nil {
 		return nil, err
 	}
-	parallelism, err := uint32Env("AUTH_ARGON2_PARALLELISM", uint32(cfg.Argon2Parallelism))
+	parallelism, err := uintEnv("AUTH_ARGON2_PARALLELISM", uint32(cfg.Argon2Parallelism), 8)
 	if err != nil {
 		return nil, err
 	}
@@ -68,40 +68,46 @@ func Load() (*Config, error) {
 }
 
 func envOr(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok && value != "" {
+	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
 
 func requiredEnv(key string) (string, error) {
-	value, ok := os.LookupEnv(key)
-	if !ok || value == "" {
+	value := os.Getenv(key)
+	if value == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
 	return value, nil
 }
 
 func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
-	value, ok := os.LookupEnv(key)
-	if !ok || value == "" {
+	value := os.Getenv(key)
+	if value == "" {
 		return fallback, nil
 	}
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("environment variable %s: %w", key, err)
 	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("environment variable %s must be positive", key)
+	}
 	return parsed, nil
 }
 
-func uint32Env(key string, fallback uint32) (uint32, error) {
-	value, ok := os.LookupEnv(key)
-	if !ok || value == "" {
+func uintEnv(key string, fallback uint32, bits int) (uint32, error) {
+	value := os.Getenv(key)
+	if value == "" {
 		return fallback, nil
 	}
-	parsed, err := strconv.ParseUint(value, 10, 32)
+	parsed, err := strconv.ParseUint(value, 10, bits)
 	if err != nil {
 		return 0, fmt.Errorf("environment variable %s: %w", key, err)
+	}
+	if parsed == 0 {
+		return 0, fmt.Errorf("environment variable %s must be positive", key)
 	}
 	return uint32(parsed), nil
 }
