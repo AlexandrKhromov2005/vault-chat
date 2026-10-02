@@ -51,6 +51,7 @@ type TokenManager interface {
 
 // TokenPair is a freshly issued access/refresh token bundle.
 type TokenPair struct {
+	UserID           string
 	AccessToken      string
 	RefreshToken     string
 	AccessExpiresAt  time.Time
@@ -163,6 +164,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 
 	s.logger.InfoContext(ctx, "user logged in", "user_id", user.ID)
 	return &TokenPair{
+		UserID:           user.ID,
 		AccessToken:      accessToken,
 		RefreshToken:     refreshToken,
 		AccessExpiresAt:  accessExpiresAt,
