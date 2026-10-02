@@ -98,9 +98,15 @@ func TestManager_Validate(t *testing.T) {
 	validToken, _, err := manager.IssueAccessToken("user-1", "user@example.com", "user1")
 	require.NoError(t, err)
 
-	expiredManager, err := jwt.NewManager(privatePEM, publicPEM, -time.Hour, time.Hour)
+	privateKey, err := jwtv5.ParseRSAPrivateKeyFromPEM(privatePEM)
 	require.NoError(t, err)
-	expiredToken, _, err := expiredManager.IssueAccessToken("user-1", "user@example.com", "user1")
+	expiredToken, err := jwtv5.NewWithClaims(jwtv5.SigningMethodRS256, jwtv5.MapClaims{
+		"iss":        "vault-chat-auth",
+		"sub":        "user-1",
+		"iat":        time.Now().Add(-2 * time.Hour).Unix(),
+		"exp":        time.Now().Add(-time.Hour).Unix(),
+		"token_type": "access",
+	}).SignedString(privateKey)
 	require.NoError(t, err)
 
 	otherPrivatePEM, _ := generateTestKeys(t)
