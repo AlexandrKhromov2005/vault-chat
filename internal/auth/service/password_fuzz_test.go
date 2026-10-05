@@ -21,6 +21,10 @@ func FuzzArgon2idHasher_Verify(f *testing.F) {
 	f.Add("x", "garbage")
 	f.Add("password1", "$argon2id$v=19$m=1024,t=1,p=2$!!!!$!!!!")
 
+	for _, params := range []string{"m=1024,t=0,p=2", "m=1024,t=1,p=0", "m=4294967295,t=1,p=2", "m=1024,t=4294967295,p=2"} {
+		f.Add("password1", "$argon2id$v=19$"+params+"$c2FsdA$a2V5")
+	}
+
 	f.Fuzz(func(t *testing.T, password, hash string) {
 		if len(password) > 1024 || len(hash) > 4096 {
 			t.Skip("input too large")

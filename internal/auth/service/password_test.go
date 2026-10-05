@@ -97,3 +97,26 @@ func TestArgon2idHasher_Verify_ParamsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, match)
 }
+
+func TestArgon2idHasher_RejectsUnsafeParameters(t *testing.T) {
+	for _, params := range []string{"m=1024,t=0,p=2", "m=1024,t=1,p=0", "m=0,t=1,p=2", "m=4294967295,t=1,p=2", "m=1024,t=4294967295,p=2", "m=1024,t=1,p=2junk"} {
+		t.Run(params, func(t *testing.T) {
+			h := service.NewArgon2idHasher(fastParams)
+			require.NotPanics(t, func() {
+				match, err := h.Verify("password1", "$argon2id$v=19$"+params+"$c2FsdA$a2V5")
+				require.Error(t, err)
+				require.False(t, match)
+			})
+		})
+	}
+}
+
+func TestArgon2idHasher_HashRejectsInvalidConfig(t *testing.T) {
+	for _, params := range []service.Argon2idParams{{}, {MemoryKiB: 1024, Time: 1, Parallelism: 2, SaltLength: 16, KeyLength: 0}} {
+		h := service.NewArgon2idHasher(params)
+		require.NotPanics(t, func() {
+			_, err := h.Hash("password1")
+			require.Error(t, err)
+		})
+	}
+}

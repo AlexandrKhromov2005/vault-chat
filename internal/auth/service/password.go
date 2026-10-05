@@ -46,11 +46,25 @@ func NewArgon2idHasher(params Argon2idParams) *Argon2idHasher {
 	return &Argon2idHasher{params: params}
 }
 
+// validate bounds the work and allocations accepted from stored hashes.
+func (p Argon2idParams) validate() error {
+	if p.Parallelism == 0 || p.Time == 0 || p.Time > 10 ||
+		p.MemoryKiB < 8*uint32(p.Parallelism) || p.MemoryKiB > 256*1024 ||
+		p.SaltLength == 0 || p.SaltLength > 64 || p.KeyLength == 0 || p.KeyLength > 64 {
+		return errors.New("invalid or excessive Argon2id parameters")
+	}
+	return nil
+}
+
 // Hash derives an Argon2id hash of password with a fresh random salt and
 // returns it in PHC string format.
 func (h *Argon2idHasher) Hash(password string) (string, error) {
 	if password == "" {
 		return "", errors.New("password must not be empty")
+	}
+
+	if err := h.params.validate(); err != nil {
+		return "", err
 	}
 
 	salt := make([]byte, h.params.SaltLength)
@@ -104,6 +118,13 @@ func decodePHC(encoded string) (Argon2idParams, []byte, []byte, error) {
 		return params, nil, nil, fmt.Errorf("malformed PHC parameters: %w", err)
 	}
 
+	if parts[2] != fmt.Sprintf("v=%d", version) || parts[3] != fmt.Sprintf("m=%d,t=%d,p=%d", params.MemoryKiB, params.Time, params.Parallelism) {
+		return params, nil, nil, errors.New("malformed PHC parameters")
+	}
+	if len(parts[4]) > base64.RawStdEncoding.EncodedLen(64) || len(parts[5]) > base64.RawStdEncoding.EncodedLen(64) {
+		return params, nil, nil, errors.New("PHC salt or key too large")
+	}
+
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return params, nil, nil, fmt.Errorf("malformed PHC salt: %w", err)
@@ -114,8 +135,9 @@ func decodePHC(encoded string) (Argon2idParams, []byte, []byte, error) {
 		return params, nil, nil, fmt.Errorf("malformed PHC key: %w", err)
 	}
 
-	if len(salt) == 0 || len(key) == 0 {
-		return params, nil, nil, errors.New("malformed PHC string: empty salt or key")
+	params.SaltLength, params.KeyLength = uint32(len(salt)), uint32(len(key))
+	if err := params.validate(); err != nil {
+		return params, nil, nil, err
 	}
 
 	return params, salt, key, nil
