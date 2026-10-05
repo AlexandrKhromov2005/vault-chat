@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -14,6 +16,7 @@ const (
 	maxUsernameLength = 32
 	minPasswordLength = 8
 	maxPasswordLength = 128
+	userIDLength      = 36
 )
 
 var (
@@ -23,6 +26,8 @@ var (
 	ErrInvalidUsername = errors.New("invalid username")
 	// ErrInvalidPassword is returned when a password fails validation.
 	ErrInvalidPassword = errors.New("invalid password")
+	// ErrInvalidUserID is returned when a user id fails validation.
+	ErrInvalidUserID = errors.New("invalid user id")
 )
 
 var (
@@ -77,6 +82,18 @@ func ValidatePassword(password string) error {
 	}
 	if !hasLetter || !hasDigit {
 		return ErrInvalidPassword
+	}
+	return nil
+}
+
+// ValidateUserID checks that id is a UUID in the canonical 36-character
+// hyphenated form. Braced and URN forms are rejected.
+func ValidateUserID(id string) error {
+	if len(id) != userIDLength {
+		return ErrInvalidUserID
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return ErrInvalidUserID
 	}
 	return nil
 }
