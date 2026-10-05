@@ -100,10 +100,19 @@ func TestService_RefreshToken(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
-	t.Run("reuse of a revoked token revokes every session of the user", func(t *testing.T) {
+	t.Run("logged-out session is rejected without touching other sessions", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
 		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionRevoked)
+
+		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
+	t.Run("reuse of a rotated token revokes every session of the user", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		expectRotation(fx)
+		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(3, nil)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
@@ -113,7 +122,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("failure to contain token reuse is reported as an internal error", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionRevoked)
+		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(0, errors.New("connection reset"))
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")

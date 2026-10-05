@@ -44,7 +44,7 @@ func TestSessionRepository_Rotate(t *testing.T) {
 	require.NoError(t, repo.Rotate(ctx, current.ID, next))
 
 	err := repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour))
-	require.ErrorIs(t, err, repository.ErrSessionRevoked, "a rotated session must not be usable again")
+	require.ErrorIs(t, err, repository.ErrSessionReused, "a rotated session must not be usable again")
 
 	require.NoError(t, repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour)),
 		"the replacement session must be active")
@@ -75,7 +75,7 @@ func TestSessionRepository_Rotate_ConcurrentRotationsHaveOneWinner(t *testing.T)
 			succeeded++
 			continue
 		}
-		require.ErrorIs(t, err, repository.ErrSessionRevoked)
+		require.ErrorIs(t, err, repository.ErrSessionReused)
 	}
 	require.Equal(t, 1, succeeded)
 }
