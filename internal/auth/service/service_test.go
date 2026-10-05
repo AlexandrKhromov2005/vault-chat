@@ -199,3 +199,14 @@ func TestService_ValidateToken(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 }
+
+func TestService_ValidateToken_RejectsNonAccessTokens(t *testing.T) {
+	for _, tokenType := range []jwt.TokenType{jwt.RefreshToken, "", "unknown"} {
+		t.Run(string(tokenType), func(t *testing.T) {
+			fx := newServiceFixture(t)
+			fx.tokens.EXPECT().Validate("token").Return(&jwt.Claims{TokenType: tokenType}, nil)
+			_, err := fx.svc.ValidateToken(context.Background(), "token")
+			require.ErrorIs(t, err, service.ErrInvalidToken)
+		})
+	}
+}

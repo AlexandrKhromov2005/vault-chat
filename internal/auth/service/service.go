@@ -183,5 +183,8 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*jwt.Claims,
 		s.logger.DebugContext(ctx, "token validation failed", "error", err)
 		return nil, ErrInvalidToken
 	}
+	if claims.TokenType != jwt.AccessToken {
+		return nil, ErrInvalidToken
+	}
 	return claims, nil
 }
