@@ -87,9 +87,9 @@ func (_c *MockTokenManager_IssueAccessToken_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
-// IssueRefreshToken provides a mock function with given fields: userID, email, username
-func (_m *MockTokenManager) IssueRefreshToken(userID string, email string, username string) (string, time.Time, error) {
-	ret := _m.Called(userID, email, username)
+// IssueRefreshToken provides a mock function with given fields: sessionID, userID, email, username
+func (_m *MockTokenManager) IssueRefreshToken(sessionID string, userID string, email string, username string) (string, time.Time, error) {
+	ret := _m.Called(sessionID, userID, email, username)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IssueRefreshToken")
@@ -98,23 +98,23 @@ func (_m *MockTokenManager) IssueRefreshToken(userID string, email string, usern
 	var r0 string
 	var r1 time.Time
 	var r2 error
-	if rf, ok := ret.Get(0).(func(string, string, string) (string, time.Time, error)); ok {
-		return rf(userID, email, username)
+	if rf, ok := ret.Get(0).(func(string, string, string, string) (string, time.Time, error)); ok {
+		return rf(sessionID, userID, email, username)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string) string); ok {
-		r0 = rf(userID, email, username)
+	if rf, ok := ret.Get(0).(func(string, string, string, string) string); ok {
+		r0 = rf(sessionID, userID, email, username)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string) time.Time); ok {
-		r1 = rf(userID, email, username)
+	if rf, ok := ret.Get(1).(func(string, string, string, string) time.Time); ok {
+		r1 = rf(sessionID, userID, email, username)
 	} else {
 		r1 = ret.Get(1).(time.Time)
 	}
 
-	if rf, ok := ret.Get(2).(func(string, string, string) error); ok {
-		r2 = rf(userID, email, username)
+	if rf, ok := ret.Get(2).(func(string, string, string, string) error); ok {
+		r2 = rf(sessionID, userID, email, username)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -128,16 +128,17 @@ type MockTokenManager_IssueRefreshToken_Call struct {
 }
 
 // IssueRefreshToken is a helper method to define mock.On call
+//   - sessionID string
 //   - userID string
 //   - email string
 //   - username string
-func (_e *MockTokenManager_Expecter) IssueRefreshToken(userID interface{}, email interface{}, username interface{}) *MockTokenManager_IssueRefreshToken_Call {
-	return &MockTokenManager_IssueRefreshToken_Call{Call: _e.mock.On("IssueRefreshToken", userID, email, username)}
+func (_e *MockTokenManager_Expecter) IssueRefreshToken(sessionID interface{}, userID interface{}, email interface{}, username interface{}) *MockTokenManager_IssueRefreshToken_Call {
+	return &MockTokenManager_IssueRefreshToken_Call{Call: _e.mock.On("IssueRefreshToken", sessionID, userID, email, username)}
 }
 
-func (_c *MockTokenManager_IssueRefreshToken_Call) Run(run func(userID string, email string, username string)) *MockTokenManager_IssueRefreshToken_Call {
+func (_c *MockTokenManager_IssueRefreshToken_Call) Run(run func(sessionID string, userID string, email string, username string)) *MockTokenManager_IssueRefreshToken_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string))
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string))
 	})
 	return _c
 }
@@ -147,7 +148,7 @@ func (_c *MockTokenManager_IssueRefreshToken_Call) Return(_a0 string, _a1 time.T
 	return _c
 }
 
-func (_c *MockTokenManager_IssueRefreshToken_Call) RunAndReturn(run func(string, string, string) (string, time.Time, error)) *MockTokenManager_IssueRefreshToken_Call {
+func (_c *MockTokenManager_IssueRefreshToken_Call) RunAndReturn(run func(string, string, string, string) (string, time.Time, error)) *MockTokenManager_IssueRefreshToken_Call {
 	_c.Call.Return(run)
 	return _c
 }

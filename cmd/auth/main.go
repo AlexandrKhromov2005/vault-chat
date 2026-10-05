@@ -71,6 +71,7 @@ func run() error {
 
 	svc, err := service.NewService(
 		repository.NewUserRepository(pool),
+		repository.NewSessionRepository(pool),
 		service.NewArgon2idHasher(service.Argon2idParams{
 			MemoryKiB:   cfg.Argon2MemoryKiB,
 			Time:        cfg.Argon2Time,

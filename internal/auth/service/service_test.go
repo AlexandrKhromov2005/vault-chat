@@ -14,7 +14,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service/mocks"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
