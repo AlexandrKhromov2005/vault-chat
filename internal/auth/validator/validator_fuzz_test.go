@@ -102,3 +102,34 @@ func FuzzValidatePassword(f *testing.F) {
 		}
 	})
 }
+
+// FuzzValidateUserID verifies that validation never panics, is deterministic,
+// and only accepts canonical 36-character UUIDs.
+func FuzzValidateUserID(f *testing.F) {
+	f.Add("3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d")
+	f.Add("")
+	f.Add("user-1")
+	f.Add("{3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d}")
+	f.Add("3f2b8c1e9d4a4e6b8f7c2a1d0e9b8c7d")
+
+	f.Fuzz(func(t *testing.T, id string) {
+		err1 := validator.ValidateUserID(id)
+		err2 := validator.ValidateUserID(id)
+		if (err1 == nil) != (err2 == nil) {
+			t.Fatalf("non-deterministic validation for %q", id)
+		}
+
+		if err1 == nil {
+			if len(id) != 36 {
+				t.Fatalf("accepted user id of length %d: %q", len(id), id)
+			}
+			for i, r := range id {
+				isDash := i == 8 || i == 13 || i == 18 || i == 23
+				isHex := r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F'
+				if isDash != (r == '-') || !isDash && !isHex {
+					t.Fatalf("accepted non-canonical user id: %q", id)
+				}
+			}
+		}
+	})
+}
