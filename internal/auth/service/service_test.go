@@ -14,26 +14,49 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service/mocks"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
 type serviceFixture struct {
-	repo   *mocks.MockUserRepository
-	tokens *mocks.MockTokenManager
-	svc    *service.Service
+	repo     *mocks.MockUserRepository
+	sessions *mocks.MockSessionRepository
+	tokens   *mocks.MockTokenManager
+	svc      *service.Service
 }
 
 func newServiceFixture(t *testing.T) serviceFixture {
 	t.Helper()
 
 	repo := mocks.NewMockUserRepository(t)
+	sessions := mocks.NewMockSessionRepository(t)
 	tokens := mocks.NewMockTokenManager(t)
 	hasher := service.NewArgon2idHasher(fastParams)
 
-	svc, err := service.NewService(repo, hasher, tokens, slog.Default())
+	svc, err := service.NewService(repo, sessions, hasher, tokens, slog.Default())
 	require.NoError(t, err)
 
-	return serviceFixture{repo: repo, tokens: tokens, svc: svc}
+	return serviceFixture{repo: repo, sessions: sessions, tokens: tokens, svc: svc}
+}
+
+// refreshExpiresAt is the fixed refresh token expiry returned by the token
+// manager mock.
+var refreshExpiresAt = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// expectTokenPair expects one access and one refresh token to be issued for
+// user and returns a pointer to the session id the refresh token was bound to.
+func (fx serviceFixture) expectTokenPair(user *domain.User) *string {
+	var sessionID string
+	fx.tokens.EXPECT().
+		IssueAccessToken(user.ID, user.Email, user.Username).
+		Return("access-token", time.Now().Add(15*time.Minute), nil)
+	fx.tokens.EXPECT().
+		IssueRefreshToken(mock.Anything, user.ID, user.Email, user.Username).
+		RunAndReturn(func(id, _, _, _ string) (string, time.Time, error) {
+			sessionID = id
+			return "refresh-token", refreshExpiresAt, nil
+		})
+	return &sessionID
 }
 
 func TestService_Register(t *testing.T) {
@@ -108,22 +131,33 @@ func TestService_Login(t *testing.T) {
 		PasswordHash: storedHash,
 	}
 
-	t.Run("success returns a token pair", func(t *testing.T) {
+	t.Run("success returns a token pair bound to a new session", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		fx.repo.EXPECT().GetByEmail(mock.Anything, "user@example.com").Return(storedUser, nil)
-		fx.tokens.EXPECT().
-			IssueAccessToken("user-1", "user@example.com", "username1").
-			Return("access-token", time.Now().Add(15*time.Minute), nil)
-		fx.tokens.EXPECT().
-			IssueRefreshToken("user-1", "user@example.com", "username1").
-			Return("refresh-token", time.Now().Add(720*time.Hour), nil)
+		sessionID := fx.expectTokenPair(storedUser)
+		fx.sessions.EXPECT().
+			Create(mock.Anything, mock.MatchedBy(func(s *domain.Session) bool {
+				return s.ID == *sessionID && s.UserID == "user-1" && s.ExpiresAt.Equal(refreshExpiresAt)
+			})).
+			Return(nil)
 
 		pair, err := fx.svc.Login(context.Background(), "user@example.com", "password1")
 		require.NoError(t, err)
 		require.Equal(t, "access-token", pair.AccessToken)
 		require.Equal(t, "refresh-token", pair.RefreshToken)
 		require.False(t, pair.AccessExpiresAt.IsZero())
-		require.False(t, pair.RefreshExpiresAt.IsZero())
+		require.Equal(t, refreshExpiresAt, pair.RefreshExpiresAt)
+	})
+
+	t.Run("session storage failure fails the login", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		fx.repo.EXPECT().GetByEmail(mock.Anything, mock.Anything).Return(storedUser, nil)
+		fx.expectTokenPair(storedUser)
+		fx.sessions.EXPECT().Create(mock.Anything, mock.Anything).Return(errors.New("connection reset"))
+
+		pair, err := fx.svc.Login(context.Background(), "user@example.com", "password1")
+		require.Error(t, err)
+		require.Nil(t, pair)
 	})
 
 	t.Run("unknown email yields invalid credentials", func(t *testing.T) {
