@@ -12,7 +12,7 @@ import (
 
 // RefreshToken exchanges a refresh token for a new token pair. The session of
 // the presented token is revoked and replaced (rotation). Presenting a token
-// whose session was already revoked indicates that the token leaked, so every
+// whose session was already rotated indicates that the token leaked, so every
 // session of its owner is revoked.
 func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	claims, err := s.parseToken(ctx, refreshToken, jwt.RefreshToken)
@@ -40,24 +40,24 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	case err == nil:
 		s.logger.InfoContext(ctx, "session refreshed", "user_id", user.ID)
 		return pair, nil
-	case errors.Is(err, repository.ErrNotFound):
+	case errors.Is(err, repository.ErrNotFound), errors.Is(err, repository.ErrSessionRevoked):
 		return nil, ErrInvalidToken
-	case errors.Is(err, repository.ErrSessionRevoked):
+	case errors.Is(err, repository.ErrSessionReused):
 		return nil, s.handleTokenReuse(ctx, user.ID)
 	default:
 		return nil, fmt.Errorf("refresh: failed to rotate session: %w", err)
 	}
 }
 
-// handleTokenReuse revokes every session of userID after a revoked refresh
-// token was presented. It returns ErrInvalidToken once the sessions are
+// handleTokenReuse revokes every session of userID after an already rotated
+// refresh token was presented. It returns ErrInvalidToken once the sessions are
 // revoked, or an internal error if they could not be.
 func (s *Service) handleTokenReuse(ctx context.Context, userID string) error {
 	revoked, err := s.sessions.RevokeAllForUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("refresh: failed to revoke sessions after token reuse: %w", err)
 	}
-	s.logger.WarnContext(ctx, "revoked refresh token reused; all sessions revoked",
+	s.logger.WarnContext(ctx, "rotated refresh token reused; all sessions revoked",
 		"user_id", userID, "revoked_sessions", revoked)
 	return ErrInvalidToken
 }

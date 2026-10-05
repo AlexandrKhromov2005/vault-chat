@@ -12,9 +12,14 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 )
 
-// ErrSessionRevoked is returned when an operation requires an active session
-// but the session has already been revoked.
-var ErrSessionRevoked = errors.New("repository: session revoked")
+var (
+	// ErrSessionRevoked is returned when an operation requires an active
+	// session but the session was revoked (logout or revoke-all).
+	ErrSessionRevoked = errors.New("repository: session revoked")
+	// ErrSessionReused is returned when a session that was already replaced by
+	// rotation is rotated again, i.e. its refresh token was used twice.
+	ErrSessionReused = errors.New("repository: rotated session reused")
+)
 
 // SessionRepository persists login sessions in PostgreSQL.
 type SessionRepository struct {
@@ -32,8 +37,9 @@ func (r *SessionRepository) Create(ctx context.Context, session *domain.Session)
 }
 
 // Rotate atomically revokes the active session currentID and stores next in
-// its place. It returns ErrSessionRevoked if currentID was already revoked
-// and ErrNotFound if it does not exist or has expired.
+// its place. It returns ErrSessionReused if currentID was already rotated,
+// ErrSessionRevoked if it was revoked otherwise, and ErrNotFound if it does
+// not exist or has expired.
 func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *domain.Session) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -43,9 +49,9 @@ func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *
 
 	// The row lock taken by UPDATE serializes concurrent rotations of the same
 	// session: the loser re-evaluates the WHERE clause and sees it revoked.
-	const revoke = `UPDATE sessions SET revoked_at = now()
+	const revoke = `UPDATE sessions SET revoked_at = now(), replaced_by = $2::uuid
 		WHERE id = $1::uuid AND revoked_at IS NULL AND expires_at > now()`
-	tag, err := tx.Exec(ctx, revoke, currentID)
+	tag, err := tx.Exec(ctx, revoke, currentID, next.ID)
 	if err != nil {
 		return fmt.Errorf("failed to revoke session: %w", err)
 	}
@@ -104,17 +110,22 @@ func insertSession(ctx context.Context, db execer, session *domain.Session) erro
 
 // inactiveSessionError explains why a session could not be rotated.
 func inactiveSessionError(ctx context.Context, tx pgx.Tx, id string) error {
-	var revoked bool
+	var revoked, rotated bool
 	err := tx.QueryRow(ctx,
-		"SELECT revoked_at IS NOT NULL FROM sessions WHERE id = $1::uuid", id).Scan(&revoked)
+		"SELECT revoked_at IS NOT NULL, replaced_by IS NOT NULL FROM sessions WHERE id = $1::uuid",
+		id).Scan(&revoked, &rotated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("failed to load session: %w", err)
 	}
-	if revoked {
+	switch {
+	case rotated:
+		return ErrSessionReused
+	case revoked:
 		return ErrSessionRevoked
+	default:
+		return ErrNotFound // exists, not revoked, therefore expired
 	}
-	return ErrNotFound // exists, not revoked, therefore expired
 }
