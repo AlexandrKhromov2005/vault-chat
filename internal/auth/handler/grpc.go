@@ -22,6 +22,9 @@ type AuthService interface {
 	Register(ctx context.Context, email, username, password string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
+	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
+	Logout(ctx context.Context, refreshToken string) error
+	RevokeAllSessions(ctx context.Context, userID string) (int64, error)
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -83,12 +86,48 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 	}, nil
 }
 
+// RefreshToken exchanges a refresh token for a new access/refresh token pair.
+func (h *AuthGRPCHandler) RefreshToken(ctx context.Context, req *authv1.RefreshTokenRequest) (*authv1.RefreshTokenResponse, error) {
+	pair, err := h.svc.RefreshToken(ctx, req.GetRefreshToken())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.RefreshTokenResponse{
+		UserId:           pair.UserID,
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		AccessExpiresAt:  timestamppb.New(pair.AccessExpiresAt),
+		RefreshExpiresAt: timestamppb.New(pair.RefreshExpiresAt),
+	}, nil
+}
+
+// Logout revokes the session bound to the given refresh token.
+func (h *AuthGRPCHandler) Logout(ctx context.Context, req *authv1.LogoutRequest) (*authv1.LogoutResponse, error) {
+	if err := h.svc.Logout(ctx, req.GetRefreshToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.LogoutResponse{}, nil
+}
+
+// RevokeAllSessions revokes every active session of a user.
+func (h *AuthGRPCHandler) RevokeAllSessions(
+	ctx context.Context,
+	req *authv1.RevokeAllSessionsRequest,
+) (*authv1.RevokeAllSessionsResponse, error) {
+	revoked, err := h.svc.RevokeAllSessions(ctx, req.GetUserId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.RevokeAllSessionsResponse{RevokedCount: revoked}, nil
+}
+
 // toStatus maps domain errors to gRPC status codes.
 func toStatus(err error) error {
 	switch {
 	case errors.Is(err, validator.ErrInvalidEmail),
 		errors.Is(err, validator.ErrInvalidUsername),
-		errors.Is(err, validator.ErrInvalidPassword):
+		errors.Is(err, validator.ErrInvalidPassword),
+		errors.Is(err, validator.ErrInvalidUserID):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, service.ErrEmailTaken),
 		errors.Is(err, service.ErrUsernameTaken):
