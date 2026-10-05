@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,36 @@ func TestSessionRepository_Rotate(t *testing.T) {
 
 	require.NoError(t, repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour)),
 		"the replacement session must be active")
+}
+
+func TestSessionRepository_Rotate_ConcurrentRotationsHaveOneWinner(t *testing.T) {
+	repo, user := newSessionFixture(t)
+	ctx := context.Background()
+
+	current := newTestSession(user.ID, time.Hour)
+	require.NoError(t, repo.Create(ctx, current))
+
+	const attempts = 8
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour))
+		}()
+	}
+	wg.Wait()
+
+	var succeeded int
+	for _, err := range errs {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		require.ErrorIs(t, err, repository.ErrSessionRevoked)
+	}
+	require.Equal(t, 1, succeeded)
 }
 
 func TestSessionRepository_Rotate_UnknownOrExpired(t *testing.T) {
