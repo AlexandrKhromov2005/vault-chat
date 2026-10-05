@@ -1,0 +1,14 @@
+with-expecter: true
+dir: "{{.InterfaceDir}}/mocks"
+outpkg: mocks
+filename: "{{.InterfaceNameSnake}}.go"
+
+packages:
+  github.com/AlexandrKhromov2005/vault-chat/internal/auth/service:
+    interfaces:
+      UserRepository:
+      Hasher:
+      TokenManager:
+  github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler:
+    interfaces:
+      AuthService:
