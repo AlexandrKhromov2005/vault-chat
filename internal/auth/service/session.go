@@ -62,15 +62,16 @@ func (s *Service) handleTokenReuse(ctx context.Context, userID string) error {
 	return ErrInvalidToken
 }
 
-// Logout revokes the session bound to refreshToken. Logging out of an
-// already revoked session succeeds.
+// Logout revokes the session bound to refreshToken together with the sessions
+// it was rotated into, ending the login. Logging out of an already revoked
+// session succeeds.
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	claims, err := s.parseToken(ctx, refreshToken, jwt.RefreshToken)
 	if err != nil {
 		return err
 	}
 
-	if err := s.sessions.Revoke(ctx, claims.ID); err != nil {
+	if err := s.sessions.RevokeFamily(ctx, claims.UserID, claims.ID); err != nil {
 		return fmt.Errorf("logout: failed to revoke session: %w", err)
 	}
 

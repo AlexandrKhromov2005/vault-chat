@@ -121,21 +121,30 @@ func (h *AuthGRPCHandler) RevokeAllSessions(
 	return &authv1.RevokeAllSessionsResponse{RevokedCount: revoked}, nil
 }
 
-// toStatus maps domain errors to gRPC status codes.
+// publicErrors are the domain errors reported to clients, with their gRPC
+// codes and messages. Any other error is reported as an opaque Internal error.
+var publicErrors = []struct {
+	err     error
+	code    codes.Code
+	message string
+}{
+	{validator.ErrInvalidEmail, codes.InvalidArgument, "invalid email address"},
+	{validator.ErrInvalidUsername, codes.InvalidArgument, "invalid username"},
+	{validator.ErrInvalidPassword, codes.InvalidArgument, "invalid password"},
+	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user id"},
+	{service.ErrEmailTaken, codes.AlreadyExists, "email already registered"},
+	{service.ErrUsernameTaken, codes.AlreadyExists, "username already taken"},
+	{service.ErrInvalidCredentials, codes.Unauthenticated, "invalid credentials"},
+	{service.ErrInvalidToken, codes.Unauthenticated, "invalid token"},
+}
+
+// toStatus maps domain errors to gRPC status codes. Only the fixed public
+// message is sent, never the wrapping context of err.
 func toStatus(err error) error {
-	switch {
-	case errors.Is(err, validator.ErrInvalidEmail),
-		errors.Is(err, validator.ErrInvalidUsername),
-		errors.Is(err, validator.ErrInvalidPassword),
-		errors.Is(err, validator.ErrInvalidUserID):
-		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, service.ErrEmailTaken),
-		errors.Is(err, service.ErrUsernameTaken):
-		return status.Error(codes.AlreadyExists, err.Error())
-	case errors.Is(err, service.ErrInvalidCredentials),
-		errors.Is(err, service.ErrInvalidToken):
-		return status.Error(codes.Unauthenticated, err.Error())
-	default:
-		return status.Error(codes.Internal, "internal error")
+	for _, e := range publicErrors {
+		if errors.Is(err, e.err) {
+			return status.Error(e.code, e.message)
+		}
 	}
+	return status.Error(codes.Internal, "internal error")
 }

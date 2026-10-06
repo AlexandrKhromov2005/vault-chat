@@ -41,11 +41,12 @@ type AuthServiceClient interface {
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
-	// refresh token is revoked (rotation); presenting an already revoked token
-	// revokes every session of its owner.
+	// refresh token is revoked (rotation). Presenting a token that was already
+	// rotated means it leaked, so every session of its owner is revoked; a
+	// logged-out token is just rejected.
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
-	// Logout revokes the session bound to the given refresh token. It is
-	// idempotent.
+	// Logout ends the login of the given refresh token: its session and the
+	// sessions it was rotated into are revoked. It is idempotent.
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	// RevokeAllSessions revokes every active session of a user ("log out
 	// everywhere"). The caller is responsible for authorizing the request.
@@ -134,11 +135,12 @@ type AuthServiceServer interface {
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(context.Context, *ValidateTokenRequest) (*ValidateTokenResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
-	// refresh token is revoked (rotation); presenting an already revoked token
-	// revokes every session of its owner.
+	// refresh token is revoked (rotation). Presenting a token that was already
+	// rotated means it leaked, so every session of its owner is revoked; a
+	// logged-out token is just rejected.
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
-	// Logout revokes the session bound to the given refresh token. It is
-	// idempotent.
+	// Logout ends the login of the given refresh token: its session and the
+	// sessions it was rotated into are revoked. It is idempotent.
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	// RevokeAllSessions revokes every active session of a user ("log out
 	// everywhere"). The caller is responsible for authorizing the request.

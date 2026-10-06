@@ -16,11 +16,12 @@ service AuthService {
   // ValidateToken verifies a JWT and returns the associated identity.
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
   // RefreshToken exchanges a refresh token for a new token pair. The presented
-  // refresh token is revoked (rotation); presenting an already revoked token
-  // revokes every session of its owner.
+  // refresh token is revoked (rotation). Presenting a token that was already
+  // rotated means it leaked, so every session of its owner is revoked; a
+  // logged-out token is just rejected.
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
-  // Logout revokes the session bound to the given refresh token. It is
-  // idempotent.
+  // Logout ends the login of the given refresh token: its session and the
+  // sessions it was rotated into are revoked. It is idempotent.
   rpc Logout(LogoutRequest) returns (LogoutResponse);
   // RevokeAllSessions revokes every active session of a user ("log out
   // everywhere"). The caller is responsible for authorizing the request.

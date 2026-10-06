@@ -39,7 +39,7 @@ type UserRepository interface {
 type SessionRepository interface {
 	Create(ctx context.Context, session *domain.Session) error
 	Rotate(ctx context.Context, currentID string, next *domain.Session) error
-	Revoke(ctx context.Context, id string) error
+	RevokeFamily(ctx context.Context, userID, sessionID string) error
 	RevokeAllForUser(ctx context.Context, userID string) (int64, error)
 }
 
@@ -200,6 +200,12 @@ func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenTy
 	}
 	if claims.TokenType != want {
 		return nil, ErrInvalidToken
+	}
+	// The id of a refresh token is the id of its session.
+	if want == jwt.RefreshToken {
+		if _, err := uuid.Parse(claims.ID); err != nil {
+			return nil, ErrInvalidToken
+		}
 	}
 	return claims, nil
 }
