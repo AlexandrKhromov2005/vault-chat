@@ -52,6 +52,7 @@ func TestAuthGRPCHandler_RefreshToken(t *testing.T) {
 
 		_, err := h.RefreshToken(context.Background(), &authv1.RefreshTokenRequest{})
 		require.Equal(t, codes.Unauthenticated, status.Code(err))
+		require.Equal(t, "invalid token", status.Convert(err).Message())
 	})
 
 	t.Run("internal failure maps to Internal", func(t *testing.T) {
@@ -121,6 +122,7 @@ func TestAuthGRPCHandler_RevokeAllSessions(t *testing.T) {
 
 		_, err := h.RevokeAllSessions(context.Background(), &authv1.RevokeAllSessionsRequest{UserId: "user-1"})
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.Equal(t, "invalid user id", status.Convert(err).Message())
 	})
 
 	t.Run("internal failure maps to Internal", func(t *testing.T) {

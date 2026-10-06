@@ -50,6 +50,8 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 
 		_, err := h.Register(context.Background(), &authv1.RegisterRequest{})
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.Equal(t, "invalid email address", status.Convert(err).Message(),
+			"internal error context must not leak to clients")
 	})
 
 	t.Run("duplicate email maps to AlreadyExists", func(t *testing.T) {

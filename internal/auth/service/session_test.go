@@ -16,9 +16,13 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
+// sessionID is the id of the session the refresh token in refreshClaims is
+// bound to.
+const sessionID = "8d4c5e7a-1b2f-4c3d-9e8f-0a1b2c3d4e5f"
+
 func refreshClaims() *jwt.Claims {
 	return &jwt.Claims{
-		ID:        "session-1",
+		ID:        sessionID,
 		UserID:    "user-1",
 		Email:     "user@example.com",
 		Username:  "username1",
@@ -41,10 +45,10 @@ func TestService_RefreshToken(t *testing.T) {
 
 	t.Run("success rotates the session and issues a pair for the current identity", func(t *testing.T) {
 		fx := newServiceFixture(t)
-		sessionID := expectRotation(fx)
+		nextID := expectRotation(fx)
 		fx.sessions.EXPECT().
-			Rotate(mock.Anything, "session-1", mock.MatchedBy(func(s *domain.Session) bool {
-				return s.ID == *sessionID && s.ID != "session-1" && s.UserID == "user-1" &&
+			Rotate(mock.Anything, sessionID, mock.MatchedBy(func(s *domain.Session) bool {
+				return s.ID == *nextID && s.ID != sessionID && s.UserID == "user-1" &&
 					s.ExpiresAt.Equal(refreshExpiresAt)
 			})).
 			Return(nil)
@@ -82,6 +86,16 @@ func TestService_RefreshToken(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
+	t.Run("token not bound to a session is rejected", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		claims := refreshClaims()
+		claims.ID = "session-1"
+		fx.tokens.EXPECT().Validate("refresh").Return(claims, nil)
+
+		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
 	t.Run("deleted user", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		fx.tokens.EXPECT().Validate("refresh").Return(refreshClaims(), nil)
@@ -94,7 +108,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("unknown or expired session", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrNotFound)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrNotFound)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.ErrorIs(t, err, service.ErrInvalidToken)
@@ -103,7 +117,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("logged-out session is rejected without touching other sessions", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionRevoked)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionRevoked)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.ErrorIs(t, err, service.ErrInvalidToken)
@@ -112,7 +126,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("reuse of a rotated token revokes every session of the user", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionReused)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(3, nil)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
@@ -122,7 +136,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("failure to contain token reuse is reported as an internal error", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, "session-1", mock.Anything).Return(repository.ErrSessionReused)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(0, errors.New("connection reset"))
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
@@ -142,10 +156,10 @@ func TestService_RefreshToken(t *testing.T) {
 }
 
 func TestService_Logout(t *testing.T) {
-	t.Run("success revokes the session of the token", func(t *testing.T) {
+	t.Run("success revokes the session family of the token", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		fx.tokens.EXPECT().Validate("refresh").Return(refreshClaims(), nil)
-		fx.sessions.EXPECT().Revoke(mock.Anything, "session-1").Return(nil)
+		fx.sessions.EXPECT().RevokeFamily(mock.Anything, "user-1", sessionID).Return(nil)
 
 		require.NoError(t, fx.svc.Logout(context.Background(), "refresh"))
 	})
@@ -175,10 +189,20 @@ func TestService_Logout(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
+	t.Run("token not bound to a session is rejected", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		claims := refreshClaims()
+		claims.ID = ""
+		fx.tokens.EXPECT().Validate("refresh").Return(claims, nil)
+
+		err := fx.svc.Logout(context.Background(), "refresh")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
 	t.Run("repository failure is wrapped", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		fx.tokens.EXPECT().Validate("refresh").Return(refreshClaims(), nil)
-		fx.sessions.EXPECT().Revoke(mock.Anything, "session-1").Return(errors.New("connection reset"))
+		fx.sessions.EXPECT().RevokeFamily(mock.Anything, "user-1", sessionID).Return(errors.New("connection reset"))
 
 		err := fx.svc.Logout(context.Background(), "refresh")
 		require.Error(t, err)
