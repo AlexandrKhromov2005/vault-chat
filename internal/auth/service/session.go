@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
@@ -79,18 +78,20 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	return nil
 }
 
-// RevokeAllSessions revokes every active session of userID and returns how
-// many were revoked. Authorizing the caller is the gateway's responsibility.
-func (s *Service) RevokeAllSessions(ctx context.Context, userID string) (int64, error) {
-	if err := validator.ValidateUserID(userID); err != nil {
-		return 0, fmt.Errorf("revoke sessions: %w", err)
+// RevokeAllSessions revokes every active session of the owner of accessToken
+// and returns how many were revoked. The token authorizes the request, so only
+// its owner's sessions can be revoked.
+func (s *Service) RevokeAllSessions(ctx context.Context, accessToken string) (int64, error) {
+	claims, err := s.parseToken(ctx, accessToken, jwt.AccessToken)
+	if err != nil {
+		return 0, err
 	}
 
-	revoked, err := s.sessions.RevokeAllForUser(ctx, userID)
+	revoked, err := s.sessions.RevokeAllForUser(ctx, claims.UserID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke sessions: %w", err)
 	}
 
-	s.logger.InfoContext(ctx, "all sessions revoked", "user_id", userID, "revoked_sessions", revoked)
+	s.logger.InfoContext(ctx, "all sessions revoked", "user_id", claims.UserID, "revoked_sessions", revoked)
 	return revoked, nil
 }

@@ -104,31 +104,3 @@ func TestValidatePassword(t *testing.T) {
 		})
 	}
 }
-
-func TestValidateUserID(t *testing.T) {
-	tests := []struct {
-		name    string
-		id      string
-		wantErr bool
-	}{
-		{"canonical uuid", "3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d", false},
-		{"uppercase uuid", "3F2B8C1E-9D4A-4E6B-8F7C-2A1D0E9B8C7D", false},
-		{"empty", "", true},
-		{"not a uuid", "user-1", true},
-		{"missing dashes", "3f2b8c1e9d4a4e6b8f7c2a1d0e9b8c7d", true},
-		{"braced", "{3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d}", true},
-		{"urn form", "urn:uuid:3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d", true},
-		{"non-hex digit", "3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7z", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validator.ValidateUserID(tt.id)
-			if tt.wantErr {
-				require.ErrorIs(t, err, validator.ErrInvalidUserID)
-				return
-			}
-			require.NoError(t, err)
-		})
-	}
-}

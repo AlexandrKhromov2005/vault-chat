@@ -132,7 +132,6 @@ var publicErrors = []struct {
 	{validator.ErrInvalidEmail, codes.InvalidArgument, "invalid email address"},
 	{validator.ErrInvalidUsername, codes.InvalidArgument, "invalid username"},
 	{validator.ErrInvalidPassword, codes.InvalidArgument, "invalid password"},
-	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user id"},
 	{service.ErrEmailTaken, codes.AlreadyExists, "email already registered"},
 	{service.ErrUsernameTaken, codes.AlreadyExists, "username already taken"},
 	{service.ErrInvalidCredentials, codes.Unauthenticated, "invalid credentials"},
