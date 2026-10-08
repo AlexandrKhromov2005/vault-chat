@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,25 +160,35 @@ func TestSessionRepository_RevokeFamily_DuringRotation(t *testing.T) {
 }
 
 func TestSessionRepository_RevokeAllForUser_DuringRotation(t *testing.T) {
-	pool, repo, user := newSessionFixture(t)
-	ctx := context.Background()
+	// The user id is accepted in any letter case, and every spelling of it
+	// must take the same lock.
+	spellings := map[string]func(string) string{
+		"lowercase id": strings.ToLower,
+		"uppercase id": strings.ToUpper,
+	}
+	for name, spell := range spellings {
+		t.Run(name, func(t *testing.T) {
+			pool, repo, user := newSessionFixture(t)
+			ctx := context.Background()
 
-	current := newTestSession(user.ID, time.Hour)
-	require.NoError(t, repo.Create(ctx, current))
-	next := newTestSession(user.ID, time.Hour)
-	stallInsertOf(t, pool, next.ID)
+			current := newTestSession(user.ID, time.Hour)
+			require.NoError(t, repo.Create(ctx, current))
+			next := newTestSession(user.ID, time.Hour)
+			stallInsertOf(t, pool, next.ID)
 
-	rotated := make(chan error, 1)
-	go func() { rotated <- repo.Rotate(ctx, current.ID, next) }()
-	waitForStalledInsert(t, pool)
+			rotated := make(chan error, 1)
+			go func() { rotated <- repo.Rotate(ctx, current.ID, next) }()
+			waitForStalledInsert(t, pool)
 
-	_, err := repo.RevokeAllForUser(ctx, user.ID)
-	require.NoError(t, err)
-	require.NoError(t, <-rotated)
+			_, err := repo.RevokeAllForUser(ctx, spell(user.ID))
+			require.NoError(t, err)
+			require.NoError(t, <-rotated)
 
-	err = repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour))
-	require.ErrorIs(t, err, repository.ErrSessionRevoked,
-		"a session created by a concurrent rotation must not survive revoke-all")
+			err = repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour))
+			require.ErrorIs(t, err, repository.ErrSessionRevoked,
+				"a session created by a concurrent rotation must not survive revoke-all")
+		})
+	}
 }
 
 func TestSessions_DeletedWithUser(t *testing.T) {
