@@ -48,8 +48,9 @@ type AuthServiceClient interface {
 	// Logout ends the login of the given refresh token: its session and the
 	// sessions it was rotated into are revoked. It is idempotent.
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
-	// RevokeAllSessions revokes every active session of a user ("log out
-	// everywhere"). The caller is responsible for authorizing the request.
+	// RevokeAllSessions revokes every active session of the owner of the given
+	// access token ("log out everywhere"). Only the token owner's sessions can
+	// be revoked.
 	RevokeAllSessions(ctx context.Context, in *RevokeAllSessionsRequest, opts ...grpc.CallOption) (*RevokeAllSessionsResponse, error)
 }
 
@@ -142,8 +143,9 @@ type AuthServiceServer interface {
 	// Logout ends the login of the given refresh token: its session and the
 	// sessions it was rotated into are revoked. It is idempotent.
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
-	// RevokeAllSessions revokes every active session of a user ("log out
-	// everywhere"). The caller is responsible for authorizing the request.
+	// RevokeAllSessions revokes every active session of the owner of the given
+	// access token ("log out everywhere"). Only the token owner's sessions can
+	// be revoked.
 	RevokeAllSessions(context.Context, *RevokeAllSessionsRequest) (*RevokeAllSessionsResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }

@@ -254,9 +254,9 @@ func (_c *MockAuthService_Register_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// RevokeAllSessions provides a mock function with given fields: ctx, userID
-func (_m *MockAuthService) RevokeAllSessions(ctx context.Context, userID string) (int64, error) {
-	ret := _m.Called(ctx, userID)
+// RevokeAllSessions provides a mock function with given fields: ctx, accessToken
+func (_m *MockAuthService) RevokeAllSessions(ctx context.Context, accessToken string) (int64, error) {
+	ret := _m.Called(ctx, accessToken)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RevokeAllSessions")
@@ -265,16 +265,16 @@ func (_m *MockAuthService) RevokeAllSessions(ctx context.Context, userID string)
 	var r0 int64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
-		return rf(ctx, userID)
+		return rf(ctx, accessToken)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string) int64); ok {
-		r0 = rf(ctx, userID)
+		r0 = rf(ctx, accessToken)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, userID)
+		r1 = rf(ctx, accessToken)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -289,12 +289,12 @@ type MockAuthService_RevokeAllSessions_Call struct {
 
 // RevokeAllSessions is a helper method to define mock.On call
 //   - ctx context.Context
-//   - userID string
-func (_e *MockAuthService_Expecter) RevokeAllSessions(ctx interface{}, userID interface{}) *MockAuthService_RevokeAllSessions_Call {
-	return &MockAuthService_RevokeAllSessions_Call{Call: _e.mock.On("RevokeAllSessions", ctx, userID)}
+//   - accessToken string
+func (_e *MockAuthService_Expecter) RevokeAllSessions(ctx interface{}, accessToken interface{}) *MockAuthService_RevokeAllSessions_Call {
+	return &MockAuthService_RevokeAllSessions_Call{Call: _e.mock.On("RevokeAllSessions", ctx, accessToken)}
 }
 
-func (_c *MockAuthService_RevokeAllSessions_Call) Run(run func(ctx context.Context, userID string)) *MockAuthService_RevokeAllSessions_Call {
+func (_c *MockAuthService_RevokeAllSessions_Call) Run(run func(ctx context.Context, accessToken string)) *MockAuthService_RevokeAllSessions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})

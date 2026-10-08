@@ -16,7 +16,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler/mocks"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 )
 
 func TestAuthGRPCHandler_RefreshToken(t *testing.T) {
@@ -100,29 +99,28 @@ func TestAuthGRPCHandler_Logout(t *testing.T) {
 }
 
 func TestAuthGRPCHandler_RevokeAllSessions(t *testing.T) {
-	const userID = "3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d"
-
 	t.Run("success", func(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().RevokeAllSessions(mock.Anything, userID).Return(2, nil)
+		svc.EXPECT().RevokeAllSessions(mock.Anything, "access-token").Return(2, nil)
 
-		resp, err := h.RevokeAllSessions(context.Background(), &authv1.RevokeAllSessionsRequest{UserId: userID})
+		resp, err := h.RevokeAllSessions(context.Background(),
+			&authv1.RevokeAllSessionsRequest{AccessToken: "access-token"})
 		require.NoError(t, err)
 		require.EqualValues(t, 2, resp.GetRevokedCount())
 	})
 
-	t.Run("malformed user id maps to InvalidArgument", func(t *testing.T) {
+	t.Run("unauthenticated request maps to Unauthenticated", func(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().RevokeAllSessions(mock.Anything, mock.Anything).
-			Return(0, fmt.Errorf("revoke sessions: %w", validator.ErrInvalidUserID))
+		svc.EXPECT().RevokeAllSessions(mock.Anything, "").
+			Return(0, fmt.Errorf("revoke sessions: %w", service.ErrInvalidToken))
 
-		_, err := h.RevokeAllSessions(context.Background(), &authv1.RevokeAllSessionsRequest{UserId: "user-1"})
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-		require.Equal(t, "invalid user id", status.Convert(err).Message())
+		_, err := h.RevokeAllSessions(context.Background(), &authv1.RevokeAllSessionsRequest{})
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+		require.Equal(t, "invalid token", status.Convert(err).Message())
 	})
 
 	t.Run("internal failure maps to Internal", func(t *testing.T) {
@@ -131,7 +129,8 @@ func TestAuthGRPCHandler_RevokeAllSessions(t *testing.T) {
 
 		svc.EXPECT().RevokeAllSessions(mock.Anything, mock.Anything).Return(0, errors.New("db down"))
 
-		_, err := h.RevokeAllSessions(context.Background(), &authv1.RevokeAllSessionsRequest{UserId: userID})
+		_, err := h.RevokeAllSessions(context.Background(),
+			&authv1.RevokeAllSessionsRequest{AccessToken: "access-token"})
 		require.Equal(t, codes.Internal, status.Code(err))
 	})
 }

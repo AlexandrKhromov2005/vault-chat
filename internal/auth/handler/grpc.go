@@ -24,7 +24,7 @@ type AuthService interface {
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
-	RevokeAllSessions(ctx context.Context, userID string) (int64, error)
+	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -109,12 +109,13 @@ func (h *AuthGRPCHandler) Logout(ctx context.Context, req *authv1.LogoutRequest)
 	return &authv1.LogoutResponse{}, nil
 }
 
-// RevokeAllSessions revokes every active session of a user.
+// RevokeAllSessions revokes every active session of the owner of the given
+// access token.
 func (h *AuthGRPCHandler) RevokeAllSessions(
 	ctx context.Context,
 	req *authv1.RevokeAllSessionsRequest,
 ) (*authv1.RevokeAllSessionsResponse, error) {
-	revoked, err := h.svc.RevokeAllSessions(ctx, req.GetUserId())
+	revoked, err := h.svc.RevokeAllSessions(ctx, req.GetAccessToken())
 	if err != nil {
 		return nil, toStatus(err)
 	}

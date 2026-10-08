@@ -23,8 +23,9 @@ service AuthService {
   // Logout ends the login of the given refresh token: its session and the
   // sessions it was rotated into are revoked. It is idempotent.
   rpc Logout(LogoutRequest) returns (LogoutResponse);
-  // RevokeAllSessions revokes every active session of a user ("log out
-  // everywhere"). The caller is responsible for authorizing the request.
+  // RevokeAllSessions revokes every active session of the owner of the given
+  // access token ("log out everywhere"). Only the token owner's sessions can
+  // be revoked.
   rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeAllSessionsResponse);
 }
 
@@ -84,7 +85,7 @@ message LogoutRequest {
 message LogoutResponse {}
 
 message RevokeAllSessionsRequest {
-  string user_id = 1;
+  string access_token = 1;
 }
 
 message RevokeAllSessionsResponse {
