@@ -14,7 +14,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
-func generateTestKeys(t *testing.T) (privatePEM, publicPEM []byte) {
+func generateTestKeys(t testing.TB) (privatePEM, publicPEM []byte) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -79,7 +79,7 @@ func TestManager_IssueAndValidate(t *testing.T) {
 	})
 
 	t.Run("refresh token round-trip", func(t *testing.T) {
-		token, expiresAt, err := manager.IssueRefreshToken("user-2", "u2@example.com", "user2")
+		token, expiresAt, err := manager.IssueRefreshToken("session-2", "user-2", "u2@example.com", "user2")
 		require.NoError(t, err)
 		require.WithinDuration(t, time.Now().Add(720*time.Hour), expiresAt, 5*time.Second)
 
@@ -87,6 +87,21 @@ func TestManager_IssueAndValidate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, jwt.RefreshToken, claims.TokenType)
 		require.Equal(t, "user-2", claims.UserID)
+		require.Equal(t, "session-2", claims.ID, "refresh token jti must be the session id")
+	})
+
+	t.Run("access tokens get unique ids", func(t *testing.T) {
+		first, _, err := manager.IssueAccessToken("user-1", "user@example.com", "user1")
+		require.NoError(t, err)
+		second, _, err := manager.IssueAccessToken("user-1", "user@example.com", "user1")
+		require.NoError(t, err)
+
+		firstClaims, err := manager.Validate(first)
+		require.NoError(t, err)
+		secondClaims, err := manager.Validate(second)
+		require.NoError(t, err)
+		require.NotEmpty(t, firstClaims.ID)
+		require.NotEqual(t, firstClaims.ID, secondClaims.ID)
 	})
 }
 

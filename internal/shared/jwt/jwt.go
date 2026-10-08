@@ -29,6 +29,9 @@ const (
 
 // Claims is the validated identity carried by a token.
 type Claims struct {
+	// ID is the token identifier (jti). For refresh tokens it is the id of
+	// the server-side session the token is bound to.
+	ID        string
 	UserID    string
 	Email     string
 	Username  string
@@ -71,12 +74,13 @@ func NewManager(privatePEM, publicPEM []byte, accessTTL, refreshTTL time.Duratio
 
 // IssueAccessToken mints a short-lived access token for the given identity.
 func (m *Manager) IssueAccessToken(userID, email, username string) (string, time.Time, error) {
-	return m.issue(userID, email, username, AccessToken, m.accessTTL)
+	return m.issue(uuid.NewString(), userID, email, username, AccessToken, m.accessTTL)
 }
 
-// IssueRefreshToken mints a long-lived refresh token for the given identity.
-func (m *Manager) IssueRefreshToken(userID, email, username string) (string, time.Time, error) {
-	return m.issue(userID, email, username, RefreshToken, m.refreshTTL)
+// IssueRefreshToken mints a long-lived refresh token for the given identity,
+// bound to sessionID via the jti claim so that it can be revoked server-side.
+func (m *Manager) IssueRefreshToken(sessionID, userID, email, username string) (string, time.Time, error) {
+	return m.issue(sessionID, userID, email, username, RefreshToken, m.refreshTTL)
 }
 
 // Validate verifies the signature, expiry, and issuer of tokenString and
@@ -95,6 +99,7 @@ func (m *Manager) Validate(tokenString string) (*Claims, error) {
 	}
 
 	return &Claims{
+		ID:        claims.ID,
 		UserID:    claims.Subject,
 		Email:     claims.Email,
 		Username:  claims.Username,
@@ -111,13 +116,13 @@ type tokenClaims struct {
 	Username  string `json:"username"`
 }
 
-func (m *Manager) issue(userID, email, username string, tokenType TokenType, ttl time.Duration) (string, time.Time, error) {
+func (m *Manager) issue(id, userID, email, username string, tokenType TokenType, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 
 	claims := tokenClaims{
 		RegisteredClaims: jwtv5.RegisteredClaims{
-			ID:        uuid.NewString(),
+			ID:        id,
 			Subject:   userID,
 			Issuer:    issuer,
 			IssuedAt:  jwtv5.NewNumericDate(now),

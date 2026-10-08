@@ -22,6 +22,14 @@ import (
 func newTestRepository(t *testing.T) *repository.UserRepository {
 	t.Helper()
 
+	return repository.NewUserRepository(newTestPool(t))
+}
+
+// newTestPool connects to the test database, applies the auth migrations and
+// wipes all auth tables.
+func newTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
 	dsn := os.Getenv("VAULT_CHAT_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("VAULT_CHAT_TEST_DATABASE_URL is not set; skipping integration test")
@@ -36,10 +44,10 @@ func newTestRepository(t *testing.T) *repository.UserRepository {
 
 	require.NoError(t, repository.Migrate(ctx, pool, migrations.AuthFS, "auth"))
 
-	_, err = pool.Exec(ctx, "TRUNCATE users")
+	_, err = pool.Exec(ctx, "TRUNCATE users CASCADE")
 	require.NoError(t, err)
 
-	return repository.NewUserRepository(pool)
+	return pool
 }
 
 func newTestUser() *domain.User {

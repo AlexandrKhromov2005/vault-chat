@@ -87,6 +87,112 @@ func (_c *MockAuthService_Login_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// Logout provides a mock function with given fields: ctx, refreshToken
+func (_m *MockAuthService) Logout(ctx context.Context, refreshToken string) error {
+	ret := _m.Called(ctx, refreshToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Logout")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, refreshToken)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_Logout_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Logout'
+type MockAuthService_Logout_Call struct {
+	*mock.Call
+}
+
+// Logout is a helper method to define mock.On call
+//   - ctx context.Context
+//   - refreshToken string
+func (_e *MockAuthService_Expecter) Logout(ctx interface{}, refreshToken interface{}) *MockAuthService_Logout_Call {
+	return &MockAuthService_Logout_Call{Call: _e.mock.On("Logout", ctx, refreshToken)}
+}
+
+func (_c *MockAuthService_Logout_Call) Run(run func(ctx context.Context, refreshToken string)) *MockAuthService_Logout_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_Logout_Call) Return(_a0 error) *MockAuthService_Logout_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_Logout_Call) RunAndReturn(run func(context.Context, string) error) *MockAuthService_Logout_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RefreshToken provides a mock function with given fields: ctx, refreshToken
+func (_m *MockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error) {
+	ret := _m.Called(ctx, refreshToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RefreshToken")
+	}
+
+	var r0 *service.TokenPair
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*service.TokenPair, error)); ok {
+		return rf(ctx, refreshToken)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *service.TokenPair); ok {
+		r0 = rf(ctx, refreshToken)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*service.TokenPair)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, refreshToken)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_RefreshToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshToken'
+type MockAuthService_RefreshToken_Call struct {
+	*mock.Call
+}
+
+// RefreshToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - refreshToken string
+func (_e *MockAuthService_Expecter) RefreshToken(ctx interface{}, refreshToken interface{}) *MockAuthService_RefreshToken_Call {
+	return &MockAuthService_RefreshToken_Call{Call: _e.mock.On("RefreshToken", ctx, refreshToken)}
+}
+
+func (_c *MockAuthService_RefreshToken_Call) Run(run func(ctx context.Context, refreshToken string)) *MockAuthService_RefreshToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RefreshToken_Call) Return(_a0 *service.TokenPair, _a1 error) *MockAuthService_RefreshToken_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_RefreshToken_Call) RunAndReturn(run func(context.Context, string) (*service.TokenPair, error)) *MockAuthService_RefreshToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Register provides a mock function with given fields: ctx, email, username, password
 func (_m *MockAuthService) Register(ctx context.Context, email string, username string, password string) (*domain.User, error) {
 	ret := _m.Called(ctx, email, username, password)
@@ -144,6 +250,63 @@ func (_c *MockAuthService_Register_Call) Return(_a0 *domain.User, _a1 error) *Mo
 }
 
 func (_c *MockAuthService_Register_Call) RunAndReturn(run func(context.Context, string, string, string) (*domain.User, error)) *MockAuthService_Register_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RevokeAllSessions provides a mock function with given fields: ctx, accessToken
+func (_m *MockAuthService) RevokeAllSessions(ctx context.Context, accessToken string) (int64, error) {
+	ret := _m.Called(ctx, accessToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RevokeAllSessions")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
+		return rf(ctx, accessToken)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = rf(ctx, accessToken)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, accessToken)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_RevokeAllSessions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RevokeAllSessions'
+type MockAuthService_RevokeAllSessions_Call struct {
+	*mock.Call
+}
+
+// RevokeAllSessions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+func (_e *MockAuthService_Expecter) RevokeAllSessions(ctx interface{}, accessToken interface{}) *MockAuthService_RevokeAllSessions_Call {
+	return &MockAuthService_RevokeAllSessions_Call{Call: _e.mock.On("RevokeAllSessions", ctx, accessToken)}
+}
+
+func (_c *MockAuthService_RevokeAllSessions_Call) Run(run func(ctx context.Context, accessToken string)) *MockAuthService_RevokeAllSessions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RevokeAllSessions_Call) Return(_a0 int64, _a1 error) *MockAuthService_RevokeAllSessions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_RevokeAllSessions_Call) RunAndReturn(run func(context.Context, string) (int64, error)) *MockAuthService_RevokeAllSessions_Call {
 	_c.Call.Return(run)
 	return _c
 }

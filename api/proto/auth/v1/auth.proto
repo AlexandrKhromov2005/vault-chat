@@ -6,8 +6,8 @@ option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v
 
 import "google/protobuf/timestamp.proto";
 
-// AuthService provides identity operations: registration, login, and
-// token validation for the API Gateway.
+// AuthService provides identity operations: registration, login, token
+// validation, and session management for the API Gateway.
 service AuthService {
   // Register creates a new user account.
   rpc Register(RegisterRequest) returns (RegisterResponse);
@@ -15,6 +15,18 @@ service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
   // ValidateToken verifies a JWT and returns the associated identity.
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  // RefreshToken exchanges a refresh token for a new token pair. The presented
+  // refresh token is revoked (rotation). Presenting a token that was already
+  // rotated means it leaked, so every session of its owner is revoked; a
+  // logged-out token is just rejected.
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  // Logout ends the login of the given refresh token: its session and the
+  // sessions it was rotated into are revoked. It is idempotent.
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  // RevokeAllSessions revokes every active session of the owner of the given
+  // access token ("log out everywhere"). Only the token owner's sessions can
+  // be revoked.
+  rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeAllSessionsResponse);
 }
 
 message RegisterRequest {
@@ -52,4 +64,30 @@ message ValidateTokenResponse {
   string email = 3;
   string username = 4;
   google.protobuf.Timestamp expires_at = 5;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string user_id = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  google.protobuf.Timestamp access_expires_at = 4;
+  google.protobuf.Timestamp refresh_expires_at = 5;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutResponse {}
+
+message RevokeAllSessionsRequest {
+  string access_token = 1;
+}
+
+message RevokeAllSessionsResponse {
+  int64 revoked_count = 1;
 }

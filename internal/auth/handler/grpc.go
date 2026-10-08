@@ -22,6 +22,9 @@ type AuthService interface {
 	Register(ctx context.Context, email, username, password string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
+	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
+	Logout(ctx context.Context, refreshToken string) error
+	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -83,20 +86,65 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 	}, nil
 }
 
-// toStatus maps domain errors to gRPC status codes.
-func toStatus(err error) error {
-	switch {
-	case errors.Is(err, validator.ErrInvalidEmail),
-		errors.Is(err, validator.ErrInvalidUsername),
-		errors.Is(err, validator.ErrInvalidPassword):
-		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, service.ErrEmailTaken),
-		errors.Is(err, service.ErrUsernameTaken):
-		return status.Error(codes.AlreadyExists, err.Error())
-	case errors.Is(err, service.ErrInvalidCredentials),
-		errors.Is(err, service.ErrInvalidToken):
-		return status.Error(codes.Unauthenticated, err.Error())
-	default:
-		return status.Error(codes.Internal, "internal error")
+// RefreshToken exchanges a refresh token for a new access/refresh token pair.
+func (h *AuthGRPCHandler) RefreshToken(ctx context.Context, req *authv1.RefreshTokenRequest) (*authv1.RefreshTokenResponse, error) {
+	pair, err := h.svc.RefreshToken(ctx, req.GetRefreshToken())
+	if err != nil {
+		return nil, toStatus(err)
 	}
+	return &authv1.RefreshTokenResponse{
+		UserId:           pair.UserID,
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		AccessExpiresAt:  timestamppb.New(pair.AccessExpiresAt),
+		RefreshExpiresAt: timestamppb.New(pair.RefreshExpiresAt),
+	}, nil
+}
+
+// Logout revokes the session bound to the given refresh token.
+func (h *AuthGRPCHandler) Logout(ctx context.Context, req *authv1.LogoutRequest) (*authv1.LogoutResponse, error) {
+	if err := h.svc.Logout(ctx, req.GetRefreshToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.LogoutResponse{}, nil
+}
+
+// RevokeAllSessions revokes every active session of the owner of the given
+// access token.
+func (h *AuthGRPCHandler) RevokeAllSessions(
+	ctx context.Context,
+	req *authv1.RevokeAllSessionsRequest,
+) (*authv1.RevokeAllSessionsResponse, error) {
+	revoked, err := h.svc.RevokeAllSessions(ctx, req.GetAccessToken())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.RevokeAllSessionsResponse{RevokedCount: revoked}, nil
+}
+
+// publicErrors are the domain errors reported to clients, with their gRPC
+// codes and messages. Any other error is reported as an opaque Internal error.
+var publicErrors = []struct {
+	err     error
+	code    codes.Code
+	message string
+}{
+	{validator.ErrInvalidEmail, codes.InvalidArgument, "invalid email address"},
+	{validator.ErrInvalidUsername, codes.InvalidArgument, "invalid username"},
+	{validator.ErrInvalidPassword, codes.InvalidArgument, "invalid password"},
+	{service.ErrEmailTaken, codes.AlreadyExists, "email already registered"},
+	{service.ErrUsernameTaken, codes.AlreadyExists, "username already taken"},
+	{service.ErrInvalidCredentials, codes.Unauthenticated, "invalid credentials"},
+	{service.ErrInvalidToken, codes.Unauthenticated, "invalid token"},
+}
+
+// toStatus maps domain errors to gRPC status codes. Only the fixed public
+// message is sent, never the wrapping context of err.
+func toStatus(err error) error {
+	for _, e := range publicErrors {
+		if errors.Is(err, e.err) {
+			return status.Error(e.code, e.message)
+		}
+	}
+	return status.Error(codes.Internal, "internal error")
 }

@@ -35,6 +35,14 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id string) (*domain.User, error)
 }
 
+// SessionRepository is the session storage contract required by the service.
+type SessionRepository interface {
+	Create(ctx context.Context, session *domain.Session) error
+	Rotate(ctx context.Context, currentID string, next *domain.Session) error
+	RevokeFamily(ctx context.Context, userID, sessionID string) error
+	RevokeAllForUser(ctx context.Context, userID string) (int64, error)
+}
+
 // Hasher is the password hashing contract required by the service.
 type Hasher interface {
 	Hash(password string) (string, error)
@@ -45,7 +53,7 @@ type Hasher interface {
 // service.
 type TokenManager interface {
 	IssueAccessToken(userID, email, username string) (string, time.Time, error)
-	IssueRefreshToken(userID, email, username string) (string, time.Time, error)
+	IssueRefreshToken(sessionID, userID, email, username string) (string, time.Time, error)
 	Validate(token string) (*jwt.Claims, error)
 }
 
@@ -58,10 +66,11 @@ type TokenPair struct {
 	RefreshExpiresAt time.Time
 }
 
-// Service implements the auth business logic: registration, login, and token
-// validation.
+// Service implements the auth business logic: registration, login, token
+// validation, and session management.
 type Service struct {
 	repo      UserRepository
+	sessions  SessionRepository
 	hasher    Hasher
 	tokens    TokenManager
 	logger    *slog.Logger
@@ -70,7 +79,13 @@ type Service struct {
 
 // NewService wires a Service. A dummy hash is precomputed so that login
 // attempts against unknown accounts cost the same Argon2id work as real ones.
-func NewService(repo UserRepository, hasher Hasher, tokens TokenManager, logger *slog.Logger) (*Service, error) {
+func NewService(
+	repo UserRepository,
+	sessions SessionRepository,
+	hasher Hasher,
+	tokens TokenManager,
+	logger *slog.Logger,
+) (*Service, error) {
 	dummyHash, err := hasher.Hash("timing-equalization-dummy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to precompute dummy hash: %w", err)
@@ -78,6 +93,7 @@ func NewService(repo UserRepository, hasher Hasher, tokens TokenManager, logger 
 
 	return &Service{
 		repo:      repo,
+		sessions:  sessions,
 		hasher:    hasher,
 		tokens:    tokens,
 		logger:    logger,
@@ -153,27 +169,26 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 		return nil, ErrInvalidCredentials
 	}
 
-	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username)
+	pair, session, err := s.issueTokenPair(user)
 	if err != nil {
-		return nil, fmt.Errorf("login: failed to issue access token: %w", err)
+		return nil, fmt.Errorf("login: %w", err)
 	}
-	refreshToken, refreshExpiresAt, err := s.tokens.IssueRefreshToken(user.ID, user.Email, user.Username)
-	if err != nil {
-		return nil, fmt.Errorf("login: failed to issue refresh token: %w", err)
+	if err := s.sessions.Create(ctx, session); err != nil {
+		return nil, fmt.Errorf("login: failed to store session: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "user logged in", "user_id", user.ID)
-	return &TokenPair{
-		UserID:           user.ID,
-		AccessToken:      accessToken,
-		RefreshToken:     refreshToken,
-		AccessExpiresAt:  accessExpiresAt,
-		RefreshExpiresAt: refreshExpiresAt,
-	}, nil
+	return pair, nil
 }
 
-// ValidateToken verifies a token and returns its identity claims.
+// ValidateToken verifies an access token and returns its identity claims.
 func (s *Service) ValidateToken(ctx context.Context, token string) (*jwt.Claims, error) {
+	return s.parseToken(ctx, token, jwt.AccessToken)
+}
+
+// parseToken validates token and checks that it is of the wanted type. Every
+// failure is reported as ErrInvalidToken.
+func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenType) (*jwt.Claims, error) {
 	if token == "" {
 		return nil, ErrInvalidToken
 	}
@@ -183,8 +198,38 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*jwt.Claims,
 		s.logger.DebugContext(ctx, "token validation failed", "error", err)
 		return nil, ErrInvalidToken
 	}
-	if claims.TokenType != jwt.AccessToken {
+	if claims.TokenType != want {
 		return nil, ErrInvalidToken
 	}
+	// The id of a refresh token is the id of its session.
+	if want == jwt.RefreshToken {
+		if _, err := uuid.Parse(claims.ID); err != nil {
+			return nil, ErrInvalidToken
+		}
+	}
 	return claims, nil
+}
+
+// issueTokenPair mints an access/refresh token pair for user together with
+// the new session the refresh token is bound to. The session is not stored.
+func (s *Service) issueTokenPair(user *domain.User) (*TokenPair, *domain.Session, error) {
+	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to issue access token: %w", err)
+	}
+
+	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID}
+	refreshToken, refreshExpiresAt, err := s.tokens.IssueRefreshToken(session.ID, user.ID, user.Email, user.Username)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to issue refresh token: %w", err)
+	}
+	session.ExpiresAt = refreshExpiresAt
+
+	return &TokenPair{
+		UserID:           user.ID,
+		AccessToken:      accessToken,
+		RefreshToken:     refreshToken,
+		AccessExpiresAt:  accessExpiresAt,
+		RefreshExpiresAt: refreshExpiresAt,
+	}, session, nil
 }
