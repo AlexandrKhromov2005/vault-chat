@@ -12,7 +12,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
@@ -211,30 +210,53 @@ func TestService_Logout(t *testing.T) {
 }
 
 func TestService_RevokeAllSessions(t *testing.T) {
-	const userID = "3f2b8c1e-9d4a-4e6b-8f7c-2a1d0e9b8c7d"
+	accessClaims := func() *jwt.Claims {
+		claims := refreshClaims()
+		claims.ID = ""
+		claims.TokenType = jwt.AccessToken
+		return claims
+	}
 
-	t.Run("success returns the number of revoked sessions", func(t *testing.T) {
+	t.Run("revokes the sessions of the token owner", func(t *testing.T) {
 		fx := newServiceFixture(t)
-		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, userID).Return(2, nil)
+		fx.tokens.EXPECT().Validate("access").Return(accessClaims(), nil)
+		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(2, nil)
 
-		revoked, err := fx.svc.RevokeAllSessions(context.Background(), userID)
+		revoked, err := fx.svc.RevokeAllSessions(context.Background(), "access")
 		require.NoError(t, err)
 		require.EqualValues(t, 2, revoked)
 	})
 
-	t.Run("malformed user id does not touch the repository", func(t *testing.T) {
+	t.Run("empty token", func(t *testing.T) {
 		fx := newServiceFixture(t)
 
-		_, err := fx.svc.RevokeAllSessions(context.Background(), "user-1")
-		require.ErrorIs(t, err, validator.ErrInvalidUserID)
+		_, err := fx.svc.RevokeAllSessions(context.Background(), "")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
+	t.Run("invalid token is rejected", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		fx.tokens.EXPECT().Validate("bad").Return(nil, errors.New("signature invalid"))
+
+		_, err := fx.svc.RevokeAllSessions(context.Background(), "bad")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
+	t.Run("refresh token is rejected", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		fx.tokens.EXPECT().Validate("refresh").Return(refreshClaims(), nil)
+
+		_, err := fx.svc.RevokeAllSessions(context.Background(), "refresh")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
 	t.Run("repository failure is wrapped", func(t *testing.T) {
 		fx := newServiceFixture(t)
-		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, userID).Return(0, errors.New("connection reset"))
+		fx.tokens.EXPECT().Validate("access").Return(accessClaims(), nil)
+		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(0, errors.New("connection reset"))
 
-		_, err := fx.svc.RevokeAllSessions(context.Background(), userID)
+		_, err := fx.svc.RevokeAllSessions(context.Background(), "access")
 		require.Error(t, err)
-		require.NotErrorIs(t, err, validator.ErrInvalidUserID)
+		require.NotErrorIs(t, err, service.ErrInvalidToken)
 	})
 }
