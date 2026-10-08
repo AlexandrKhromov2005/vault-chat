@@ -107,7 +107,9 @@ func (r *SessionRepository) RevokeAllForUser(ctx context.Context, userID string)
 // userID. Row locks alone are not enough: a revoking statement started while
 // a rotation is in flight cannot see the session the rotation inserts, so the
 // new session would survive. Serializing every revoking transaction of a user
-// guarantees each one sees the outcome of the previous one.
+// guarantees each one sees the outcome of the previous one. The lock key is
+// derived from the canonical form of the uuid, so every spelling of userID
+// takes the same lock.
 func (r *SessionRepository) withUserLock(ctx context.Context, userID string, fn func(tx pgx.Tx) error) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -115,7 +117,7 @@ func (r *SessionRepository) withUserLock(ctx context.Context, userID string, fn 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const lock = `SELECT pg_advisory_xact_lock(hashtextextended('auth.sessions:' || $1::text, 0))`
+	const lock = `SELECT pg_advisory_xact_lock(hashtextextended('auth.sessions:' || ($1::uuid)::text, 0))`
 	if _, err := tx.Exec(ctx, lock, userID); err != nil {
 		return fmt.Errorf("failed to lock user sessions: %w", err)
 	}
