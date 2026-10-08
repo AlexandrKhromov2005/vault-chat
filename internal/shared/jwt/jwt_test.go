@@ -14,7 +14,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
-func generateTestKeys(t *testing.T) (privatePEM, publicPEM []byte) {
+func generateTestKeys(t testing.TB) (privatePEM, publicPEM []byte) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
