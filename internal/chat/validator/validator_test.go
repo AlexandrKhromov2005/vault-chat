@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 )
 
 func TestCanonicalID(t *testing.T) {

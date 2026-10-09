@@ -6,9 +6,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 )
 
 func FuzzCanonicalID(f *testing.F) {
