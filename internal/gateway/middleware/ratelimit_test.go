@@ -67,6 +67,24 @@ func TestRateLimit(t *testing.T) {
 		require.Equal(t, "1", rec.Header().Get("Retry-After"))
 	})
 
+	t.Run("limiter cut off by the request deadline does not fail open", func(t *testing.T) {
+		limiter := mocks.NewMockLimiter(t)
+		limiter.EXPECT().Allow(mock.Anything, mock.Anything).Return(ratelimit.Result{}, context.DeadlineExceeded)
+		logger, _ := newLogger()
+		called := false
+		h := middleware.RateLimit(limiter, middleware.ByClientIP, logger)(http.HandlerFunc(
+			func(http.ResponseWriter, *http.Request) { called = true }))
+
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+
+		require.False(t, called, "no backend call may start after the budget is spent")
+		require.Equal(t, http.StatusGatewayTimeout, rec.Code)
+		require.JSONEq(t, `{"error":{"code":"timeout","message":"request timed out"}}`, rec.Body.String())
+	})
+
 	t.Run("limiter failure fails open", func(t *testing.T) {
 		limiter := mocks.NewMockLimiter(t)
 		limiter.EXPECT().Allow(mock.Anything, mock.Anything).

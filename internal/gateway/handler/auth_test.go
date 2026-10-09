@@ -3,9 +3,12 @@ package handler_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +30,11 @@ func newJSONRequest(target, body string) *http.Request {
 	req.Header.Set("Content-Type", "application/json")
 	return req
 }
+
+// failingReader fails every read with err.
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 func newAuthHandler(t *testing.T) (*handler.AuthHandler, *mocks.MockAuthClient, *bytes.Buffer) {
 	t.Helper()
@@ -132,6 +140,20 @@ func TestAuthHandler_RejectsBadBodies(t *testing.T) {
 		h.Login(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("body not received before the deadline", func(t *testing.T) {
+		h, _, _ := newAuthHandler(t) // the mock fails the test if auth is called
+
+		req := newJSONRequest("/", "")
+		// What a connection read deadline produces mid-body.
+		req.Body = io.NopCloser(failingReader{&net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}})
+		rec := httptest.NewRecorder()
+		h.Login(rec, req)
+
+		require.Equal(t, http.StatusRequestTimeout, rec.Code)
+		require.JSONEq(t, `{"error":{"code":"request_timeout","message":"request body was not received in time"}}`,
+			rec.Body.String())
 	})
 
 	t.Run("oversized body", func(t *testing.T) {

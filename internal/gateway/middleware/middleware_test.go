@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -318,15 +319,47 @@ func TestBodyLimit(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
-	var deadline time.Time
-	var ok bool
-	h := middleware.Timeout(2 * time.Second)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		deadline, ok = r.Context().Deadline()
-	}))
+	t.Run("backend calls inherit the deadline", func(t *testing.T) {
+		var deadline time.Time
+		var ok bool
+		h := middleware.Timeout(2 * time.Second)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			deadline, ok = r.Context().Deadline()
+		}))
 
-	start := time.Now()
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+		start := time.Now()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 
-	require.True(t, ok)
-	require.WithinDuration(t, start.Add(2*time.Second), deadline, time.Second)
+		require.True(t, ok)
+		require.WithinDuration(t, start.Add(2*time.Second), deadline, time.Second)
+	})
+
+	t.Run("slow body read fails at the deadline", func(t *testing.T) {
+		type result struct {
+			err     error
+			elapsed time.Duration
+		}
+		results := make(chan result, 1)
+		server := httptest.NewServer(middleware.Timeout(50 * time.Millisecond)(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				start := time.Now()
+				_, err := io.ReadAll(r.Body)
+				results <- result{err: err, elapsed: time.Since(start)}
+				w.WriteHeader(http.StatusOK)
+			})))
+		t.Cleanup(server.Close)
+
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+		_, err = io.WriteString(conn, "POST / HTTP/1.1\r\nHost: gateway\r\nContent-Length: 2\r\n\r\n[")
+		require.NoError(t, err)
+
+		select {
+		case res := <-results:
+			require.Error(t, res.err)
+			require.Less(t, res.elapsed, 500*time.Millisecond)
+		case <-time.After(5 * time.Second):
+			t.Fatal("body read was not interrupted by the request deadline")
+		}
+	})
 }
