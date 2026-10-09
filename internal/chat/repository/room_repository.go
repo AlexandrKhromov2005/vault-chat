@@ -98,3 +98,24 @@ func scanRoom(row pgx.Row) (*domain.Room, error) {
 	}
 	return &room, nil
 }
+
+// CreateChannel atomically stores a channel and its owner's membership.
+func (r *RoomRepository) CreateChannel(ctx context.Context, ownerID, name string, private bool) (*domain.Room, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin channel creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	room, err := scanRoom(tx.QueryRow(ctx, `INSERT INTO rooms (id, kind, name, owner_id, private)
+  VALUES ($1::uuid, 'channel', $2, $3::uuid, $4) RETURNING `+roomColumns, uuid.NewString(), name, ownerID, private))
+	if err != nil {
+		return nil, fmt.Errorf("store channel: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1::uuid, $2::uuid)`, room.ID, ownerID); err != nil {
+		return nil, fmt.Errorf("enroll channel owner: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit channel creation: %w", err)
+	}
+	return room, nil
+}
