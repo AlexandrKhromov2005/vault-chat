@@ -16,6 +16,11 @@ info:
     routes are additionally limited per user. Responses carry
     `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429` responses carry
     `Retry-After` (seconds).
+
+    **Time budget.** Each `/api/` request has one budget,
+    `GATEWAY_REQUEST_TIMEOUT` (10s by default), covering rate limiting,
+    reading the body, and backend calls. A body not received within it gets
+    `408`; a request that runs out of it anywhere else gets `504`.
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -89,9 +94,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
         "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
   /api/v1/auth/login:
     post:
@@ -117,9 +124,11 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
   /api/v1/auth/me:
     get:
@@ -140,6 +149,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
   /api/v1/auth/refresh:
     post:
@@ -163,9 +173,11 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
   /api/v1/auth/logout:
     post:
@@ -186,9 +198,11 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
   /api/v1/auth/sessions:
     delete:
@@ -210,6 +224,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
 
 components:
   securitySchemes:
@@ -259,7 +274,7 @@ components:
               type: string
               enum: [invalid_argument, invalid_json, unauthenticated, permission_denied, not_found,
                      already_exists, body_too_large, unsupported_media_type, rate_limited,
-                     cors_forbidden, timeout, unavailable, internal]
+                     cors_forbidden, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
   responses:
@@ -289,6 +304,16 @@ components:
       description: Quota exhausted.
       headers:
         Retry-After: {schema: {type: integer}, description: Seconds until the next request is allowed.}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    RequestTimeout:
+      description: The body was not received within the request budget (`request_timeout`).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Timeout:
+      description: The request budget ran out while rate limiting or waiting for a backend (`timeout`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
