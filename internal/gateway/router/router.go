@@ -28,10 +28,10 @@ type Deps struct {
 //
 // Every request gets a request id, an access log line, panic recovery, and
 // security headers. Probes (/health, /ready) stop there, so orchestrators
-// are never rate limited. API routes (/api/) additionally go through CORS,
-// per-IP rate limiting, the body size limit, and the request timeout;
-// protected routes also require a valid access token and are rate limited
-// per user.
+// are never rate limited. API routes (/api/) additionally run within the
+// request timeout and go through CORS, per-IP rate limiting, and the body
+// size limit; protected routes also require a valid access token and are
+// rate limited per user.
 func New(d Deps) http.Handler {
 	protected := func(h http.HandlerFunc) http.Handler {
 		return middleware.Chain(h,
@@ -52,11 +52,13 @@ func New(d Deps) http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("GET /health", d.Health.Live)
 	root.HandleFunc("GET /ready", d.Health.Ready)
+	// Timeout comes first so that the whole request, rate limiting
+	// included, runs within one budget.
 	root.Handle("/api/", middleware.Chain(api,
+		middleware.Timeout(d.RequestTimeout),
 		middleware.CORS(d.CORSAllowedOrigins),
 		middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger),
 		middleware.BodyLimit(d.MaxBodyBytes),
-		middleware.Timeout(d.RequestTimeout),
 	))
 	root.HandleFunc("/", notFound)
 

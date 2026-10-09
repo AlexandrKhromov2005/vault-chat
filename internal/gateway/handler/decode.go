@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
@@ -38,6 +39,9 @@ func decodeJSON(r *http.Request, dst any) *requestError {
 		switch {
 		case errors.As(err, &maxBytesErr):
 			return &requestError{http.StatusRequestEntityTooLarge, "body_too_large", "request body is too large"}
+		case errors.Is(err, os.ErrDeadlineExceeded) || r.Context().Err() != nil:
+			// The connection read deadline set by middleware.Timeout passed.
+			return &requestError{http.StatusRequestTimeout, "request_timeout", "request body was not received in time"}
 		case errors.Is(err, io.EOF):
 			return &requestError{http.StatusBadRequest, "invalid_json", "request body is empty"}
 		default:

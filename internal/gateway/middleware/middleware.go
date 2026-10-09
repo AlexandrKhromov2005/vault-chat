@@ -212,13 +212,20 @@ func BodyLimit(limit int64) func(http.Handler) http.Handler {
 	}
 }
 
-// Timeout bounds the time spent on a request, including backend calls, which
-// inherit the deadline through the request context.
+// Timeout gives the request one deadline, d from now. Rate limiting and
+// backend calls observe it through the request context. Reading the body
+// does not watch the context, so the same deadline is also set on the
+// connection: a client that sends its body too slowly makes the read fail
+// instead of holding the handler past the budget.
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), d)
+			deadline := time.Now().Add(d)
+			ctx, cancel := context.WithDeadline(r.Context(), deadline)
 			defer cancel()
+			// Only real connections support read deadlines (not recorders in
+			// tests); without one, the server's ReadTimeout still applies.
+			_ = http.NewResponseController(w).SetReadDeadline(deadline)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

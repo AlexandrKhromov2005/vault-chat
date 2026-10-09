@@ -41,11 +41,17 @@ func ByUserID(r *http.Request) string {
 
 // RateLimit rejects requests over the limiter's quota with 429. When the
 // limiter itself fails (Redis is down), requests are let through: losing rate
-// limiting is preferable to losing the whole API (ARCHITECTURE.md 6.2).
+// limiting is preferable to losing the whole API (ARCHITECTURE.md 6.2). A
+// request whose deadline passed while waiting for the limiter is answered
+// with 504 instead, since nothing may run after its budget is spent.
 func RateLimit(limiter Limiter, key KeyFunc, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			result, err := limiter.Allow(r.Context(), key(r))
+			if err != nil && r.Context().Err() != nil {
+				response.Error(w, http.StatusGatewayTimeout, "timeout", "request timed out")
+				return
+			}
 			if err != nil {
 				logger.WarnContext(r.Context(), "rate limiter unavailable, allowing request", "error", err)
 				next.ServeHTTP(w, r)

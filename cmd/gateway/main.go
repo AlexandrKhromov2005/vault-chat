@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -64,16 +63,7 @@ func run() error {
 	authClient := authv1.NewAuthServiceClient(authConn)
 	authHealth := healthpb.NewHealthClient(authConn)
 
-	// Short timeouts: the limiter fails open, and an unreachable Redis must
-	// not add seconds of latency to every request while it does.
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:         cfg.RedisAddr,
-		Password:     cfg.RedisPassword,
-		DialTimeout:  250 * time.Millisecond,
-		ReadTimeout:  250 * time.Millisecond,
-		WriteTimeout: 250 * time.Millisecond,
-		PoolTimeout:  500 * time.Millisecond,
-	})
+	redisClient := ratelimit.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword)
 	defer func() { _ = redisClient.Close() }()
 	limiter, err := ratelimit.NewRedisLimiter(redisClient, cfg.RateLimitPerMinute, cfg.RateLimitBurst)
 	if err != nil {
@@ -108,10 +98,12 @@ func run() error {
 			RequestTimeout:     cfg.RequestTimeout,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      cfg.RequestTimeout + 5*time.Second,
-		IdleTimeout:       60 * time.Second,
-		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+		// Backstop only: API request bodies are cut off at the request
+		// deadline by middleware.Timeout.
+		ReadTimeout:  cfg.RequestTimeout + 5*time.Second,
+		WriteTimeout: cfg.RequestTimeout + 5*time.Second,
+		IdleTimeout:  60 * time.Second,
+		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 
 	tlsEnabled := cfg.TLSCertPath != ""
