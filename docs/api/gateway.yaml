@@ -1,0 +1,324 @@
+openapi: 3.0.3
+info:
+  title: Vault Chat API Gateway
+  version: 0.1.0
+  description: |
+    Public REST API of Vault Chat. The gateway authenticates requests through
+    the auth service (gRPC) and forwards them to backend services.
+
+    **Errors.** Every error has the body `{"error":{"code":"...","message":"..."}}`.
+
+    **Correlation.** Send `X-Request-ID` (1-64 chars of `[A-Za-z0-9._-]`) to
+    trace a request; otherwise one is generated. It is echoed in the response
+    and forwarded to backends.
+
+    **Rate limiting.** `/api/` routes are limited per client IP; authenticated
+    routes are additionally limited per user. Responses carry
+    `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429` responses carry
+    `Retry-After` (seconds).
+
+    **Time budget.** Each `/api/` request has one budget,
+    `GATEWAY_REQUEST_TIMEOUT` (10s by default), covering rate limiting,
+    reading the body, and backend calls. A body not received within it gets
+    `408`; a request that runs out of it anywhere else gets `504`.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      tags: [probes]
+      responses:
+        "200":
+          description: The process is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: ok}
+
+  /ready:
+    get:
+      summary: Readiness probe
+      description: Ready when the auth service answers its gRPC health check.
+      tags: [probes]
+      responses:
+        "200":
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Readiness"}
+        "503":
+          description: A dependency is unavailable.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Readiness"}
+
+  /api/v1/auth/register:
+    post:
+      summary: Register a new account
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, username, password]
+              properties:
+                email: {type: string, format: email, maxLength: 254, example: alice@example.com}
+                username:
+                  type: string
+                  pattern: "^[A-Za-z][A-Za-z0-9_-]{2,31}$"
+                  example: alice
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: At least one ASCII letter and one digit.
+                  example: password1
+      responses:
+        "201":
+          description: Account created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409":
+          description: Email or username already taken (`already_exists`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/login:
+    post:
+      summary: Log in with email and password
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: {type: string, format: email, example: alice@example.com}
+                password: {type: string, example: password1}
+      responses:
+        "200":
+          description: Credentials accepted; a token pair is issued.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenPair"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/me:
+    get:
+      summary: Identity of the caller
+      tags: [auth]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/User"
+                  - type: object
+                    properties:
+                      expires_at: {type: string, format: date-time, description: Access token expiry.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Exchange a refresh token for a new token pair
+      description: |
+        The presented refresh token is rotated out and stops working. Presenting
+        an already rotated token is treated as theft: every session of the user
+        is revoked and the request fails with 401.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RefreshTokenRequest"}
+      responses:
+        "200":
+          description: A new token pair.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TokenPair"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/logout:
+    post:
+      summary: End the login of a refresh token
+      description: |
+        Revokes the session of the refresh token and the sessions it was rotated
+        into. Idempotent: logging out an already ended session succeeds. No
+        access token is required, since it may already have expired.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RefreshTokenRequest"}
+      responses:
+        "204":
+          description: The session is ended.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/sessions:
+    delete:
+      summary: Log out everywhere
+      description: |
+        Revokes every session of the caller; their refresh tokens stop working.
+        Access tokens already issued stay valid until they expire.
+      tags: [auth]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Sessions revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked_count: {type: integer, format: int64, example: 2}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from /api/v1/auth/login. Refresh tokens are rejected.
+
+  schemas:
+    User:
+      type: object
+      properties:
+        user_id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        username: {type: string}
+    TokenPair:
+      type: object
+      properties:
+        user_id: {type: string, format: uuid}
+        token_type: {type: string, enum: [Bearer]}
+        access_token: {type: string}
+        refresh_token: {type: string}
+        access_expires_at: {type: string, format: date-time}
+        refresh_expires_at: {type: string, format: date-time}
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: {type: string}
+    Readiness:
+      type: object
+      properties:
+        status: {type: string, enum: [ready, not_ready]}
+        checks:
+          type: object
+          additionalProperties: {type: string, enum: [ok, fail]}
+          example: {auth: ok}
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [invalid_argument, invalid_json, unauthenticated, permission_denied, not_found,
+                     already_exists, body_too_large, unsupported_media_type, rate_limited,
+                     cors_forbidden, request_timeout, timeout, unavailable, internal]
+            message: {type: string}
+
+  responses:
+    BadRequest:
+      description: Malformed JSON (`invalid_json`) or invalid field values (`invalid_argument`).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: Missing, malformed, invalid, or expired credentials.
+      headers:
+        WWW-Authenticate: {schema: {type: string}, description: Bearer challenge (RFC 6750).}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    TooLarge:
+      description: Body exceeds GATEWAY_MAX_BODY_BYTES.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    UnsupportedMediaType:
+      description: Content-Type is not application/json.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    RateLimited:
+      description: Quota exhausted.
+      headers:
+        Retry-After: {schema: {type: integer}, description: Seconds until the next request is allowed.}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    RequestTimeout:
+      description: The body was not received within the request budget (`request_timeout`).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Timeout:
+      description: The request budget ran out while rate limiting or waiting for a backend (`timeout`).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unavailable:
+      description: A backend service is unreachable.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}

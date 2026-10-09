@@ -13,3 +13,10 @@ packages:
   github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler:
     interfaces:
       AuthService:
+  github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware:
+    interfaces:
+      TokenValidator:
+      Limiter:
+  github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler:
+    interfaces:
+      AuthClient:
