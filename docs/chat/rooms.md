@@ -1,8 +1,8 @@
 # Chat room foundation
 
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
-room input validation. Storage and the internal room service follow in dependent
-increments. This contract does not expose a running gRPC server or REST routes.
+room input validation and PostgreSQL room storage. The internal room service
+follows in the next dependent increment. This contract does not expose a running gRPC server or REST routes.
 Messages, room listing, member removal, ownership transfer and public discovery
 are subsequent increments.
 
