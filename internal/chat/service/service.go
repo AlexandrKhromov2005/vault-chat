@@ -50,3 +50,57 @@ func (s *Service) GetOrCreateDirect(ctx context.Context, actorID, peerID string)
 	}
 	return room, nil
 }
+
+// CreateChannel creates a channel whose owner is the authenticated actor.
+func (s *Service) CreateChannel(ctx context.Context, actorID, name string, private bool) (*domain.Room, error) {
+	actor, err := validator.CanonicalID(actorID)
+	if err != nil {
+		return nil, fmt.Errorf("channel owner: %w", err)
+	}
+	if err := validator.ChannelName(name); err != nil {
+		return nil, err
+	}
+	room, err := s.rooms.CreateChannel(ctx, actor, name, private)
+	if err != nil {
+		return nil, fmt.Errorf("create channel: %w", err)
+	}
+	return room, nil
+}
+
+// GetRoom returns metadata only when the actor belongs to the room.
+func (s *Service) GetRoom(ctx context.Context, actorID, roomID string) (*domain.Room, error) {
+	actor, err := validator.CanonicalID(actorID)
+	if err != nil {
+		return nil, fmt.Errorf("room actor: %w", err)
+	}
+	id, err := validator.CanonicalID(roomID)
+	if err != nil {
+		return nil, fmt.Errorf("room identifier: %w", err)
+	}
+	room, err := s.rooms.GetForMember(ctx, id, actor)
+	if err != nil {
+		return nil, fmt.Errorf("get room: %w", err)
+	}
+	return room, nil
+}
+
+// AddMember asks storage to atomically verify the actor's owner rights and add
+// the resolved target identity. Direct room participants cannot be changed.
+func (s *Service) AddMember(ctx context.Context, actorID, roomID, userID string) error {
+	actor, err := validator.CanonicalID(actorID)
+	if err != nil {
+		return fmt.Errorf("member actor: %w", err)
+	}
+	id, err := validator.CanonicalID(roomID)
+	if err != nil {
+		return fmt.Errorf("member room: %w", err)
+	}
+	user, err := validator.CanonicalID(userID)
+	if err != nil {
+		return fmt.Errorf("member user: %w", err)
+	}
+	if err := s.rooms.AddChannelMember(ctx, id, actor, user); err != nil {
+		return fmt.Errorf("add member: %w", err)
+	}
+	return nil
+}
