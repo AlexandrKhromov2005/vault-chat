@@ -61,3 +61,34 @@ func TestChatDirect_MembershipAndIdempotency(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM room_members WHERE room_id=$1", room.ID).Scan(&count))
 	require.Equal(t, 2, count)
 }
+
+func TestChatChannel_OwnerControlsMembership(t *testing.T) {
+	pool := newChatPool(t)
+	repo := repository.NewRoomRepository(pool)
+	ctx := context.Background()
+	owner, member, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, private := range []bool{false, true} {
+		room, err := repo.CreateChannel(ctx, owner, "Команда", private)
+		require.NoError(t, err)
+		require.Equal(t, domain.Channel, room.Kind)
+		require.Equal(t, owner, room.OwnerID)
+		require.Equal(t, private, room.Private)
+		got, err := repo.GetForMember(ctx, room.ID, owner)
+		require.NoError(t, err)
+		require.Equal(t, room, got)
+		require.ErrorIs(t, repo.AddChannelMember(ctx, room.ID, outsider, outsider), domain.ErrNotFound)
+		require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+		require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+		require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, owner))
+		_, err = repo.GetForMember(ctx, room.ID, member)
+		require.NoError(t, err)
+		require.ErrorIs(t, repo.AddChannelMember(ctx, room.ID, member, outsider), domain.ErrForbidden)
+		_, err = repo.GetForMember(ctx, room.ID, outsider)
+		require.ErrorIs(t, err, domain.ErrNotFound)
+		_, err = repo.GetForMember(ctx, uuid.NewString(), outsider)
+		require.ErrorIs(t, err, domain.ErrNotFound)
+		var count int
+		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM room_members WHERE room_id=$1", room.ID).Scan(&count))
+		require.Equal(t, 2, count)
+	}
+}
