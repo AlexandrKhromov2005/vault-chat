@@ -24,6 +24,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
@@ -94,7 +95,9 @@ func run() error {
 		return fmt.Errorf("failed to listen on %s: %w", cfg.GRPCAddr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	// The interceptor puts the caller's request id into the context, and the
+	// shared logger adds it to every record logged with that context.
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(requestid.UnaryServerInterceptor()))
 	authv1.RegisterAuthServiceServer(grpcServer, handler.NewAuthGRPCHandler(svc))
 	// Standard gRPC health service: the gateway's readiness probe uses it.
 	healthServer := health.NewServer()

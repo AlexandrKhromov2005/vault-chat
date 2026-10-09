@@ -54,6 +54,24 @@ func FromContext(ctx context.Context) string {
 	return id
 }
 
+// UnaryServerInterceptor stores the caller's request id in the handler's
+// context, so that logs written with that context carry it. A missing or
+// unsafe id is replaced with a fresh one, as RequestID does for HTTP.
+func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		var id string
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if values := md.Get(MetadataKey); len(values) > 0 {
+				id = values[0]
+			}
+		}
+		if !Valid(id) {
+			id = New()
+		}
+		return handler(NewContext(ctx, id), req)
+	}
+}
+
 // UnaryClientInterceptor forwards the request id from the context to the
 // callee as gRPC metadata.
 func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
