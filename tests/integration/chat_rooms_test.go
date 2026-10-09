@@ -13,6 +13,7 @@ import (
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
@@ -96,7 +97,7 @@ func TestChatChannel_OwnerControlsMembership(t *testing.T) {
 
 func TestChatDirect_ConcurrentCreation(t *testing.T) {
 	pool := newChatPool(t)
-	repo := repository.NewRoomRepository(pool)
+	svc := service.NewService(repository.NewRoomRepository(pool))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	first, second := uuid.NewString(), uuid.NewString()
@@ -111,9 +112,9 @@ func TestChatDirect_ConcurrentCreation(t *testing.T) {
 			<-start
 			a, b := first, second
 			if reverse {
-				a, b = strings.ReplaceAll(second, "-", ""), strings.ToUpper(first)
+				a, b = "urn:uuid:"+second, strings.ToUpper(first)
 			}
-			room, err := repo.GetOrCreateDirect(ctx, a, b)
+			room, err := svc.GetOrCreateDirect(ctx, a, b)
 			results <- result{room, err}
 		}(i%2 == 0)
 	}

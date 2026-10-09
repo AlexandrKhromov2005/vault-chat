@@ -1,8 +1,7 @@
 # Chat room foundation
 
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
-room input validation and PostgreSQL room storage. The internal room service
-follows in the next dependent increment. This contract does not expose a running gRPC server or REST routes.
+internal room service. It does not expose a running gRPC server or REST routes.
 Messages, room listing, member removal, ownership transfer and public discovery
 are subsequent increments.
 
@@ -36,12 +35,12 @@ Chat database, never to the Auth database.
   `ErrNotFound`. Management by a nonmember also returns `ErrNotFound`; an existing
   member without owner rights gets `ErrForbidden`. A direct dialog cannot be
   managed as a channel.
-- The repository implementation must check membership and management rights itself; a transport
+- The repository checks membership and management rights itself; a transport
   cannot authorize a write using a separate, potentially stale membership read.
 
 ## Verification
 
-Unit and fuzz tests do not need infrastructure. The storage increment adds PostgreSQL integration tests using
+Unit and fuzz tests do not need infrastructure. PostgreSQL integration tests use
 `VAULT_CHAT_TEST_CHAT_DATABASE_URL`, a separate disposable Chat database. They
 truncate Chat tables; do not point this variable at production data. Auth tests
 continue using `VAULT_CHAT_TEST_DATABASE_URL`.
@@ -53,6 +52,6 @@ VAULT_CHAT_TEST_CHAT_DATABASE_URL='postgres://review:review@localhost:55435/chat
 ```
 
 The migration creates a unique sorted UUID pair for direct dialogs and a
-membership primary key. The repository will expose only enrollment operations that create
+membership primary key. The only enrollment operations in the repository create
 both direct participants, create the channel owner, or add members as an owner.
 There is no arbitrary membership write exposed by the service.
