@@ -4,8 +4,9 @@ import (
 	"context"
 	"io/fs"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 )
 
 // Migrate applies Auth migrations using the shared runner. Kept for existing

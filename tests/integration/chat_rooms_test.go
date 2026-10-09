@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,4 +92,79 @@ func TestChatChannel_OwnerControlsMembership(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM room_members WHERE room_id=$1", room.ID).Scan(&count))
 		require.Equal(t, 2, count)
 	}
+}
+
+func TestChatDirect_ConcurrentCreation(t *testing.T) {
+	pool := newChatPool(t)
+	repo := repository.NewRoomRepository(pool)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	first, second := uuid.NewString(), uuid.NewString()
+	type result struct {
+		room *domain.Room
+		err  error
+	}
+	results := make(chan result, 20)
+	start := make(chan struct{})
+	for i := 0; i < cap(results); i++ {
+		go func(reverse bool) {
+			<-start
+			a, b := first, second
+			if reverse {
+				a, b = strings.ReplaceAll(second, "-", ""), strings.ToUpper(first)
+			}
+			room, err := repo.GetOrCreateDirect(ctx, a, b)
+			results <- result{room, err}
+		}(i%2 == 0)
+	}
+	close(start)
+	var id string
+	for i := 0; i < cap(results); i++ {
+		got := <-results
+		require.NoError(t, got.err)
+		if id == "" {
+			id = got.room.ID
+		}
+		require.Equal(t, id, got.room.ID)
+	}
+	var rooms, members int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM rooms").Scan(&rooms))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM room_members").Scan(&members))
+	require.Equal(t, 1, rooms)
+	require.Equal(t, 2, members)
+}
+
+func TestChatChannel_FailedEnrollmentRollsBackRoom(t *testing.T) {
+	pool := newChatPool(t)
+	ctx := context.Background()
+	// Inject a database failure during the second write of channel creation.
+	_, err := pool.Exec(ctx, `CREATE FUNCTION reject_chat_member() RETURNS trigger LANGUAGE plpgsql AS
+ $$ BEGIN RAISE EXCEPTION 'injected membership failure'; END; $$;
+ CREATE TRIGGER reject_chat_member BEFORE INSERT ON room_members FOR EACH ROW EXECUTE FUNCTION reject_chat_member();`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), "DROP TRIGGER reject_chat_member ON room_members; DROP FUNCTION reject_chat_member()")
+		require.NoError(t, err)
+	})
+	_, err = repository.NewRoomRepository(pool).CreateChannel(ctx, uuid.NewString(), "general", true)
+	require.Error(t, err)
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM rooms").Scan(&count))
+	require.Zero(t, count)
+}
+
+func TestChatMigrations_IdempotentAndReversible(t *testing.T) {
+	pool := newChatPool(t)
+	ctx := context.Background()
+	require.NoError(t, migration.Apply(ctx, pool, migrations.ChatFS, "chat"))
+	down, err := migrations.ChatFS.ReadFile("chat/0001_create_rooms.down.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(down))
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version='0001_create_rooms.up.sql'")
+	require.NoError(t, err)
+	require.NoError(t, migration.Apply(ctx, pool, migrations.ChatFS, "chat"))
+	room, err := repository.NewRoomRepository(pool).CreateChannel(ctx, uuid.NewString(), "recreated", false)
+	require.NoError(t, err)
+	require.NotEmpty(t, room.ID)
 }
