@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
@@ -50,17 +52,28 @@ func (l delayedLimiter) Allow(ctx context.Context, _ string) (ratelimit.Result, 
 
 func newBudgetRouter(t *testing.T, limiter middleware.Limiter) (http.Handler, *handlermocks.MockAuthClient) {
 	t.Helper()
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	auth := handlermocks.NewMockAuthClient(t)
+	return newBudgetRouterFor(t, limiter, auth, middlewaremocks.NewMockTokenValidator(t)), auth
+}
+
+func newBudgetRouterWith(t *testing.T, limiter middleware.Limiter, validator middleware.TokenValidator) http.Handler {
+	t.Helper()
+	return newBudgetRouterFor(t, limiter, handlermocks.NewMockAuthClient(t), validator)
+}
+
+func newBudgetRouterFor(t *testing.T, limiter middleware.Limiter, auth handler.AuthClient,
+	validator middleware.TokenValidator) http.Handler {
+	t.Helper()
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	return router.New(router.Deps{
 		Auth:           handler.NewAuthHandler(auth, logger),
 		Health:         handler.NewHealth(nil, logger),
-		TokenValidator: middlewaremocks.NewMockTokenValidator(t),
+		TokenValidator: validator,
 		Limiter:        limiter,
 		Logger:         logger,
 		MaxBodyBytes:   1 << 20,
 		RequestTimeout: budget,
-	}), auth
+	})
 }
 
 func TestRouter_RequestTimeout(t *testing.T) {
@@ -90,6 +103,59 @@ func TestRouter_RequestTimeout(t *testing.T) {
 		require.Less(t, time.Since(start), cutoff)
 		require.Equal(t, http.StatusGatewayTimeout, rec.Code)
 		require.JSONEq(t, `{"error":{"code":"timeout","message":"request timed out"}}`, rec.Body.String())
+	})
+
+	t.Run("slow backend is cut off at the deadline with 504", func(t *testing.T) {
+		// A real server matters here: for requests without a body net/http
+		// reads the connection in the background, and that read sees the
+		// connection deadline too.
+		validator := middlewaremocks.NewMockTokenValidator(t)
+		validator.EXPECT().ValidateToken(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *authv1.ValidateTokenRequest, _ ...grpc.CallOption) (*authv1.ValidateTokenResponse, error) {
+				// Like a gRPC call: wait for the context, report its error.
+				<-ctx.Done()
+				return nil, status.FromContextError(ctx.Err()).Err()
+			})
+		server := httptest.NewServer(newBudgetRouterWith(t, delayedLimiter{}, validator))
+		t.Cleanup(server.Close)
+
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/auth/me", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer tok")
+		start := time.Now()
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		elapsed := time.Since(start)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Less(t, elapsed, cutoff)
+		require.Equal(t, http.StatusGatewayTimeout, resp.StatusCode, string(body))
+		require.Contains(t, string(body), `"code":"timeout"`)
+	})
+
+	t.Run("slow backend after a fully read body is cut off with 504", func(t *testing.T) {
+		auth := handlermocks.NewMockAuthClient(t)
+		auth.EXPECT().Login(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *authv1.LoginRequest, _ ...grpc.CallOption) (*authv1.LoginResponse, error) {
+				<-ctx.Done()
+				return nil, status.FromContextError(ctx.Err()).Err()
+			})
+		server := httptest.NewServer(newBudgetRouterFor(t, delayedLimiter{}, auth, middlewaremocks.NewMockTokenValidator(t)))
+		t.Cleanup(server.Close)
+
+		start := time.Now()
+		resp, err := http.Post(server.URL+"/api/v1/auth/login", "application/json", strings.NewReader(`{}`))
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		elapsed := time.Since(start)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Less(t, elapsed, cutoff)
+		require.Equal(t, http.StatusGatewayTimeout, resp.StatusCode, string(body))
+		require.Contains(t, string(body), `"code":"timeout"`)
 	})
 
 	t.Run("slow request body is cut off at the deadline", func(t *testing.T) {
