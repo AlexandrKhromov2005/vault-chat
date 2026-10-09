@@ -45,8 +45,10 @@ func IdentityFromContext(ctx context.Context) (Identity, bool) {
 
 // Authenticate rejects requests without a valid access token and stores the
 // caller's Identity in the request context. Tokens are verified by the auth
-// service on every request (ARCHITECTURE.md section 3.1), so revocation there
-// takes effect at the gateway immediately.
+// service on every request (ARCHITECTURE.md section 3.1), so the gateway
+// always applies auth's current validation rules. This is not revocation:
+// access tokens stay valid until they expire even after their sessions are
+// revoked, because auth keeps no access token blacklist.
 func Authenticate(validator TokenValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

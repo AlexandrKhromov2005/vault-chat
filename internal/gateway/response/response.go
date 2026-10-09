@@ -26,8 +26,9 @@ type ErrorDetail struct {
 func JSON(w http.ResponseWriter, statusCode int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	// The status line is already sent; an encoding error here can only mean
-	// the client went away, so there is nothing left to report it to.
+	// The status line is already sent, so an encoding error (a failed write,
+	// or a value JSON cannot represent) can no longer be reported to the
+	// client. The gateway's response types contain only encodable fields.
 	_ = json.NewEncoder(w).Encode(body)
 }
 
