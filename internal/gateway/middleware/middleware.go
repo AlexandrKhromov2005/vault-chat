@@ -5,11 +5,14 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
@@ -214,19 +217,47 @@ func BodyLimit(limit int64) func(http.Handler) http.Handler {
 
 // Timeout gives the request one deadline, d from now. Rate limiting and
 // backend calls observe it through the request context. Reading the body
-// does not watch the context, so the same deadline is also set on the
-// connection: a client that sends its body too slowly makes the read fail
-// instead of holding the handler past the budget.
+// does not watch the context, so while the body is being read the same
+// deadline is also set on the connection: a client that sends its body too
+// slowly makes the read fail instead of holding the handler past the budget.
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			deadline := time.Now().Add(d)
 			ctx, cancel := context.WithDeadline(r.Context(), deadline)
 			defer cancel()
-			// Only real connections support read deadlines (not recorders in
-			// tests); without one, the server's ReadTimeout still applies.
-			_ = http.NewResponseController(w).SetReadDeadline(deadline)
+
+			if r.Body != nil && r.Body != http.NoBody {
+				rc := http.NewResponseController(w)
+				// Only real connections support read deadlines (not recorders
+				// in tests); without one, the server's ReadTimeout applies.
+				if rc.SetReadDeadline(deadline) == nil {
+					r.Body = &deadlineBody{
+						ReadCloser: r.Body,
+						clear:      func() { _ = rc.SetReadDeadline(time.Time{}) },
+					}
+				}
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// deadlineBody clears the connection read deadline once the body has been
+// read to the end. From then on net/http reads the connection in the
+// background to notice clients going away, and a deadline expiring in that
+// read would cancel the request context: a backend call cut off by the
+// budget would then fail as canceled (503) rather than timed out (504).
+type deadlineBody struct {
+	io.ReadCloser
+	clear func()
+	once  sync.Once
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if errors.Is(err, io.EOF) {
+		b.once.Do(b.clear)
+	}
+	return n, err
 }
