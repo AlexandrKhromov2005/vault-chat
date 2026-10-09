@@ -47,6 +47,39 @@ func TestContext(t *testing.T) {
 	require.Equal(t, "req-1", requestid.FromContext(ctx))
 }
 
+func TestUnaryServerInterceptor(t *testing.T) {
+	interceptor := requestid.UnaryServerInterceptor()
+
+	handle := func(md metadata.MD) string {
+		ctx := context.Background()
+		if md != nil {
+			ctx = metadata.NewIncomingContext(ctx, md)
+		}
+		var got string
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/auth.v1.AuthService/Login"},
+			func(ctx context.Context, _ any) (any, error) {
+				got = requestid.FromContext(ctx)
+				return nil, nil
+			})
+		require.NoError(t, err)
+		return got
+	}
+
+	t.Run("adopts the caller's request id", func(t *testing.T) {
+		require.Equal(t, "req-1", handle(metadata.Pairs(requestid.MetadataKey, "req-1")))
+	})
+
+	t.Run("replaces an unsafe request id", func(t *testing.T) {
+		got := handle(metadata.Pairs(requestid.MetadataKey, "bad id\nX: 1"))
+		require.NotEqual(t, "bad id\nX: 1", got)
+		require.True(t, requestid.Valid(got))
+	})
+
+	t.Run("generates one when the caller sent none", func(t *testing.T) {
+		require.True(t, requestid.Valid(handle(nil)))
+	})
+}
+
 func TestUnaryClientInterceptor(t *testing.T) {
 	interceptor := requestid.UnaryClientInterceptor()
 

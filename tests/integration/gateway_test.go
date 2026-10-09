@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
@@ -29,19 +28,20 @@ import (
 )
 
 // startAuth serves the real auth stack (PostgreSQL included, see
-// newAuthHandler) over an in-memory gRPC connection and records the request
-// ids it receives.
+// newAuthHandler) over an in-memory gRPC connection, with the request id
+// interceptor cmd/auth uses, and records the request id each call ends up
+// with in its context.
 func startAuth(t *testing.T) (*grpc.ClientConn, func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
 	var requestIDs []string
 	listener := bufconn.Listen(1 << 20)
-	server := grpc.NewServer(grpc.UnaryInterceptor(
+	server := grpc.NewServer(grpc.ChainUnaryInterceptor(
+		requestid.UnaryServerInterceptor(),
 		func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
-			md, _ := metadata.FromIncomingContext(ctx)
 			mu.Lock()
-			requestIDs = append(requestIDs, md.Get(requestid.MetadataKey)...)
+			requestIDs = append(requestIDs, requestid.FromContext(ctx))
 			mu.Unlock()
 			return next(ctx, req)
 		}))
@@ -179,11 +179,18 @@ func TestGateway_AuthFlow(t *testing.T) {
 	code, _ = call(t, http.MethodGet, api+"/me", session.access+"x", "")
 	require.Equal(t, http.StatusUnauthorized, code)
 
-	// Every backend call carried the gateway's correlation id.
-	require.NotEmpty(t, requestIDs())
-	for _, id := range requestIDs() {
-		require.True(t, requestid.Valid(id), id)
-	}
+	// The client's correlation id reaches auth's request context. auth
+	// generates ids for callers that send none, so check for this exact one.
+	req, err := http.NewRequest(http.MethodGet, api+"/me", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+session.access)
+	req.Header.Set(requestid.Header, "e2e-me-1")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "e2e-me-1", resp.Header.Get(requestid.Header))
+	require.Contains(t, requestIDs(), "e2e-me-1")
 }
 
 func TestGateway_SessionLifecycle(t *testing.T) {
