@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
@@ -21,6 +23,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
+	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
@@ -37,7 +40,7 @@ func run() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	logger := newLogger(cfg.LogLevel)
+	logger := sharedlogger.New(cfg.LogLevel)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -93,11 +96,15 @@ func run() error {
 
 	grpcServer := grpc.NewServer()
 	authv1.RegisterAuthServiceServer(grpcServer, handler.NewAuthGRPCHandler(svc))
+	// Standard gRPC health service: the gateway's readiness probe uses it.
+	healthServer := health.NewServer()
+	healthpb.RegisterHealthServer(grpcServer, healthServer)
 	reflection.Register(grpcServer)
 
 	go func() {
 		<-ctx.Done()
 		logger.Info("shutting down")
+		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()
 
@@ -106,18 +113,4 @@ func run() error {
 		return fmt.Errorf("gRPC server failed: %w", err)
 	}
 	return nil
-}
-
-func newLogger(level string) *slog.Logger {
-	levels := map[string]slog.Level{
-		"debug": slog.LevelDebug,
-		"info":  slog.LevelInfo,
-		"warn":  slog.LevelWarn,
-		"error": slog.LevelError,
-	}
-	parsed, ok := levels[level]
-	if !ok {
-		parsed = slog.LevelInfo
-	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parsed}))
 }
