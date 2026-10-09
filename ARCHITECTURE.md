@@ -352,6 +352,8 @@ vault-chat/
 │   ├── gateway/
 │   │   ├── handler/      # HTTP handlers
 │   │   ├── middleware/   # Auth, rate limit, logging
+│   │   ├── ratelimit/    # Redis token bucket
+│   │   ├── response/     # JSON responses, gRPC → HTTP error mapping
 │   │   └── router/       # Route definitions
 │   ├── auth/
 │   │   ├── service/      # Business logic
@@ -373,6 +375,7 @@ vault-chat/
 │       ├── config/       # Env/config parsing
 │       ├── grpc/         # gRPC client/server helpers
 │       ├── jwt/          # JWT utilities
+│       ├── requestid/    # Correlation id across HTTP and gRPC
 │       ├── validator/    # Input validation
 │       └── errors/       # Domain errors
 ├── api/
