@@ -20,3 +20,6 @@ packages:
   github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler:
     interfaces:
       AuthClient:
+  github.com/AlexandrKhromov2005/vault-chat/internal/chat/service:
+    interfaces:
+      RoomRepository:
