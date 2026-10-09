@@ -7,3 +7,8 @@ import "embed"
 //
 //go:embed auth
 var AuthFS embed.FS
+
+// ChatFS contains migrations for the independent Chat database.
+//
+//go:embed chat
+var ChatFS embed.FS

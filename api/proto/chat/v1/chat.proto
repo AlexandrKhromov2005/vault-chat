@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package chat.v1;
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1;chatv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ChatService manages rooms. This contract is not yet served by a binary.
+// The future server must validate the caller's access token through Auth and
+// derive the actor from it; caller identity is never accepted from request fields.
+// Before creating a dialog or adding a member, resolve the target through Auth.
+service ChatService {
+  // GetOrCreateDirect is idempotent for an unordered pair of distinct users.
+  rpc GetOrCreateDirect(GetOrCreateDirectRequest) returns (GetOrCreateDirectResponse);
+  // CreateChannel creates a channel and enrolls the caller as its sole owner.
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
+  // GetRoom returns NOT_FOUND for both absent rooms and nonmembers.
+  rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+  // AddMember is owner-only, channel-only and idempotent for an existing member.
+  // Public and private channels both require invitation in this first version.
+  rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+}
+
+// RoomKind describes the supported room types.
+enum RoomKind {
+  ROOM_KIND_UNSPECIFIED = 0;
+  ROOM_KIND_DIRECT = 1;
+  ROOM_KIND_CHANNEL = 2;
+}
+
+// Room contains metadata visible to members. It does not expose the roster.
+message Room {
+  string id = 1;
+  RoomKind kind = 2;
+  // Empty for direct dialogs; channel names contain 1–80 Unicode code points.
+  string name = 3;
+  // Empty for direct dialogs. Channel owners are members as well.
+  string owner_id = 4;
+  bool private = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message GetOrCreateDirectRequest {
+  string peer_user_id = 1;
+}
+
+message GetOrCreateDirectResponse {
+  Room room = 1;
+}
+
+message CreateChannelRequest {
+  string name = 1;
+  bool private = 2;
+}
+
+message CreateChannelResponse {
+  Room room = 1;
+}
+
+message GetRoomRequest {
+  string room_id = 1;
+}
+
+message GetRoomResponse {
+  Room room = 1;
+}
+
+message AddMemberRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message AddMemberResponse {}
