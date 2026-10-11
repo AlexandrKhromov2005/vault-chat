@@ -228,3 +228,21 @@ func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, opera
 	}
 	response.Error(w, statusCode, code, message)
 }
+
+// User returns the public profile of an existing account to an authenticated caller.
+func (h *AuthHandler) User(w http.ResponseWriter, r *http.Request) {
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+	profile, err := h.client.GetUser(r.Context(), &authv1.GetUserRequest{AccessToken: identity.Token, UserId: r.PathValue("user_id")})
+	if err != nil {
+		h.backendError(w, r, "get_user", err)
+		return
+	}
+	response.JSON(w, http.StatusOK, struct {
+		UserID   string `json:"user_id"`
+		Username string `json:"username"`
+	}{profile.GetUserId(), profile.GetUsername()})
+}

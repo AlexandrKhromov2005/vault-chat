@@ -1,16 +1,18 @@
 package handler_test
 
 import (
-	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
 )
 
 func TestUserREST_RequiresIdentityAndUsesPublicProfile(t *testing.T) {

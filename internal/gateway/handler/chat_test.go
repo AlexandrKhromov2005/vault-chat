@@ -2,21 +2,23 @@ package handler_test
 
 import (
 	"context"
-	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
+	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 )
 
 func chatRequest(method, body string) *http.Request {
