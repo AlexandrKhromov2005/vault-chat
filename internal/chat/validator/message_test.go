@@ -35,7 +35,7 @@ func FuzzMessageText(f *testing.F) {
 		if MessageText(text) == nil {
 			require.True(t, utf8.ValidString(text))
 			require.LessOrEqual(t, len(text), 16384)
-			require.InDelta(t, utf8.RuneCountInString(text), min(utf8.RuneCountInString(text), 4096), 0)
+			require.LessOrEqual(t, utf8.RuneCountInString(text), 4096)
 			require.NotEmpty(t, strings.TrimSpace(text))
 		}
 	})

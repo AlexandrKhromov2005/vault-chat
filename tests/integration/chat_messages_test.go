@@ -52,7 +52,10 @@ func TestChatMessages_ConcurrentRetries(t *testing.T) {
 	room, err := repo.GetOrCreateDirect(ctx, a, b)
 	require.NoError(t, err)
 	key := uuid.NewString()
-	type result struct { message *domain.Message; err error }
+	type result struct {
+		message *domain.Message
+		err     error
+	}
 	results := make(chan result, 20)
 	for range cap(results) {
 		go func() { m, err := repo.SendMessage(ctx, room.ID, a, key, "once"); results <- result{m, err} }()
@@ -61,7 +64,9 @@ func TestChatMessages_ConcurrentRetries(t *testing.T) {
 	for range cap(results) {
 		got := <-results
 		require.NoError(t, got.err)
-		if first == nil { first = got.message }
+		if first == nil {
+			first = got.message
+		}
 		require.Equal(t, first, got.message)
 	}
 	page, err := repo.ListMessages(ctx, room.ID, b, 0, 100)
