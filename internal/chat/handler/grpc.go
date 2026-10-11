@@ -30,8 +30,8 @@ type RoomService interface {
 
 // MessageService is the message business logic consumed by the gRPC handler.
 type MessageService interface {
- SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
- ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
+	SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
+	ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
 }
 
 // IdentityClient is the authenticated Auth directory consumed by Chat.
@@ -43,10 +43,10 @@ type IdentityClient interface {
 // GRPCHandler derives the actor from a verified token, never a user ID header.
 type GRPCHandler struct {
 	chatv1.UnimplementedChatServiceServer
-	rooms  RoomService
- messages MessageService
-	auth   IdentityClient
-	logger *slog.Logger
+	rooms    RoomService
+	messages MessageService
+	auth     IdentityClient
+	logger   *slog.Logger
 }
 
 // NewGRPCHandler binds Chat business logic and the Auth RPC client.
@@ -174,6 +174,14 @@ func roomProto(room *domain.Room) *chatv1.Room {
 
 func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 	switch {
+	case errors.Is(err, domain.ErrMessageConflict):
+		return status.Error(codes.AlreadyExists, "message key already used with different text")
+	case errors.Is(err, validator.ErrInvalidText):
+		return status.Error(codes.InvalidArgument, "invalid message text")
+	case errors.Is(err, validator.ErrInvalidCursor):
+		return status.Error(codes.InvalidArgument, "invalid history cursor")
+	case errors.Is(err, service.ErrInvalidLimit):
+		return status.Error(codes.InvalidArgument, "history limit must be 1–100")
 	case errors.Is(err, domain.ErrNotFound):
 		return status.Error(codes.NotFound, "room not found")
 	case errors.Is(err, domain.ErrForbidden):
