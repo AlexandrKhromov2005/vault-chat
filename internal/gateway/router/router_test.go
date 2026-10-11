@@ -25,6 +25,7 @@ import (
 
 type fixture struct {
 	handler   http.Handler
+	chat      *handlermocks.MockChatClient
 	auth      *handlermocks.MockAuthClient
 	validator *middlewaremocks.MockTokenValidator
 	limiter   *middlewaremocks.MockLimiter
@@ -35,11 +36,13 @@ func newFixture(t *testing.T) *fixture {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	f := &fixture{
 		auth:      handlermocks.NewMockAuthClient(t),
+		chat:      handlermocks.NewMockChatClient(t),
 		validator: middlewaremocks.NewMockTokenValidator(t),
 		limiter:   middlewaremocks.NewMockLimiter(t),
 	}
 	f.handler = router.New(router.Deps{
 		Auth:               handler.NewAuthHandler(f.auth, logger),
+		Chat:               handler.NewChatHandler(f.chat, logger),
 		Health:             handler.NewHealth(map[string]handler.Check{"auth": func(context.Context) error { return nil }}, logger),
 		TokenValidator:     f.validator,
 		Limiter:            f.limiter,
