@@ -14,8 +14,10 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 )
 
-// ChatClient is the room RPC API consumed by the Gateway.
+// ChatClient is the Chat RPC API consumed by the Gateway.
 type ChatClient interface {
+	SendMessage(context.Context, *chatv1.SendMessageRequest, ...grpc.CallOption) (*chatv1.SendMessageResponse, error)
+	ListMessages(context.Context, *chatv1.ListMessagesRequest, ...grpc.CallOption) (*chatv1.ListMessagesResponse, error)
 	GetOrCreateDirect(context.Context, *chatv1.GetOrCreateDirectRequest, ...grpc.CallOption) (*chatv1.GetOrCreateDirectResponse, error)
 	CreateChannel(context.Context, *chatv1.CreateChannelRequest, ...grpc.CallOption) (*chatv1.CreateChannelResponse, error)
 	GetRoom(context.Context, *chatv1.GetRoomRequest, ...grpc.CallOption) (*chatv1.GetRoomResponse, error)

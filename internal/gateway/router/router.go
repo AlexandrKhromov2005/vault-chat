@@ -50,6 +50,8 @@ func New(d Deps) http.Handler {
 	api.Handle("DELETE /api/v1/auth/sessions", protected(d.Auth.RevokeAllSessions))
 	api.Handle("GET /api/v1/users/{user_id}", protected(d.Auth.User))
 	if d.Chat != nil {
+		api.Handle("POST /api/v1/rooms/{room_id}/messages", protected(d.Chat.SendMessage))
+		api.Handle("GET /api/v1/rooms/{room_id}/messages", protected(d.Chat.Messages))
 		api.Handle("POST /api/v1/rooms/direct", protected(d.Chat.Direct))
 		api.Handle("POST /api/v1/rooms/channels", protected(d.Chat.CreateChannel))
 		api.Handle("GET /api/v1/rooms/{room_id}", protected(d.Chat.Room))
