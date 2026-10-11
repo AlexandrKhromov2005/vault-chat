@@ -1,13 +1,15 @@
 package router_test
 
 import (
-	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
-	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 )
 
 func TestRouter_ChatRoutesRequireIdentity(t *testing.T) {
