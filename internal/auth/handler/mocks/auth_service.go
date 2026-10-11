@@ -27,6 +27,66 @@ func (_m *MockAuthService) EXPECT() *MockAuthService_Expecter {
 	return &MockAuthService_Expecter{mock: &_m.Mock}
 }
 
+// GetUser provides a mock function with given fields: ctx, accessToken, userID
+func (_m *MockAuthService) GetUser(ctx context.Context, accessToken string, userID string) (*domain.User, error) {
+	ret := _m.Called(ctx, accessToken, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUser")
+	}
+
+	var r0 *domain.User
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*domain.User, error)); ok {
+		return rf(ctx, accessToken, userID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *domain.User); ok {
+		r0 = rf(ctx, accessToken, userID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*domain.User)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, accessToken, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_GetUser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUser'
+type MockAuthService_GetUser_Call struct {
+	*mock.Call
+}
+
+// GetUser is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+//   - userID string
+func (_e *MockAuthService_Expecter) GetUser(ctx interface{}, accessToken interface{}, userID interface{}) *MockAuthService_GetUser_Call {
+	return &MockAuthService_GetUser_Call{Call: _e.mock.On("GetUser", ctx, accessToken, userID)}
+}
+
+func (_c *MockAuthService_GetUser_Call) Run(run func(ctx context.Context, accessToken string, userID string)) *MockAuthService_GetUser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_GetUser_Call) Return(_a0 *domain.User, _a1 error) *MockAuthService_GetUser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_GetUser_Call) RunAndReturn(run func(context.Context, string, string) (*domain.User, error)) *MockAuthService_GetUser_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Login provides a mock function with given fields: ctx, email, password
 func (_m *MockAuthService) Login(ctx context.Context, email string, password string) (*service.TokenPair, error) {
 	ret := _m.Called(ctx, email, password)

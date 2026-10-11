@@ -19,6 +19,7 @@ import (
 // AuthService is the business-logic contract required by the handler.
 // Defined at the consumer per CONTRIBUTING.md.
 type AuthService interface {
+	GetUser(ctx context.Context, accessToken, userID string) (*domain.User, error)
 	Register(ctx context.Context, email, username, password string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
