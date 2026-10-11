@@ -1,23 +1,33 @@
 # Chat room foundation
 
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
-internal room service. It does not expose a running gRPC server or REST routes.
+internal room service, authenticated gRPC server (`cmd/chat`) and REST routes
+through Gateway.
 Messages, room listing, member removal, ownership transfer and public discovery
 are subsequent increments.
 
 ## Identity boundary
 
-Service methods accept a trusted actor ID. Before exposing these methods, the
-transport must validate an access token through Auth and derive the actor from
-that response. Never accept the actor from a client field or an unverified header.
-The transport must also resolve target users through an Auth directory API before
-creating a dialog or adding a channel member. That directory API is not yet
-implemented. UUID validation alone cannot establish account existence.
+The internal service accepts a trusted actor ID. The gRPC handler requires one
+`authorization: Bearer <access token>` metadata value, validates it through Auth
+and derives the actor from that response. Client actor fields and user-ID headers
+are not trusted. Gateway forwards the verified access token; Chat validates it
+again so calling Chat directly cannot bypass authentication.
+
+Before creating a dialog or adding a member, Chat resolves the target through
+Auth's authenticated `GetUser` RPC. That API returns only ID and username; UUID
+validation alone never establishes account existence. Auth failure prevents the
+room operation. Request ID propagates through Gateway → Chat → Auth.
 
 Chat owns its own database. User IDs are opaque external references, with no
 foreign keys or queries to Auth's tables. Database credentials must restrict each
 service to its own database. Apply `migrations.ChatFS` with directory `chat` to the
-Chat database, never to the Auth database.
+Chat database, never to the Auth database. `cmd/chat` applies these migrations on
+startup. Compose provides a separate `chat-postgres` instance on port 5433. Chat
+uses `CHAT_DATABASE_URL`; its unary requests are bounded by
+`CHAT_REQUEST_TIMEOUT` (10 seconds by default), including Auth and PostgreSQL.
+An earlier caller deadline takes precedence. Internal RPC is plaintext for now;
+mTLS remains a separate implementation task.
 
 ## Room rules
 
