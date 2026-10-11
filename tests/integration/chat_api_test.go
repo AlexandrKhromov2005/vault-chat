@@ -39,7 +39,7 @@ func startChat(t *testing.T, authConn *grpc.ClientConn) (*grpc.ClientConn, func(
 		mu.Unlock()
 		return next(ctx, req)
 	}))
-	h := chathandler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	h := chathandler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), service.NewMessageService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	chatv1.RegisterChatServiceServer(server, h)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)

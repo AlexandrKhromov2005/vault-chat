@@ -28,6 +28,12 @@ type RoomService interface {
 	AddMember(context.Context, string, string, string) error
 }
 
+// MessageService is the message business logic consumed by the gRPC handler.
+type MessageService interface {
+ SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
+ ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
+}
+
 // IdentityClient is the authenticated Auth directory consumed by Chat.
 type IdentityClient interface {
 	ValidateToken(context.Context, *authv1.ValidateTokenRequest, ...grpc.CallOption) (*authv1.ValidateTokenResponse, error)
@@ -38,13 +44,14 @@ type IdentityClient interface {
 type GRPCHandler struct {
 	chatv1.UnimplementedChatServiceServer
 	rooms  RoomService
+ messages MessageService
 	auth   IdentityClient
 	logger *slog.Logger
 }
 
 // NewGRPCHandler binds Chat business logic and the Auth RPC client.
-func NewGRPCHandler(rooms RoomService, auth IdentityClient, logger *slog.Logger) *GRPCHandler {
-	return &GRPCHandler{rooms: rooms, auth: auth, logger: logger}
+func NewGRPCHandler(rooms RoomService, messages MessageService, auth IdentityClient, logger *slog.Logger) *GRPCHandler {
+	return &GRPCHandler{rooms: rooms, messages: messages, auth: auth, logger: logger}
 }
 
 func bearerCredential(ctx context.Context) (string, bool) {
