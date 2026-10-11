@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,9 @@ func FuzzChatRequestTimeout(f *testing.F) {
 		f.Add(input)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
+		if strings.ContainsRune(input, 0) {
+			t.Skip("environment values cannot contain NUL")
+		}
 		t.Setenv("CHAT_DATABASE_URL", "postgres://test")
 		t.Setenv("CHAT_REQUEST_TIMEOUT", input)
 		cfg, err := config.LoadChat()
