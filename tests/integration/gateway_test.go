@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
@@ -72,7 +73,7 @@ func newAuthConn(t *testing.T, dialer func(context.Context, string) (net.Conn, e
 	return conn
 }
 
-func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32) *httptest.Server {
+func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32, chatConns ...*grpc.ClientConn) *httptest.Server {
 	t.Helper()
 
 	redisServer := miniredis.RunT(t)
@@ -83,8 +84,13 @@ func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32) *httptest.S
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	authClient := authv1.NewAuthServiceClient(conn)
+	var chat *handler.ChatHandler
+	if len(chatConns) > 0 {
+		chat = handler.NewChatHandler(chatv1.NewChatServiceClient(chatConns[0]), logger)
+	}
 	gateway := httptest.NewServer(router.New(router.Deps{
 		Auth:           handler.NewAuthHandler(authClient, logger),
+		Chat:           chat,
 		Health:         handler.NewHealth(nil, logger),
 		TokenValidator: authClient,
 		Limiter:        limiter,
