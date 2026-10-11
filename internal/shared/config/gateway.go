@@ -14,6 +14,7 @@ import (
 type GatewayConfig struct {
 	HTTPAddr           string
 	AuthGRPCAddr       string
+	ChatGRPCAddr       string
 	RedisAddr          string
 	RedisPassword      string
 	TLSCertPath        string
@@ -33,6 +34,7 @@ func LoadGateway() (*GatewayConfig, error) {
 	cfg := &GatewayConfig{
 		HTTPAddr:      envOr("GATEWAY_HTTP_ADDR", ":8080"),
 		AuthGRPCAddr:  envOr("GATEWAY_AUTH_GRPC_ADDR", "localhost:50051"),
+		ChatGRPCAddr:  envOr("GATEWAY_CHAT_GRPC_ADDR", "localhost:50052"),
 		RedisAddr:     envOr("GATEWAY_REDIS_ADDR", "localhost:6379"),
 		RedisPassword: os.Getenv("GATEWAY_REDIS_PASSWORD"),
 		TLSCertPath:   os.Getenv("GATEWAY_TLS_CERT_PATH"),
