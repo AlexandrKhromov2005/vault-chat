@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AuthService_GetUser_FullMethodName           = "/auth.v1.AuthService/GetUser"
 	AuthService_Register_FullMethodName          = "/auth.v1.AuthService/Register"
 	AuthService_Login_FullMethodName             = "/auth.v1.AuthService/Login"
 	AuthService_ValidateToken_FullMethodName     = "/auth.v1.AuthService/ValidateToken"
@@ -34,6 +35,8 @@ const (
 // AuthService provides identity operations: registration, login, token
 // validation, and session management for the API Gateway.
 type AuthServiceClient interface {
+	// GetUser returns the public profile of an existing identity to an access-token holder.
+	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
 	// Register creates a new user account.
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 	// Login authenticates a user and issues an access/refresh token pair.
@@ -60,6 +63,16 @@ type authServiceClient struct {
 
 func NewAuthServiceClient(cc grpc.ClientConnInterface) AuthServiceClient {
 	return &authServiceClient{cc}
+}
+
+func (c *authServiceClient) GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *authServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error) {
@@ -129,6 +142,8 @@ func (c *authServiceClient) RevokeAllSessions(ctx context.Context, in *RevokeAll
 // AuthService provides identity operations: registration, login, token
 // validation, and session management for the API Gateway.
 type AuthServiceServer interface {
+	// GetUser returns the public profile of an existing identity to an access-token holder.
+	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	// Register creates a new user account.
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	// Login authenticates a user and issues an access/refresh token pair.
@@ -157,6 +172,9 @@ type AuthServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAuthServiceServer struct{}
 
+func (UnimplementedAuthServiceServer) GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUser not implemented")
+}
 func (UnimplementedAuthServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
 }
@@ -194,6 +212,24 @@ func RegisterAuthServiceServer(s grpc.ServiceRegistrar, srv AuthServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AuthService_ServiceDesc, srv)
+}
+
+func _AuthService_GetUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetUser(ctx, req.(*GetUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AuthService_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -311,6 +347,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "auth.v1.AuthService",
 	HandlerType: (*AuthServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetUser",
+			Handler:    _AuthService_GetUser_Handler,
+		},
 		{
 			MethodName: "Register",
 			Handler:    _AuthService_Register_Handler,
