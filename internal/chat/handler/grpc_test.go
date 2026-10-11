@@ -64,3 +64,22 @@ func TestDirect_UnknownPeerDoesNotCreateRoom(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 	require.Empty(t, rooms.Calls)
 }
+
+func TestChannelOperations_UseVerifiedActorAndResolveMembers(t *testing.T) {
+	h, rooms, auth := newHandler(t)
+	ctx := authorizedContext()
+	actor, member, roomID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	auth.EXPECT().ValidateToken(ctx, &authv1.ValidateTokenRequest{Token: "access"}).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: actor}, nil).Times(3)
+	room := &domain.Room{ID: roomID, Kind: domain.Channel, OwnerID: actor, Name: "general"}
+	rooms.EXPECT().CreateChannel(ctx, actor, "general", true).Return(room, nil).Once()
+	resp, err := h.CreateChannel(ctx, &chatv1.CreateChannelRequest{Name: "general", Private: true})
+	require.NoError(t, err)
+	require.Equal(t, actor, resp.GetRoom().GetOwnerId())
+	rooms.EXPECT().GetRoom(ctx, actor, roomID).Return(nil, domain.ErrNotFound).Once()
+	_, err = h.GetRoom(ctx, &chatv1.GetRoomRequest{RoomId: roomID})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	auth.EXPECT().GetUser(ctx, &authv1.GetUserRequest{AccessToken: "access", UserId: member}).Return(&authv1.GetUserResponse{UserId: member}, nil).Once()
+	rooms.EXPECT().AddMember(ctx, actor, roomID, member).Return(domain.ErrForbidden).Once()
+	_, err = h.AddMember(ctx, &chatv1.AddMemberRequest{RoomId: roomID, UserId: member})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
