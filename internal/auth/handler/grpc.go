@@ -130,6 +130,10 @@ var publicErrors = []struct {
 	code    codes.Code
 	message string
 }{
+	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
+	{context.Canceled, codes.Canceled, "request canceled"},
+	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},
+	{service.ErrUserNotFound, codes.NotFound, "user not found"},
 	{validator.ErrInvalidEmail, codes.InvalidArgument, "invalid email address"},
 	{validator.ErrInvalidUsername, codes.InvalidArgument, "invalid username"},
 	{validator.ErrInvalidPassword, codes.InvalidArgument, "invalid password"},
@@ -148,4 +152,13 @@ func toStatus(err error) error {
 		}
 	}
 	return status.Error(codes.Internal, "internal error")
+}
+
+// GetUser resolves a user and projects only the public directory fields.
+func (h *AuthGRPCHandler) GetUser(ctx context.Context, req *authv1.GetUserRequest) (*authv1.GetUserResponse, error) {
+	user, err := h.svc.GetUser(ctx, req.GetAccessToken(), req.GetUserId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.GetUserResponse{UserId: user.ID, Username: user.Username}, nil
 }

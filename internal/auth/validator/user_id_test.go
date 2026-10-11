@@ -1,11 +1,13 @@
 package validator_test
 
 import (
-	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 )
 
 func TestCanonicalUserID(t *testing.T) {

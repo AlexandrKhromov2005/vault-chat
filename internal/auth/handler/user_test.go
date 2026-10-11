@@ -6,15 +6,16 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler/mocks"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestGetUser_ReturnsOnlyPublicProfile(t *testing.T) {
