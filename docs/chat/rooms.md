@@ -3,7 +3,7 @@
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
 internal room service, authenticated gRPC server (`cmd/chat`) and REST routes
 through Gateway.
-Messages, room listing, member removal, ownership transfer and public discovery
+Room listing, member removal, ownership transfer and public discovery
 are subsequent increments.
 
 ## Identity boundary

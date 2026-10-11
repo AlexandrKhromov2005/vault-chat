@@ -351,6 +351,85 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/rooms/{room_id}/messages:
+    parameters:
+      - {$ref: "#/components/parameters/RoomID"}
+    post:
+      summary: Send an immutable text message
+      tags: [chat]
+      security: [{bearerAuth: []}]
+      description: |
+        Membership is required. Retries with the same room, sender, UUID and
+        exact text return the original message. Different text under that key
+        returns 409. Sender identity always comes from the access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [client_message_id, text]
+              properties:
+                client_message_id: {type: string, format: uuid, description: Nonzero UUID retained across retries.}
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+                  description: Valid UTF-8 with non-whitespace content. Newline and tab are the only allowed controls.
+      responses:
+        "200":
+          description: Message stored, or original result of an identical retry.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Message"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The retry key was already used with different text.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+    get:
+      summary: Read member-only message history, newest first
+      tags: [chat]
+      security: [{bearerAuth: []}]
+      description: Duplicate or unknown query parameters are rejected. An empty page still requires membership.
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string, pattern: "^$|^[1-9][0-9]{0,18}$"}
+          description: Empty starts at newest. Otherwise use next_cursor from this room, at most 9223372036854775807.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        "200":
+          description: Messages and an exclusive older-page cursor; empty cursor means the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages, next_cursor]
+                properties:
+                  messages:
+                    type: array
+                    items: {$ref: "#/components/schemas/Message"}
+                  next_cursor: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -372,6 +451,16 @@ components:
       schema: {type: string, format: uuid}
 
   schemas:
+    Message:
+      type: object
+      required: [message_id, room_id, sender_id, client_message_id, text, created_at]
+      properties:
+        message_id: {type: string, format: uuid}
+        room_id: {type: string, format: uuid}
+        sender_id: {type: string, format: uuid}
+        client_message_id: {type: string, format: uuid}
+        text: {type: string, minLength: 1, maxLength: 4096}
+        created_at: {type: string, format: date-time}
     PublicProfile:
       type: object
       required: [user_id, username]
