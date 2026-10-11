@@ -72,7 +72,7 @@ func run() error {
 	}
 	defer func() { _ = listener.Close() }()
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
-	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), logger))
+	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), service.NewMessageService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), logger))
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	reflection.Register(server)

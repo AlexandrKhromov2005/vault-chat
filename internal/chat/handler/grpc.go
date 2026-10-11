@@ -28,6 +28,12 @@ type RoomService interface {
 	AddMember(context.Context, string, string, string) error
 }
 
+// MessageService is the message business logic consumed by the gRPC handler.
+type MessageService interface {
+	SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
+	ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
+}
+
 // IdentityClient is the authenticated Auth directory consumed by Chat.
 type IdentityClient interface {
 	ValidateToken(context.Context, *authv1.ValidateTokenRequest, ...grpc.CallOption) (*authv1.ValidateTokenResponse, error)
@@ -37,14 +43,15 @@ type IdentityClient interface {
 // GRPCHandler derives the actor from a verified token, never a user ID header.
 type GRPCHandler struct {
 	chatv1.UnimplementedChatServiceServer
-	rooms  RoomService
-	auth   IdentityClient
-	logger *slog.Logger
+	rooms    RoomService
+	messages MessageService
+	auth     IdentityClient
+	logger   *slog.Logger
 }
 
 // NewGRPCHandler binds Chat business logic and the Auth RPC client.
-func NewGRPCHandler(rooms RoomService, auth IdentityClient, logger *slog.Logger) *GRPCHandler {
-	return &GRPCHandler{rooms: rooms, auth: auth, logger: logger}
+func NewGRPCHandler(rooms RoomService, messages MessageService, auth IdentityClient, logger *slog.Logger) *GRPCHandler {
+	return &GRPCHandler{rooms: rooms, messages: messages, auth: auth, logger: logger}
 }
 
 func bearerCredential(ctx context.Context) (string, bool) {
@@ -167,6 +174,14 @@ func roomProto(room *domain.Room) *chatv1.Room {
 
 func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 	switch {
+	case errors.Is(err, domain.ErrMessageConflict):
+		return status.Error(codes.AlreadyExists, "message key already used with different text")
+	case errors.Is(err, validator.ErrInvalidText):
+		return status.Error(codes.InvalidArgument, "invalid message text")
+	case errors.Is(err, validator.ErrInvalidCursor):
+		return status.Error(codes.InvalidArgument, "invalid history cursor")
+	case errors.Is(err, service.ErrInvalidLimit):
+		return status.Error(codes.InvalidArgument, "history limit must be 1–100")
 	case errors.Is(err, domain.ErrNotFound):
 		return status.Error(codes.NotFound, "room not found")
 	case errors.Is(err, domain.ErrForbidden):

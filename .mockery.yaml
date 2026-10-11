@@ -28,4 +28,5 @@ packages:
   github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler:
     interfaces:
       RoomService:
+      MessageService:
       IdentityClient:

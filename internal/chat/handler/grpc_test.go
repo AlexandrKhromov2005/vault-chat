@@ -25,7 +25,7 @@ import (
 
 func newHandler(t *testing.T) (*handler.GRPCHandler, *mocks.MockRoomService, *mocks.MockIdentityClient) {
 	rooms, auth := mocks.NewMockRoomService(t), mocks.NewMockIdentityClient(t)
-	return handler.NewGRPCHandler(rooms, auth, slog.New(slog.NewJSONHandler(io.Discard, nil))), rooms, auth
+	return handler.NewGRPCHandler(rooms, nil, auth, slog.New(slog.NewJSONHandler(io.Discard, nil))), rooms, auth
 }
 
 func authorizedContext() context.Context {
