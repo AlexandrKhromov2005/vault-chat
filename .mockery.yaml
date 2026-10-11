@@ -24,6 +24,7 @@ packages:
   github.com/AlexandrKhromov2005/vault-chat/internal/chat/service:
     interfaces:
       RoomRepository:
+      MessageRepository:
   github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler:
     interfaces:
       RoomService:
