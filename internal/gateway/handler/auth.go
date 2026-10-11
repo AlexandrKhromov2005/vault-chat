@@ -20,6 +20,7 @@ import (
 // Defined at the consumer per CONTRIBUTING.md; authv1.AuthServiceClient
 // satisfies it.
 type AuthClient interface {
+	GetUser(ctx context.Context, in *authv1.GetUserRequest, opts ...grpc.CallOption) (*authv1.GetUserResponse, error)
 	Register(ctx context.Context, in *authv1.RegisterRequest, opts ...grpc.CallOption) (*authv1.RegisterResponse, error)
 	Login(ctx context.Context, in *authv1.LoginRequest, opts ...grpc.CallOption) (*authv1.LoginResponse, error)
 	RefreshToken(ctx context.Context, in *authv1.RefreshTokenRequest, opts ...grpc.CallOption) (*authv1.RefreshTokenResponse, error)
@@ -226,4 +227,22 @@ func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, opera
 		h.logger.ErrorContext(r.Context(), "auth backend call failed", "operation", operation, "error", err)
 	}
 	response.Error(w, statusCode, code, message)
+}
+
+// User returns the public profile of an existing account to an authenticated caller.
+func (h *AuthHandler) User(w http.ResponseWriter, r *http.Request) {
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+	profile, err := h.client.GetUser(r.Context(), &authv1.GetUserRequest{AccessToken: identity.Token, UserId: r.PathValue("user_id")})
+	if err != nil {
+		h.backendError(w, r, "get_user", err)
+		return
+	}
+	response.JSON(w, http.StatusOK, struct {
+		UserID   string `json:"user_id"`
+		Username string `json:"username"`
+	}{profile.GetUserId(), profile.GetUsername()})
 }

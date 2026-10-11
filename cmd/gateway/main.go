@@ -19,6 +19,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
@@ -63,6 +64,14 @@ func run() error {
 	authClient := authv1.NewAuthServiceClient(authConn)
 	authHealth := healthpb.NewHealthClient(authConn)
 
+	chatConn, err := grpc.NewClient(cfg.ChatGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+	if err != nil {
+		return fmt.Errorf("failed to create chat client: %w", err)
+	}
+	defer func() { _ = chatConn.Close() }()
+	chatClient := chatv1.NewChatServiceClient(chatConn)
+	chatHealth := healthpb.NewHealthClient(chatConn)
+
 	redisClient := ratelimit.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword)
 	defer func() { _ = redisClient.Close() }()
 	limiter, err := ratelimit.NewRedisLimiter(redisClient, cfg.RateLimitPerMinute, cfg.RateLimitBurst)
@@ -73,22 +82,15 @@ func run() error {
 	// Redis is deliberately not a readiness dependency: the rate limiter
 	// fails open, so the gateway keeps serving without it.
 	health := handler.NewHealth(map[string]handler.Check{
-		"auth": func(ctx context.Context) error {
-			resp, err := authHealth.Check(ctx, &healthpb.HealthCheckRequest{})
-			if err != nil {
-				return err
-			}
-			if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-				return fmt.Errorf("auth service is %s", resp.GetStatus())
-			}
-			return nil
-		},
+		"auth": checkGRPCHealth(authHealth, "auth"),
+		"chat": checkGRPCHealth(chatHealth, "chat"),
 	}, logger)
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: router.New(router.Deps{
 			Auth:               handler.NewAuthHandler(authClient, logger),
+			Chat:               handler.NewChatHandler(chatClient, logger),
 			Health:             health,
 			TokenValidator:     authClient,
 			Limiter:            limiter,
@@ -138,4 +140,17 @@ func run() error {
 		return fmt.Errorf("HTTP server failed: %w", err)
 	}
 	return nil
+}
+
+func checkGRPCHealth(client healthpb.HealthClient, name string) handler.Check {
+	return func(ctx context.Context) error {
+		resp, err := client.Check(ctx, &healthpb.HealthCheckRequest{})
+		if err != nil {
+			return err
+		}
+		if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+			return fmt.Errorf("%s service is %s", name, resp.GetStatus())
+		}
+		return nil
+	}
 }

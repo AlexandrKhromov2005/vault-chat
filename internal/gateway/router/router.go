@@ -15,6 +15,7 @@ import (
 // Deps are the collaborators and settings the routes are built from.
 type Deps struct {
 	Auth               *handler.AuthHandler
+	Chat               *handler.ChatHandler
 	Health             *handler.Health
 	TokenValidator     middleware.TokenValidator
 	Limiter            middleware.Limiter
@@ -47,6 +48,13 @@ func New(d Deps) http.Handler {
 	api.HandleFunc("POST /api/v1/auth/logout", d.Auth.Logout)
 	api.Handle("GET /api/v1/auth/me", protected(d.Auth.Me))
 	api.Handle("DELETE /api/v1/auth/sessions", protected(d.Auth.RevokeAllSessions))
+	api.Handle("GET /api/v1/users/{user_id}", protected(d.Auth.User))
+	if d.Chat != nil {
+		api.Handle("POST /api/v1/rooms/direct", protected(d.Chat.Direct))
+		api.Handle("POST /api/v1/rooms/channels", protected(d.Chat.CreateChannel))
+		api.Handle("GET /api/v1/rooms/{room_id}", protected(d.Chat.Room))
+		api.Handle("PUT /api/v1/rooms/{room_id}/members/{user_id}", protected(d.Chat.AddMember))
+	}
 	api.HandleFunc("/", notFound)
 
 	root := http.NewServeMux()

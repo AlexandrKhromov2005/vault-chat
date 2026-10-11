@@ -12,7 +12,7 @@ import (
 func clearGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"GATEWAY_HTTP_ADDR", "GATEWAY_AUTH_GRPC_ADDR", "GATEWAY_REDIS_ADDR", "GATEWAY_REDIS_PASSWORD",
+		"GATEWAY_HTTP_ADDR", "GATEWAY_AUTH_GRPC_ADDR", "GATEWAY_CHAT_GRPC_ADDR", "GATEWAY_REDIS_ADDR", "GATEWAY_REDIS_PASSWORD",
 		"GATEWAY_TLS_CERT_PATH", "GATEWAY_TLS_KEY_PATH", "GATEWAY_CORS_ALLOWED_ORIGINS",
 		"GATEWAY_MAX_BODY_BYTES", "GATEWAY_REQUEST_TIMEOUT", "GATEWAY_RATE_LIMIT_PER_MINUTE",
 		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL",
@@ -29,6 +29,7 @@ func TestLoadGateway(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, ":8080", cfg.HTTPAddr)
 		require.Equal(t, "localhost:50051", cfg.AuthGRPCAddr)
+		require.Equal(t, "localhost:50052", cfg.ChatGRPCAddr)
 		require.Equal(t, "localhost:6379", cfg.RedisAddr)
 		require.Empty(t, cfg.RedisPassword)
 		require.Empty(t, cfg.TLSCertPath)
@@ -45,6 +46,7 @@ func TestLoadGateway(t *testing.T) {
 		clearGatewayEnv(t)
 		t.Setenv("GATEWAY_HTTP_ADDR", ":9090")
 		t.Setenv("GATEWAY_AUTH_GRPC_ADDR", "auth:50051")
+		t.Setenv("GATEWAY_CHAT_GRPC_ADDR", "chat:50052")
 		t.Setenv("GATEWAY_REDIS_ADDR", "redis:6379")
 		t.Setenv("GATEWAY_REDIS_PASSWORD", "secret")
 		t.Setenv("GATEWAY_TLS_CERT_PATH", "secrets/gateway.crt")
@@ -60,6 +62,7 @@ func TestLoadGateway(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, ":9090", cfg.HTTPAddr)
 		require.Equal(t, "auth:50051", cfg.AuthGRPCAddr)
+		require.Equal(t, "chat:50052", cfg.ChatGRPCAddr)
 		require.Equal(t, "redis:6379", cfg.RedisAddr)
 		require.Equal(t, "secret", cfg.RedisPassword)
 		require.Equal(t, "secrets/gateway.crt", cfg.TLSCertPath)
