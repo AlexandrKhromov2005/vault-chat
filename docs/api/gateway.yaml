@@ -43,7 +43,7 @@ paths:
   /ready:
     get:
       summary: Readiness probe
-      description: Ready when the auth service answers its gRPC health check.
+      description: Ready when both Auth and Chat answer their gRPC health checks.
       tags: [probes]
       responses:
         "200":
@@ -226,6 +226,131 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/users/{user_id}:
+    get:
+      summary: Get an existing user's public profile by UUID
+      description: Returns only user_id and username; requires an access token.
+      tags: [users]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/UserID"}
+      responses:
+        "200":
+          description: Existing public profile.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PublicProfile"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/rooms/direct:
+    post:
+      summary: Get or create a direct dialog with an existing user
+      description: Idempotent for an unordered pair; a self-dialog is rejected.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [peer_user_id]
+              properties:
+                peer_user_id: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Existing or newly created direct dialog.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Room"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/rooms/channels:
+    post:
+      summary: Create a channel owned by the authenticated caller
+      description: Both public and private channels currently require invitation.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 80, description: "Valid UTF-8, no control characters or surrounding whitespace."}
+                private: {type: boolean, default: false}
+      responses:
+        "201":
+          description: Channel and owner membership created atomically.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Room"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/rooms/{room_id}:
+    get:
+      summary: Read room metadata as a member
+      description: Absent rooms and nonmembers both receive the same 404 response.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/RoomID"}
+      responses:
+        "200":
+          description: Room visible to the caller.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Room"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/rooms/{room_id}/members/{user_id}:
+    put:
+      summary: Add an existing user to a channel as its owner
+      description: Idempotent; adding a third direct-dialog participant is forbidden.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/RoomID"}
+        - {$ref: "#/components/parameters/UserID"}
+      responses:
+        "204": {description: User is a member of the channel.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -234,7 +359,35 @@ components:
       bearerFormat: JWT
       description: Access token from /api/v1/auth/login. Refresh tokens are rejected.
 
+  parameters:
+    UserID:
+      name: user_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    RoomID:
+      name: room_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+
   schemas:
+    PublicProfile:
+      type: object
+      required: [user_id, username]
+      properties:
+        user_id: {type: string, format: uuid}
+        username: {type: string}
+    Room:
+      type: object
+      required: [room_id, kind, private, created_at]
+      properties:
+        room_id: {type: string, format: uuid}
+        kind: {type: string, enum: [direct, channel]}
+        name: {type: string, description: Only present for channels.}
+        owner_id: {type: string, format: uuid, description: Only present for channels.}
+        private: {type: boolean}
+        created_at: {type: string, format: date-time}
     User:
       type: object
       properties:
@@ -263,7 +416,7 @@ components:
         checks:
           type: object
           additionalProperties: {type: string, enum: [ok, fail]}
-          example: {auth: ok}
+          example: {auth: ok, chat: ok}
     Error:
       type: object
       properties:
@@ -278,6 +431,16 @@ components:
             message: {type: string}
 
   responses:
+    NotFound:
+      description: User or room absent, or the caller is not a room member.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: Caller is not the channel owner, or the room is a direct dialog.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
     BadRequest:
       description: Malformed JSON (`invalid_json`) or invalid field values (`invalid_argument`).
       content:
