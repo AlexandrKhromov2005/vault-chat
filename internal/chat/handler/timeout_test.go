@@ -2,11 +2,13 @@ package handler_test
 
 import (
 	"context"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
 )
 
 func TestUnaryTimeout_RespectsServerAndCallerDeadlines(t *testing.T) {
