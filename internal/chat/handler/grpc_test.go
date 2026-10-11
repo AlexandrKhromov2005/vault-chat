@@ -2,20 +2,22 @@ package handler_test
 
 import (
 	"context"
-	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
-	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler/mocks"
+	"io"
+	"log/slog"
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"io"
-	"log/slog"
-	"testing"
+
+	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler/mocks"
 )
 
 func newHandler(t *testing.T) (*handler.GRPCHandler, *mocks.MockRoomService, *mocks.MockIdentityClient) {

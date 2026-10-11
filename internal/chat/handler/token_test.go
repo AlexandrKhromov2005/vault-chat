@@ -2,10 +2,11 @@ package handler
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/metadata"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestBearerCredential(t *testing.T) {
