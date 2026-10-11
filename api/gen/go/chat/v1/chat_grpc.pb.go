@@ -29,10 +29,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// ChatService manages rooms. This contract is not yet served by a binary.
-// The future server must validate the caller's access token through Auth and
-// derive the actor from it; caller identity is never accepted from request fields.
-// Before creating a dialog or adding a member, resolve the target through Auth.
+// ChatService manages rooms. Send a single "authorization: Bearer <access token>"
+// gRPC metadata value. The server validates the token through Auth and derives
+// the actor from it; caller identity is never accepted from request fields.
+// Creating a dialog or adding a member also resolves the target through Auth.
 type ChatServiceClient interface {
 	// GetOrCreateDirect is idempotent for an unordered pair of distinct users.
 	GetOrCreateDirect(ctx context.Context, in *GetOrCreateDirectRequest, opts ...grpc.CallOption) (*GetOrCreateDirectResponse, error)
@@ -97,10 +97,10 @@ func (c *chatServiceClient) AddMember(ctx context.Context, in *AddMemberRequest,
 // All implementations must embed UnimplementedChatServiceServer
 // for forward compatibility.
 //
-// ChatService manages rooms. This contract is not yet served by a binary.
-// The future server must validate the caller's access token through Auth and
-// derive the actor from it; caller identity is never accepted from request fields.
-// Before creating a dialog or adding a member, resolve the target through Auth.
+// ChatService manages rooms. Send a single "authorization: Bearer <access token>"
+// gRPC metadata value. The server validates the token through Auth and derives
+// the actor from it; caller identity is never accepted from request fields.
+// Creating a dialog or adding a member also resolves the target through Auth.
 type ChatServiceServer interface {
 	// GetOrCreateDirect is idempotent for an unordered pair of distinct users.
 	GetOrCreateDirect(context.Context, *GetOrCreateDirectRequest) (*GetOrCreateDirectResponse, error)

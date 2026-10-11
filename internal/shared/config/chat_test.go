@@ -1,10 +1,12 @@
 package config_test
 
 import (
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 )
 
 func TestLoadChat(t *testing.T) {
@@ -35,4 +37,27 @@ func TestLoadChat(t *testing.T) {
 		_, err := config.LoadChat()
 		require.Error(t, err)
 	}
+}
+
+func FuzzChatRequestTimeout(f *testing.F) {
+	for _, input := range []string{"", "10s", "0s", "bad", "-1s", "1ns"} {
+		f.Add(input)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		t.Setenv("CHAT_DATABASE_URL", "postgres://test")
+		t.Setenv("CHAT_REQUEST_TIMEOUT", input)
+		cfg, err := config.LoadChat()
+		parsed, parseErr := time.ParseDuration(input)
+		if input == "" {
+			require.NoError(t, err)
+			require.Equal(t, 10*time.Second, cfg.RequestTimeout)
+			return
+		}
+		if parseErr != nil || parsed <= 0 {
+			require.Error(t, err)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, parsed, cfg.RequestTimeout)
+	})
 }
