@@ -36,7 +36,7 @@ func TestCatchUpCursor(t *testing.T) {
 	}
 	for _, input := range []string{"", "00", "01", "-0", "-1", "+1", " 1", "1 ", "9223372036854775808", "x", "1e3"} {
 		_, err := CatchUpCursor(input)
-		require.ErrorIs(t, err, ErrInvalidCursor, input)
+		require.ErrorIs(t, err, ErrInvalidCatchUp, input)
 	}
 }
 

@@ -34,7 +34,7 @@ func TestMessageRPC_VerifiedIdentityAndMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, a, got.GetMessage().GetSenderId())
 	require.Equal(t, key, got.GetMessage().GetClientMessageId())
-	messages.EXPECT().ListMessages(ctx, a, room, "5", 1).Return(&service.MessagePage{Messages: []*domain.Message{want}, NextCursor: "3"}, nil).Once()
+	messages.EXPECT().History(ctx, a, room, "5", "", 1).Return(&service.MessagePage{Messages: []*domain.Message{want}, NextCursor: "3"}, nil).Once()
 	page, err := h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, Cursor: "5", Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, page.Messages, 1)
@@ -53,6 +53,7 @@ func TestMessageRPC_SafeErrors(t *testing.T) {
 		{domain.ErrMessageConflict, codes.AlreadyExists}, {domain.ErrNotFound, codes.NotFound},
 		{validator.ErrInvalidText, codes.InvalidArgument}, {validator.ErrInvalidCursor, codes.InvalidArgument},
 		{service.ErrInvalidLimit, codes.InvalidArgument}, {context.DeadlineExceeded, codes.DeadlineExceeded},
+		{validator.ErrInvalidCatchUp, codes.InvalidArgument}, {service.ErrCatchUpWithCursor, codes.InvalidArgument},
 	} {
 		t.Run(tc.err.Error(), func(t *testing.T) {
 			messages, auth := mocks.NewMockMessageService(t), mocks.NewMockIdentityClient(t)
@@ -62,7 +63,7 @@ func TestMessageRPC_SafeErrors(t *testing.T) {
 			messages.EXPECT().SendMessage(mock.Anything, a, "room", "key", "text").Return(nil, tc.err).Once()
 			_, err := h.SendMessage(authorizedContext(), &chatv1.SendMessageRequest{RoomId: "room", ClientMessageId: "key", Text: "text"})
 			require.Equal(t, tc.code, status.Code(err))
-			messages.EXPECT().ListMessages(mock.Anything, a, "room", "", 0).Return(nil, tc.err).Once()
+			messages.EXPECT().History(mock.Anything, a, "room", "", "", 0).Return(nil, tc.err).Once()
 			_, err = h.ListMessages(authorizedContext(), &chatv1.ListMessagesRequest{RoomId: "room"})
 			require.Equal(t, tc.code, status.Code(err))
 		})
@@ -76,19 +77,22 @@ func TestMessageRPC_CatchUpAfterPositionWithSequences(t *testing.T) {
 	ctx := authorizedContext()
 	auth.EXPECT().ValidateToken(ctx, mock.Anything).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: a}, nil).Times(4)
 	missed := &domain.Message{ID: uuid.NewString(), RoomID: room, SenderID: a, Text: "missed", Sequence: 8, CreatedAt: time.Now()}
-	messages.EXPECT().CatchUp(ctx, a, room, "7", 2).Return(&service.MessagePage{Messages: []*domain.Message{missed}, NextCursor: "8"}, nil).Once()
+	messages.EXPECT().History(ctx, a, room, "", "7", 2).Return(&service.MessagePage{Messages: []*domain.Message{missed}, NextCursor: "8"}, nil).Once()
 	page, err := h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, After: "7", Limit: 2})
 	require.NoError(t, err)
 	require.Equal(t, int64(8), page.GetMessages()[0].GetSequence())
 	require.Equal(t, "8", page.GetNextCursor())
-	messages.EXPECT().CatchUp(ctx, a, room, "0", 0).Return(nil, validator.ErrInvalidCursor).Once()
+	messages.EXPECT().History(ctx, a, room, "", "0", 0).Return(nil, validator.ErrInvalidCatchUp).Once()
 	_, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, After: "0"})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	messages.EXPECT().ListMessages(ctx, a, room, "", 0).Return(&service.MessagePage{Messages: []*domain.Message{missed}}, nil).Once()
+	require.Equal(t, "invalid catch-up position", status.Convert(err).Message())
+	messages.EXPECT().History(ctx, a, room, "", "", 0).Return(&service.MessagePage{Messages: []*domain.Message{missed}}, nil).Once()
 	page, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room})
 	require.NoError(t, err)
 	require.Equal(t, int64(8), page.GetMessages()[0].GetSequence())
-	// One position per request: a cursor and a catch-up position contradict each other.
+	// One position per request: the service rejects a cursor with a catch-up position.
+	messages.EXPECT().History(ctx, a, room, "9", "7", 0).Return(nil, service.ErrCatchUpWithCursor).Once()
 	_, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, Cursor: "9", After: "7"})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Equal(t, "cursor and after are mutually exclusive", status.Convert(err).Message())
 }
