@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -156,6 +158,55 @@ func TestUserRepository_SearchByUsernamePrefix(t *testing.T) {
 	for _, prefix := range []string{"%", `\`, "zz"} {
 		require.Empty(t, search(prefix, uuid.NewString(), 10), prefix)
 	}
+}
+
+// searchQueryRecorder captures the SQL and arguments of the user search so
+// the test can EXPLAIN exactly what the repository sends.
+type searchQueryRecorder struct {
+	sql  string
+	args []any
+}
+
+func (r *searchQueryRecorder) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "FROM users") && strings.Contains(data.SQL, "ORDER BY") {
+		r.sql, r.args = data.SQL, data.Args
+	}
+	return ctx
+}
+
+func (*searchQueryRecorder) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestUserRepository_SearchByUsernamePrefix_UsesPrefixIndex(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+
+	recorder := &searchQueryRecorder{}
+	config := pool.Config()
+	config.ConnConfig.Tracer = recorder
+	traced, err := pgxpool.NewWithConfig(ctx, config)
+	require.NoError(t, err)
+	t.Cleanup(traced.Close)
+
+	_, err = repository.NewUserRepository(traced).SearchByUsernamePrefix(ctx, "Bo_", uuid.NewString(), 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, recorder.sql)
+
+	// On a small table the planner prefers a sequential scan, so rule it out
+	// to see whether the index can serve the search at all.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	_, err = tx.Exec(ctx, "SET LOCAL enable_seqscan = off")
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, "EXPLAIN "+recorder.sql, recorder.args...)
+	require.NoError(t, err)
+	lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	require.NoError(t, err)
+	plan := strings.Join(lines, "\n")
+
+	require.Contains(t, plan, "users_username_lower_idx", plan)
+	// The prefix is matched by the index range alone, without a LIKE recheck.
+	require.NotContains(t, plan, "~~", plan)
 }
 
 func TestMigrate_Idempotent(t *testing.T) {
