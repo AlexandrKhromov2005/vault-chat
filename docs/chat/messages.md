@@ -16,7 +16,7 @@ including when their history is empty. Public channels still require invitation.
 
 The client generates a nonzero UUID once and keeps it for retries. The server
 returns `200` with `message_id`, `room_id`, `sender_id`, `client_message_id`,
-`text` and `created_at`. A retry by the same sender in the same room returns
+`text`, `sequence` and `created_at`. A retry by the same sender in the same room returns
 the original ID and timestamp. Changing the text under that key returns `409`
 (`ALREADY_EXISTS` in gRPC); another sender or room has a separate key namespace.
 Membership is checked again on every retry.
@@ -45,6 +45,26 @@ last returned message. They are positions, not credentials or a snapshot token.
 New sends after the first page do not displace older pages; fetch the first page
 again to see new messages. Changing rooms starts a separate history.
 
+## Catch-up after a position
+
+`sequence` numbers the committed messages of a room 1, 2, 3, ... without
+gaps: a failed write rolls its number back and a retry reuses the original
+message. A client that has seen sequence `n` fetches what it missed with:
+
+```
+GET /api/v1/rooms/{room_id}/messages?after=n&limit=100
+```
+
+The page holds messages with a greater sequence, oldest first. A nonempty
+`next_cursor` is the `after` value of the next page; an empty one means the
+client has reached the newest message at the time of the read. `after=0`
+starts at the first message. `after` must be `0` or a canonical positive
+decimal and cannot be combined with `cursor`, even an empty one. Membership is
+checked on every page, so a removed member gets `404` like a nonmember. The
+gRPC equivalent is the `after` field of `ListMessages`.
+
+## Consistency
+
 Sends take a room row lock and commit the message and sequence together.
 This prevents a cursor from skipping a lower-sequence message whose transaction
 has not yet committed. Failed writes roll back the sequence; retries do not
@@ -53,5 +73,5 @@ snapshot. The unique `(room_id, sequence)` index supports history pagination.
 The room lock serializes sends to one room; this is a deliberate initial
 throughput tradeoff, not a guarantee of large-channel scalability.
 
-There are no attachments, edits, deletion or WebSocket delivery yet. History
-is available by request; sending a message does not publish a NATS event.
+There are no attachments, edits or deletion yet. History is available by
+request; sending a message does not publish a NATS event.
