@@ -41,7 +41,8 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 **Requirements:**
 - Go `1.26+` (the `toolchain go1.27.2` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
 - `xmake` ([installation](https://xmake.io/#/guide/installation))
-- `golangci-lint` ([installation](https://golangci-lint.run/usage/install/))
+- `golangci-lint` v2.14.0+ built with Go 1.27+ ([installation](https://golangci-lint.run/usage/install/)); older releases or binaries built with an earlier Go fail to load this module
+- `govulncheck` built with Go 1.27+ (`go install` picks the toolchain from the tool's own `go.mod`, so set it explicitly: `GOTOOLCHAIN=go1.27.2 go install golang.org/x/vuln/cmd/govulncheck@latest`)
 - `git` with `user.name` and `user.email` configured
 
 **Install dependencies and hooks:**
