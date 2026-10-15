@@ -64,3 +64,36 @@ func TestMessages_HistoryPages(t *testing.T) {
 	_, err = svc.ListMessages(ctx, a, room, "", 1)
 	require.True(t, errors.Is(err, context.Canceled))
 }
+
+func TestMessages_CatchUpPagesOldestFirst(t *testing.T) {
+	ctx := context.Background()
+	a, room := uuid.NewString(), uuid.NewString()
+	repo := mocks.NewMockMessageRepository(t)
+	svc := service.NewMessageService(repo)
+	rows := []*domain.Message{{Sequence: 4}, {Sequence: 5}, {Sequence: 6}}
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(3), 3).Return(rows, nil).Once()
+	page, err := svc.CatchUp(ctx, a, room, "3", 2)
+	require.NoError(t, err)
+	require.Equal(t, rows[:2], page.Messages)
+	require.Equal(t, "5", page.NextCursor)
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(5), 3).Return(rows[2:], nil).Once()
+	page, err = svc.CatchUp(ctx, a, room, page.NextCursor, 2)
+	require.NoError(t, err)
+	require.Equal(t, rows[2:], page.Messages)
+	require.Empty(t, page.NextCursor)
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(0), 51).Return([]*domain.Message{}, nil).Once()
+	page, err = svc.CatchUp(ctx, a, room, "0", 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Messages)
+	require.Empty(t, page.NextCursor)
+	for _, args := range []struct {
+		actor, room, after string
+		limit              int
+	}{{"bad", room, "0", 1}, {a, "bad", "0", 1}, {a, room, "", 1}, {a, room, "01", 1}, {a, room, "-1", 1}, {a, room, "0", 101}} {
+		_, err := svc.CatchUp(ctx, args.actor, args.room, args.after, args.limit)
+		require.Error(t, err)
+	}
+	repo.EXPECT().ListMessagesAfter(mock.Anything, room, a, int64(0), 2).Return(nil, domain.ErrNotFound).Once()
+	_, err = svc.CatchUp(ctx, a, room, "0", 1)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+}
