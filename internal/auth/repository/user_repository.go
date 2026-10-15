@@ -77,6 +77,40 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 	return r.scanUser(r.pool.QueryRow(ctx, query, id))
 }
 
+// likeEscaper makes LIKE metacharacters match literally under the default
+// backslash escape.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// SearchByUsernamePrefix returns at most limit users other than excludeID
+// whose username starts with prefix, ignoring case. Only ID and Username are
+// loaded. Users are ordered by lowercased username in byte order, which puts
+// an exact match first, then by username.
+func (r *UserRepository) SearchByUsernamePrefix(
+	ctx context.Context,
+	prefix, excludeID string,
+	limit int,
+) ([]*domain.User, error) {
+	// The COLLATE "C" expression matches users_username_lower_idx.
+	const query = `SELECT id::text, username FROM users
+		WHERE lower(username) COLLATE "C" LIKE $1 AND id <> $2::uuid
+		ORDER BY lower(username) COLLATE "C", username COLLATE "C"
+		LIMIT $3`
+
+	pattern := likeEscaper.Replace(strings.ToLower(prefix)) + "%"
+	rows, err := r.pool.Query(ctx, query, pattern, excludeID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search users: %w", err)
+	}
+	users, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*domain.User, error) {
+		var user domain.User
+		return &user, row.Scan(&user.ID, &user.Username)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan users: %w", err)
+	}
+	return users, nil
+}
+
 func (r *UserRepository) scanUser(row pgx.Row) (*domain.User, error) {
 	var user domain.User
 	err := row.Scan(&user.ID, &user.Email, &user.Username,
