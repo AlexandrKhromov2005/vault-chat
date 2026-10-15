@@ -124,6 +124,40 @@ func TestUserRepository_GetByID(t *testing.T) {
 	require.True(t, errors.Is(err, repository.ErrNotFound), "expected ErrNotFound, got %v", err)
 }
 
+func TestUserRepository_SearchByUsernamePrefix(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	ids := map[string]string{}
+	for _, name := range []string{"bobby", "Bob", "bob", "bo_b", "boxb", "bob-x", "alice", "BOBCAT"} {
+		user := newTestUser()
+		user.Username = name
+		require.NoError(t, repo.Create(ctx, user))
+		ids[name] = user.ID
+	}
+	search := func(prefix, excludeID string, limit int) []string {
+		t.Helper()
+		users, err := repo.SearchByUsernamePrefix(ctx, prefix, excludeID, limit)
+		require.NoError(t, err)
+		names := []string{}
+		for _, user := range users {
+			require.Equal(t, ids[user.Username], user.ID)
+			require.Empty(t, user.Email)
+			require.Empty(t, user.PasswordHash)
+			names = append(names, user.Username)
+		}
+		return names
+	}
+
+	// Case-insensitive, exact matches first, the excluded caller is skipped.
+	require.Equal(t, []string{"Bob", "bob", "bob-x", "bobby"}, search("BOB", ids["BOBCAT"], 10))
+	require.Equal(t, []string{"bo_b", "Bob"}, search("b", uuid.NewString(), 2))
+	// LIKE metacharacters are literal.
+	require.Equal(t, []string{"bo_b"}, search("bo_", uuid.NewString(), 10))
+	for _, prefix := range []string{"%", `\`, "zz"} {
+		require.Empty(t, search(prefix, uuid.NewString(), 10), prefix)
+	}
+}
+
 func TestMigrate_Idempotent(t *testing.T) {
 	dsn := os.Getenv("VAULT_CHAT_TEST_DATABASE_URL")
 	if dsn == "" {

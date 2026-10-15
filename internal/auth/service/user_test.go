@@ -53,3 +53,52 @@ func TestGetUser_TargetErrors(t *testing.T) {
 	require.ErrorIs(t, err, validator.ErrInvalidUserID)
 	require.Empty(t, f.repo.Calls)
 }
+
+func TestSearchUsers_ExcludesCallerAndAppliesDefaultLimit(t *testing.T) {
+	ctx := context.Background()
+	f := newServiceFixture(t)
+	users := []*domain.User{{ID: uuid.NewString(), Username: "bob"}}
+	f.tokens.EXPECT().Validate("access").Return(&jwt.Claims{TokenType: jwt.AccessToken, UserID: "caller"}, nil).Once()
+	f.repo.EXPECT().SearchByUsernamePrefix(ctx, "Bo", "caller", 20).Return(users, nil).Once()
+	got, err := f.svc.SearchUsers(ctx, "access", "Bo", 0)
+	require.NoError(t, err)
+	require.Equal(t, users, got)
+}
+
+func TestSearchUsers_RejectsBeforeLookup(t *testing.T) {
+	access := &jwt.Claims{TokenType: jwt.AccessToken, UserID: "caller"}
+	cases := []struct {
+		name, token, query string
+		limit              int32
+		claims             *jwt.Claims
+		err                error
+	}{
+		{"no token", "", "bo", 0, nil, service.ErrInvalidToken},
+		{"refresh token", "refresh", "bo", 0, &jwt.Claims{TokenType: jwt.RefreshToken}, service.ErrInvalidToken},
+		{"wildcard query", "access", "b%", 0, access, validator.ErrInvalidUsernameQuery},
+		{"empty query", "access", "", 0, access, validator.ErrInvalidUsernameQuery},
+		{"single character query", "access", "b", 0, access, validator.ErrInvalidUsernameQuery},
+		{"limit too large", "access", "bo", 51, access, validator.ErrInvalidSearchLimit},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newServiceFixture(t)
+			if tc.claims != nil {
+				f.tokens.EXPECT().Validate(tc.token).Return(tc.claims, nil).Once()
+			}
+			_, err := f.svc.SearchUsers(context.Background(), tc.token, tc.query, tc.limit)
+			require.ErrorIs(t, err, tc.err)
+			require.Empty(t, f.repo.Calls)
+		})
+	}
+}
+
+func TestSearchUsers_WrapsStorageFailure(t *testing.T) {
+	ctx := context.Background()
+	f := newServiceFixture(t)
+	failure := errors.New("database down")
+	f.tokens.EXPECT().Validate("access").Return(&jwt.Claims{TokenType: jwt.AccessToken, UserID: "caller"}, nil).Once()
+	f.repo.EXPECT().SearchByUsernamePrefix(ctx, "bo", "caller", 5).Return(nil, failure).Once()
+	_, err := f.svc.SearchUsers(ctx, "access", "bo", 5)
+	require.ErrorIs(t, err, failure)
+}
