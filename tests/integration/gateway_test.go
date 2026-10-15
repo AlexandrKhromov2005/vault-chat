@@ -75,9 +75,16 @@ func newAuthConn(t *testing.T, dialer func(context.Context, string) (net.Conn, e
 
 func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32, chatConns ...*grpc.ClientConn) *httptest.Server {
 	t.Helper()
+	gateway := httptest.NewServer(router.New(gatewayDeps(t, conn, miniredis.RunT(t).Addr(), burst, chatConns...)))
+	t.Cleanup(gateway.Close)
+	return gateway
+}
 
-	redisServer := miniredis.RunT(t)
-	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+// gatewayDeps wires the gateway like cmd/gateway, rate limiting through the
+// Redis at redisAddr.
+func gatewayDeps(t *testing.T, conn *grpc.ClientConn, redisAddr string, burst uint32, chatConns ...*grpc.ClientConn) router.Deps {
+	t.Helper()
+	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
 	t.Cleanup(func() { _ = redisClient.Close() })
 	limiter, err := ratelimit.NewRedisLimiter(redisClient, 600, burst)
 	require.NoError(t, err)
@@ -88,7 +95,7 @@ func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32, chatConns .
 	if len(chatConns) > 0 {
 		chat = handler.NewChatHandler(chatv1.NewChatServiceClient(chatConns[0]), logger)
 	}
-	gateway := httptest.NewServer(router.New(router.Deps{
+	return router.Deps{
 		Auth:           handler.NewAuthHandler(authClient, logger),
 		Chat:           chat,
 		Health:         handler.NewHealth(nil, logger),
@@ -97,9 +104,7 @@ func startGateway(t *testing.T, conn *grpc.ClientConn, burst uint32, chatConns .
 		Logger:         logger,
 		MaxBodyBytes:   1 << 20,
 		RequestTimeout: 5 * time.Second,
-	}))
-	t.Cleanup(gateway.Close)
-	return gateway
+	}
 }
 
 // call sends a request to the gateway and decodes the JSON response body, if

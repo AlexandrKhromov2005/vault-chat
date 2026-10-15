@@ -27,7 +27,9 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 )
 
-func startChat(t *testing.T, authConn *grpc.ClientConn) (*grpc.ClientConn, func() []string) {
+// startChat serves Chat over an in-memory connection; options configure its
+// repository, e.g. to publish events.
+func startChat(t *testing.T, authConn *grpc.ClientConn, options ...repository.Option) (*grpc.ClientConn, func() []string) {
 	t.Helper()
 	pool := newChatPool(t)
 	listener := bufconn.Listen(1 << 20)
@@ -39,7 +41,8 @@ func startChat(t *testing.T, authConn *grpc.ClientConn) (*grpc.ClientConn, func(
 		mu.Unlock()
 		return next(ctx, req)
 	}))
-	h := chathandler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), service.NewMessageService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	rooms := repository.NewRoomRepository(pool, options...)
+	h := chathandler.NewGRPCHandler(service.NewService(rooms), service.NewMessageService(rooms), authv1.NewAuthServiceClient(authConn), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	chatv1.RegisterChatServiceServer(server, h)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
