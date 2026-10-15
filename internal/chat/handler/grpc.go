@@ -35,8 +35,7 @@ type RoomService interface {
 // MessageService is the message business logic consumed by the gRPC handler.
 type MessageService interface {
 	SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
-	ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
-	CatchUp(context.Context, string, string, string, int) (*service.MessagePage, error)
+	History(context.Context, string, string, string, string, int) (*service.MessagePage, error)
 }
 
 // IdentityClient is the authenticated Auth directory consumed by Chat.
@@ -186,6 +185,10 @@ func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 		return status.Error(codes.InvalidArgument, "invalid message text")
 	case errors.Is(err, validator.ErrInvalidCursor):
 		return status.Error(codes.InvalidArgument, "invalid history cursor")
+	case errors.Is(err, validator.ErrInvalidCatchUp):
+		return status.Error(codes.InvalidArgument, "invalid catch-up position")
+	case errors.Is(err, service.ErrCatchUpWithCursor):
+		return status.Error(codes.InvalidArgument, "cursor and after are mutually exclusive")
 	case errors.Is(err, service.ErrInvalidLimit):
 		return status.Error(codes.InvalidArgument, "history limit must be 1–100")
 	case errors.Is(err, validator.ErrInvalidRoomCursor):

@@ -9,8 +9,12 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 )
 
-// ErrInvalidLimit rejects history requests outside the supported page size.
-var ErrInvalidLimit = errors.New("chat: history limit must be 1–100")
+var (
+	// ErrInvalidLimit rejects history requests outside the supported page size.
+	ErrInvalidLimit = errors.New("chat: history limit must be 1–100")
+	// ErrCatchUpWithCursor rejects a request for older history and catch-up at once.
+	ErrCatchUpWithCursor = errors.New("chat: cursor and after are mutually exclusive")
+)
 
 // MessageRepository must authorize each read/write atomically with membership.
 type MessageRepository interface {
@@ -81,6 +85,20 @@ func (s *MessageService) ListMessages(ctx context.Context, actorID, roomID, curs
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
 	return messagePage(messages, limit), nil
+}
+
+// History reads one page from a single position: older history before cursor,
+// or, when after is set, catch-up after it. A request with both is rejected
+// because the positions select opposite directions.
+func (s *MessageService) History(ctx context.Context, actorID, roomID, cursor, after string, limit int) (*MessagePage, error) {
+	switch {
+	case after != "" && cursor != "":
+		return nil, ErrCatchUpWithCursor
+	case after != "":
+		return s.CatchUp(ctx, actorID, roomID, after, limit)
+	default:
+		return s.ListMessages(ctx, actorID, roomID, cursor, limit)
+	}
 }
 
 // CatchUp returns messages after a room position, oldest first, so a client can

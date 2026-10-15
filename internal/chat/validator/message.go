@@ -13,6 +13,8 @@ var (
 	ErrInvalidText = errors.New("chat: invalid message text")
 	// ErrInvalidCursor rejects noncanonical history positions.
 	ErrInvalidCursor = errors.New("chat: invalid history cursor")
+	// ErrInvalidCatchUp rejects noncanonical catch-up positions.
+	ErrInvalidCatchUp = errors.New("chat: invalid catch-up position")
 )
 
 // MessageText preserves whitespace but requires visible content and at most
@@ -46,7 +48,7 @@ func HistoryCursor(input string) (int64, error) {
 func CatchUpCursor(input string) (int64, error) {
 	value, err := strconv.ParseInt(input, 10, 64)
 	if err != nil || value < 0 || FormatHistoryCursor(value) != input {
-		return 0, ErrInvalidCursor
+		return 0, ErrInvalidCatchUp
 	}
 	return value, nil
 }
