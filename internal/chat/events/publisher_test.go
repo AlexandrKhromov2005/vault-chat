@@ -21,6 +21,7 @@ import (
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/events"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
 func TestEncode_EveryKind(t *testing.T) {
@@ -106,7 +107,7 @@ func subscribe(t *testing.T, client *redis.Client, users ...string) *redis.PubSu
 	t.Helper()
 	channels := make([]string, 0, len(users))
 	for _, user := range users {
-		channels = append(channels, events.UserChannel(user))
+		channels = append(channels, eventbus.UserChannel(user))
 	}
 	subscription := client.Subscribe(context.Background(), channels...)
 	t.Cleanup(func() { _ = subscription.Close() })
