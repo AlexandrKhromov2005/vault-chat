@@ -9,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
@@ -101,4 +102,30 @@ func TestRedisStream_FailedSubscriptionIsNotRestored(t *testing.T) {
 	require.Equal(t, int64(1), client.Publish(ctx, eventbus.UserChannel("bob"), "y").Val())
 	require.Equal(t, [2]string{"bob", "y"}, <-sink.delivered)
 	require.Empty(t, sink.interrupted)
+}
+
+func TestRedisStream_IdlesPastTheClientReadTimeout(t *testing.T) {
+	// cmd/gateway shares the rate limiter's client, whose read timeout is a
+	// fraction of a second; waiting for events must not be subject to it.
+	client := ratelimit.NewRedisClient(miniredis.RunT(t).Addr(), "")
+	t.Cleanup(func() { _ = client.Close() })
+	stream := realtime.NewRedisStream(client)
+	sink := newRecordingSink()
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = stream.Run(ctx, sink)
+	}()
+	defer func() {
+		cancel()
+		<-stopped
+	}()
+	require.NoError(t, stream.Subscribe(ctx, "alice"))
+	// Were the read timeout applied, the idle connection would be dropped and
+	// resubscribed, which interrupts alice, within twice that timeout.
+	require.Never(t, func() bool { return len(sink.interrupted) > 0 }, 2*client.Options().ReadTimeout, 10*time.Millisecond)
+	require.Equal(t, int64(1), client.Publish(ctx, eventbus.UserChannel("alice"), "event").Val())
+	require.Equal(t, [2]string{"alice", "event"}, <-sink.delivered)
+	require.Empty(t, sink.interrupted, "the idle connection was dropped and resubscribed")
 }
