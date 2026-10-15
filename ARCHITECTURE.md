@@ -386,6 +386,7 @@ vault-chat/
 │   └── shared/
 │       ├── logger/       # slog wrapper
 │       ├── config/       # Env/config parsing
+│       ├── eventbus/     # Pub/Sub channel names shared by Chat and Gateway
 │       ├── grpc/         # gRPC client/server helpers
 │       ├── jwt/          # JWT utilities
 │       ├── requestid/    # Correlation id across HTTP and gRPC

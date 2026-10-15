@@ -7,7 +7,9 @@ instances relay these events to their connected clients.
 
 After a transaction commits, Chat publishes a protobuf `chat.v1.Event`
 (`api/proto/chat/v1/events.proto`) to the Redis Pub/Sub channel
-`chat:user:<user_id>` of each recipient:
+`chat:user:<user_id>` of each recipient. The channel names live in
+`internal/shared/eventbus`, so Chat and Gateway agree on them without
+importing each other:
 
 | Kind | Published when | Recipients |
 |---|---|---|
