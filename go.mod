@@ -2,6 +2,8 @@ module github.com/AlexandrKhromov2005/vault-chat
 
 go 1.23.0
 
+toolchain go1.27.2
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
