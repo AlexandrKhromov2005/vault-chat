@@ -157,8 +157,12 @@ docker compose -f deployments/docker-compose.yml down -v   # остановит�
 Как устроены образы:
 
 - Один `Dockerfile` для всех сервисов: сервис выбирается аргументом сборки
-  `SERVICE`, версия Go — аргументом `GO_VERSION` (держите её равной `go.mod`).
-  Бинарники собираются статически (`CGO_ENABLED=0`, `-trimpath`).
+  `SERVICE`, версия Go — аргументом `GO_VERSION` (по умолчанию 1.27.2; держите
+  её равной строке `toolchain` в `go.mod`). Бинарники собираются статически
+  (`CGO_ENABLED=0`, `-trimpath`).
+- Базовые образы закреплены: сборочный — точной версией Go и Alpine
+  (`golang:1.27.2-alpine3.24`), runtime — по digest. Новый digest берётся из
+  `docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot`.
 - Runtime-образ — `distroless/static` без shell, запуск от непривилегированного
   пользователя (uid 65532), корневая ФС только для чтения.
 - Healthcheck выполняет встроенный бинарник `cmd/healthcheck`: для Auth и Chat —
