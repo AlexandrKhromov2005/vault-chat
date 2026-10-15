@@ -68,3 +68,27 @@ func TestMessageRPC_SafeErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestMessageRPC_CatchUpAfterPositionWithSequences(t *testing.T) {
+	messages, auth := mocks.NewMockMessageService(t), mocks.NewMockIdentityClient(t)
+	h := handler.NewGRPCHandler(nil, messages, auth, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	a, room := uuid.NewString(), uuid.NewString()
+	ctx := authorizedContext()
+	auth.EXPECT().ValidateToken(ctx, mock.Anything).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: a}, nil).Times(4)
+	missed := &domain.Message{ID: uuid.NewString(), RoomID: room, SenderID: a, Text: "missed", Sequence: 8, CreatedAt: time.Now()}
+	messages.EXPECT().CatchUp(ctx, a, room, "7", 2).Return(&service.MessagePage{Messages: []*domain.Message{missed}, NextCursor: "8"}, nil).Once()
+	page, err := h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, After: "7", Limit: 2})
+	require.NoError(t, err)
+	require.Equal(t, int64(8), page.GetMessages()[0].GetSequence())
+	require.Equal(t, "8", page.GetNextCursor())
+	messages.EXPECT().CatchUp(ctx, a, room, "0", 0).Return(nil, validator.ErrInvalidCursor).Once()
+	_, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, After: "0"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	messages.EXPECT().ListMessages(ctx, a, room, "", 0).Return(&service.MessagePage{Messages: []*domain.Message{missed}}, nil).Once()
+	page, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room})
+	require.NoError(t, err)
+	require.Equal(t, int64(8), page.GetMessages()[0].GetSequence())
+	// One position per request: a cursor and a catch-up position contradict each other.
+	_, err = h.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: room, Cursor: "9", After: "7"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
