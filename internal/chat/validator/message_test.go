@@ -28,6 +28,18 @@ func TestHistoryCursor(t *testing.T) {
 	}
 }
 
+func TestCatchUpCursor(t *testing.T) {
+	for input, want := range map[string]int64{"0": 0, "1": 1, "9223372036854775807": 9223372036854775807} {
+		got, err := CatchUpCursor(input)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+	for _, input := range []string{"", "00", "01", "-0", "-1", "+1", " 1", "1 ", "9223372036854775808", "x", "1e3"} {
+		_, err := CatchUpCursor(input)
+		require.ErrorIs(t, err, ErrInvalidCursor, input)
+	}
+}
+
 func FuzzMessageText(f *testing.F) {
 	f.Add("hello\nworld")
 	f.Add("\x00")
@@ -51,5 +63,20 @@ func FuzzHistoryCursor(f *testing.F) {
 			require.Positive(t, value)
 			require.Equal(t, input, FormatHistoryCursor(value))
 		}
+	})
+}
+
+func FuzzCatchUpCursor(f *testing.F) {
+	f.Add("0")
+	f.Add("17")
+	f.Add("007")
+	f.Fuzz(func(t *testing.T, input string) {
+		value, err := CatchUpCursor(input)
+		if err != nil {
+			require.Zero(t, value)
+			return
+		}
+		require.GreaterOrEqual(t, value, int64(0))
+		require.Equal(t, input, FormatHistoryCursor(value))
 	})
 }
