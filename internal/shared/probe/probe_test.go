@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -30,8 +31,10 @@ func TestHTTP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, http.MethodGet, r.Method)
-				require.Equal(t, "/health", r.URL.Path)
+				// The handler runs on a server goroutine, where require's
+				// FailNow must not be called; assert only marks the failure.
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/health", r.URL.Path)
 				if tt.status == http.StatusFound {
 					w.Header().Set("Location", "/elsewhere")
 				}
