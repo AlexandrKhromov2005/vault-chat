@@ -139,11 +139,18 @@ docker compose -f deployments/docker-compose.yml down      # остановит�
 docker compose -f deployments/docker-compose.yml down -v   # остановить и удалить данные
 ```
 
+Все порты публикуются только на `127.0.0.1`: PostgreSQL, Redis, NATS и MinIO
+используют учётные данные для разработки или работают без пароля, поэтому с
+других машин они недоступны. Gateway по умолчанию тоже слушает только
+loopback; чтобы открыть его в сети (например, для проверки с телефона в
+доверенной сети), задайте `GATEWAY_HOST_ADDR=0.0.0.0`.
+
 Если порт на хосте занят, переопределите его переменной окружения: например,
 `POSTGRES_HOST_PORT=55432 GATEWAY_HOST_PORT=18080 docker compose ... up -d`.
 
 | Переменная | Сервис | По умолчанию |
 |---|---|---|
+| `GATEWAY_HOST_ADDR` | Адрес хоста для порта Gateway | 127.0.0.1 |
 | `GATEWAY_HOST_PORT` | Gateway (HTTP) | 8080 |
 | `POSTGRES_HOST_PORT` | PostgreSQL Auth | 5432 |
 | `CHAT_POSTGRES_HOST_PORT` | PostgreSQL Chat | 5433 |

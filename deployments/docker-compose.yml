@@ -14,6 +14,12 @@ name: vault-chat
 # (for example when 5432 is already taken). Containers always talk to each
 # other through service names and container ports, so overrides never affect
 # the application configuration.
+#
+# Every published port is bound to 127.0.0.1: the databases, Redis, NATS and
+# MinIO use fixed development credentials or none at all and must not be
+# reachable from other machines. The gateway is the only service meant for
+# clients; set GATEWAY_HOST_ADDR=0.0.0.0 to expose it on all interfaces, for
+# example to test from another device on a trusted network.
 
 # Shared settings of the Go services. Images are distroless and run as a
 # non-root user; the services write nothing to disk, so the root filesystem
@@ -32,7 +38,7 @@ services:
       POSTGRES_PASSWORD: auth
       POSTGRES_DB: auth_db
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -48,7 +54,7 @@ services:
       POSTGRES_PASSWORD: chat
       POSTGRES_DB: chat_db
     ports:
-      - "${CHAT_POSTGRES_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:${CHAT_POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - chat_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -60,7 +66,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -78,8 +84,8 @@ services:
     image: nats:2.10-alpine
     command: ["-js", "-m", "8222"]
     ports:
-      - "${NATS_HOST_PORT:-4222}:4222"
-      - "${NATS_MONITOR_HOST_PORT:-8222}:8222"
+      - "127.0.0.1:${NATS_HOST_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_HOST_PORT:-8222}:8222"
     volumes:
       - natsdata:/data
     healthcheck:
@@ -96,8 +102,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "${MINIO_HOST_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -204,7 +210,7 @@ services:
       GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-}
       GATEWAY_LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-info}
     ports:
-      - "${GATEWAY_HOST_PORT:-8080}:8080"
+      - "${GATEWAY_HOST_ADDR:-127.0.0.1}:${GATEWAY_HOST_PORT:-8080}:8080"
     depends_on:
       auth:
         condition: service_healthy
