@@ -242,8 +242,5 @@ func (h *AuthHandler) User(w http.ResponseWriter, r *http.Request) {
 		h.backendError(w, r, "get_user", err)
 		return
 	}
-	response.JSON(w, http.StatusOK, struct {
-		UserID   string `json:"user_id"`
-		Username string `json:"username"`
-	}{profile.GetUserId(), profile.GetUsername()})
+	response.JSON(w, http.StatusOK, publicProfile{profile.GetUserId(), profile.GetUsername()})
 }
