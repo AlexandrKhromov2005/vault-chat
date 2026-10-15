@@ -23,6 +23,8 @@ type Deps struct {
 	CORSAllowedOrigins []string
 	MaxBodyBytes       int64
 	RequestTimeout     time.Duration
+	// Realtime serves WebSocket connections; nil disables the route.
+	Realtime http.Handler
 }
 
 // New returns the gateway's root handler.
@@ -32,7 +34,9 @@ type Deps struct {
 // are never rate limited. API routes (/api/) additionally run within the
 // request timeout and go through CORS, per-IP rate limiting, and the body
 // size limit; protected routes also require a valid access token and are
-// rate limited per user.
+// rate limited per user. The WebSocket route is long-lived, so it bypasses
+// the request timeout and body limit; its upgrade is rate limited per IP,
+// and the connection authenticates in-band and checks origins itself.
 func New(d Deps) http.Handler {
 	protected := func(h http.HandlerFunc) http.Handler {
 		return middleware.Chain(h,
@@ -68,6 +72,10 @@ func New(d Deps) http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("GET /health", d.Health.Live)
 	root.HandleFunc("GET /ready", d.Health.Ready)
+	if d.Realtime != nil {
+		// More specific than "/api/", so the API chain does not apply.
+		root.Handle("GET /api/v1/ws", middleware.Chain(d.Realtime, middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger)))
+	}
 	// Timeout comes first so that the whole request, rate limiting
 	// included, runs within one budget.
 	root.Handle("/api/", middleware.Chain(api,
