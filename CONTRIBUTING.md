@@ -39,7 +39,7 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 ### 2. Environment Setup
 
 **Requirements:**
-- Go `1.23+`
+- Go `1.26+` (the `toolchain go1.27.2` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
 - `xmake` ([installation](https://xmake.io/#/guide/installation))
 - `golangci-lint` ([installation](https://golangci-lint.run/usage/install/))
 - `git` with `user.name` and `user.email` configured
