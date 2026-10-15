@@ -36,6 +36,7 @@ type RoomService interface {
 type MessageService interface {
 	SendMessage(context.Context, string, string, string, string) (*domain.Message, error)
 	ListMessages(context.Context, string, string, string, int) (*service.MessagePage, error)
+	CatchUp(context.Context, string, string, string, int) (*service.MessagePage, error)
 }
 
 // IdentityClient is the authenticated Auth directory consumed by Chat.
