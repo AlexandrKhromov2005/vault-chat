@@ -61,7 +61,11 @@ client has reached the newest message at the time of the read. `after=0`
 starts at the first message. `after` must be `0` or a canonical positive
 decimal and cannot be combined with `cursor`, even an empty one. Membership is
 checked on every page, so a removed member gets `404` like a nonmember. The
-gRPC equivalent is the `after` field of `ListMessages`.
+gRPC equivalent is the `after` field of `ListMessages`; the Chat service
+rejects a noncanonical `after` ("invalid catch-up position") and a nonempty
+`cursor` together with `after` with `INVALID_ARGUMENT`. Gateway additionally
+rejects a `cursor` parameter next to `after` even when it is empty, which gRPC
+cannot distinguish from an absent cursor.
 
 ## Consistency
 
