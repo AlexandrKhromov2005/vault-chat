@@ -21,6 +21,7 @@ type ChatClient interface {
 	GetOrCreateDirect(context.Context, *chatv1.GetOrCreateDirectRequest, ...grpc.CallOption) (*chatv1.GetOrCreateDirectResponse, error)
 	CreateChannel(context.Context, *chatv1.CreateChannelRequest, ...grpc.CallOption) (*chatv1.CreateChannelResponse, error)
 	GetRoom(context.Context, *chatv1.GetRoomRequest, ...grpc.CallOption) (*chatv1.GetRoomResponse, error)
+	ListRooms(context.Context, *chatv1.ListRoomsRequest, ...grpc.CallOption) (*chatv1.ListRoomsResponse, error)
 	AddMember(context.Context, *chatv1.AddMemberRequest, ...grpc.CallOption) (*chatv1.AddMemberResponse, error)
 }
 

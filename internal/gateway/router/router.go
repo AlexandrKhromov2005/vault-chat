@@ -54,6 +54,7 @@ func New(d Deps) http.Handler {
 		api.Handle("GET /api/v1/rooms/{room_id}/messages", protected(d.Chat.Messages))
 		api.Handle("POST /api/v1/rooms/direct", protected(d.Chat.Direct))
 		api.Handle("POST /api/v1/rooms/channels", protected(d.Chat.CreateChannel))
+		api.Handle("GET /api/v1/rooms", protected(d.Chat.Rooms))
 		api.Handle("GET /api/v1/rooms/{room_id}", protected(d.Chat.Room))
 		api.Handle("PUT /api/v1/rooms/{room_id}/members/{user_id}", protected(d.Chat.AddMember))
 	}
