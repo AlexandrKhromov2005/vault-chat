@@ -370,6 +370,41 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/rooms/{room_id}/members:
+    get:
+      summary: List room members, ordered by user ID
+      description: Members only; absent rooms and nonmembers both receive 404. Direct dialogs list both participants.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/RoomID"}
+        - name: cursor
+          in: query
+          schema: {type: string, format: uuid}
+          description: Empty starts at the lowest user ID. Otherwise use next_cursor unchanged (lowercase canonical UUID).
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        "200":
+          description: Members and an exclusive next-page cursor; empty cursor means the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members, next_cursor]
+                properties:
+                  members:
+                    type: array
+                    items: {$ref: "#/components/schemas/Member"}
+                  next_cursor: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
   /api/v1/rooms/{room_id}/members/{user_id}:
     put:
       summary: Add an existing user to a channel as its owner
@@ -499,6 +534,12 @@ components:
         client_message_id: {type: string, format: uuid}
         text: {type: string, minLength: 1, maxLength: 4096}
         created_at: {type: string, format: date-time}
+    Member:
+      type: object
+      required: [user_id, joined_at]
+      properties:
+        user_id: {type: string, format: uuid}
+        joined_at: {type: string, format: date-time}
     PublicProfile:
       type: object
       required: [user_id, username]
