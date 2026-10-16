@@ -3,8 +3,8 @@
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
 internal room service, authenticated gRPC server (`cmd/chat`) and REST routes
 through Gateway.
-Room listing, member removal, ownership transfer and public discovery
-are subsequent increments.
+Member removal, ownership transfer and public discovery are subsequent
+increments.
 
 ## Identity boundary
 
@@ -52,18 +52,19 @@ mTLS remains a separate implementation task.
 
 ## Room list
 
-The internal room service lists the caller's rooms. Each item is the room
-metadata plus the time of the room's latest message, absent when the room has
-no messages. Only rooms with the caller's membership are listed.
+`ListRooms` in gRPC returns the caller's rooms as `RoomSummary` items. Each
+item is the room returned by the other room RPCs plus `last_message_at`, the
+time of the room's latest message, unset when the room has no messages. Only
+rooms with the caller's membership are listed.
 
 Rooms are ordered by activity, newest first, then by room ID descending.
 Activity is the later of the latest message and the caller's own enrollment.
 A channel the caller was just invited to therefore appears at the top even if
 it has been quiet for a long time; for other rooms activity starts at creation.
-The default limit is 50, explicit limits are 1–100. Each page returns the
-cursor of the next one; an empty next cursor means that the page reached the
-end at the time of the read. Noncanonical cursors and limits are rejected
-before storage is queried.
+The default limit is 50, explicit limits are 1–100. Request the next page with
+the returned `next_cursor` in `cursor`; an empty next cursor means that the
+page reached the end at the time of the read. Noncanonical cursors or limits
+return `INVALID_ARGUMENT`.
 
 Cursors are keyset positions `<activity Unix microseconds>_<room UUID>`,
 exclusive of the last returned room. Clients must treat them as opaque; they are
