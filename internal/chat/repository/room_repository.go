@@ -101,17 +101,8 @@ func (r *RoomRepository) AddChannelMember(ctx context.Context, roomID, actorID, 
 		return fmt.Errorf("begin channel enrollment: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM rooms
-  WHERE id=$1::uuid AND EXISTS (SELECT 1 FROM room_members WHERE room_id=rooms.id AND user_id=$2::uuid)
-  FOR UPDATE`, roomID, actorID))
-	if err != nil {
-		return fmt.Errorf("load managed room: %w", err)
-	}
-	// Compare UUID values rather than the caller's textual encoding.
-	owner, err := uuid.Parse(room.OwnerID)
-	actor, actorErr := uuid.Parse(actorID)
-	if room.Kind != domain.Channel || err != nil || actorErr != nil || owner != actor {
-		return domain.ErrForbidden
+	if _, err := lockOwnedChannel(ctx, tx, roomID, actorID); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO room_members (room_id, user_id)
   VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`, roomID, userID); err != nil {
@@ -121,6 +112,42 @@ func (r *RoomRepository) AddChannelMember(ctx context.Context, roomID, actorID, 
 		return fmt.Errorf("commit channel enrollment: %w", err)
 	}
 	return nil
+}
+
+// lockMemberRoom locks a room visible to the actor until the transaction ends,
+// serializing membership changes with sends and other membership changes.
+func lockMemberRoom(ctx context.Context, tx pgx.Tx, roomID, actorID string) (*domain.Room, error) {
+	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM rooms
+  WHERE id=$1::uuid AND EXISTS (SELECT 1 FROM room_members WHERE room_id=rooms.id AND user_id=$2::uuid)
+  FOR UPDATE`, roomID, actorID))
+	if err != nil {
+		return nil, fmt.Errorf("load managed room: %w", err)
+	}
+	return room, nil
+}
+
+// lockOwnedChannel locks a room and requires it to be a channel owned by the actor.
+func lockOwnedChannel(ctx context.Context, tx pgx.Tx, roomID, actorID string) (*domain.Room, error) {
+	room, err := lockMemberRoom(ctx, tx, roomID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	return room, requireOwner(room, actorID)
+}
+
+// requireOwner allows only the owner of a channel to manage its members.
+func requireOwner(room *domain.Room, actorID string) error {
+	if room.Kind != domain.Channel || !sameID(room.OwnerID, actorID) {
+		return domain.ErrForbidden
+	}
+	return nil
+}
+
+// sameID compares UUID values rather than the caller's textual encoding.
+func sameID(first, second string) bool {
+	a, err := uuid.Parse(first)
+	b, otherErr := uuid.Parse(second)
+	return err == nil && otherErr == nil && a == b
 }
 
 func scanRoom(row pgx.Row) (*domain.Room, error) {

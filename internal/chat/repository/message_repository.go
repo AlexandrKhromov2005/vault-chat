@@ -22,14 +22,7 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 		return nil, fmt.Errorf("begin message: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var sequence int64
-	err = tx.QueryRow(ctx, `SELECT message_sequence FROM rooms WHERE id=$1::uuid
- AND EXISTS (SELECT 1 FROM room_members WHERE room_id=rooms.id AND user_id=$2::uuid)
- FOR UPDATE`, roomID, actorID).Scan(&sequence)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
-	}
-	if err != nil {
+	if _, err := lockMemberRoom(ctx, tx, roomID, actorID); err != nil {
 		return nil, fmt.Errorf("authorize message: %w", err)
 	}
 	message, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages
@@ -47,6 +40,7 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 		return nil, fmt.Errorf("find message retry: %w", err)
 	}
 	// PostgreSQL checks overflow; the transaction rolls back on either write failing.
+	var sequence int64
 	err = tx.QueryRow(ctx, `UPDATE rooms SET message_sequence=message_sequence+1
  WHERE id=$1::uuid RETURNING message_sequence`, roomID).Scan(&sequence)
 	if err != nil {
