@@ -36,6 +36,19 @@ func TestListMembers_PagesByUserID(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
+func TestMembershipChanges_DelegateCanonicalIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := mocks.NewMockRoomRepository(t)
+	svc := service.NewService(repo)
+	actor, roomID, member := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	repo.EXPECT().RemoveChannelMember(ctx, roomID, actor, member).Return(domain.ErrOwnerMembership).Once()
+	require.ErrorIs(t, svc.RemoveMember(ctx, strings.ToUpper(actor), roomID, "urn:uuid:"+member), domain.ErrOwnerMembership)
+	repo.EXPECT().LeaveRoom(ctx, roomID, actor).Return(nil).Once()
+	require.NoError(t, svc.LeaveRoom(ctx, actor, strings.ToUpper(roomID)))
+	repo.EXPECT().LeaveRoom(ctx, roomID, member).Return(domain.ErrForbidden).Once()
+	require.ErrorIs(t, svc.LeaveRoom(ctx, member, roomID), domain.ErrForbidden)
+}
+
 func TestMemberOperations_InvalidInputsDoNotReachStorage(t *testing.T) {
 	id := uuid.NewString()
 	for _, tc := range []struct {
@@ -59,6 +72,11 @@ func TestMemberOperations_InvalidInputsDoNotReachStorage(t *testing.T) {
 			_, err := s.ListMembers(context.Background(), id, id, "", 101)
 			return err
 		}, service.ErrInvalidMemberLimit},
+		{"remove actor", func(s *service.Service) error { return s.RemoveMember(context.Background(), "bad", id, id) }, validator.ErrInvalidID},
+		{"remove room", func(s *service.Service) error { return s.RemoveMember(context.Background(), id, "bad", id) }, validator.ErrInvalidID},
+		{"remove user", func(s *service.Service) error { return s.RemoveMember(context.Background(), id, id, "bad") }, validator.ErrInvalidID},
+		{"leave actor", func(s *service.Service) error { return s.LeaveRoom(context.Background(), "bad", id) }, validator.ErrInvalidID},
+		{"leave room", func(s *service.Service) error { return s.LeaveRoom(context.Background(), id, "bad") }, validator.ErrInvalidID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := mocks.NewMockRoomRepository(t)

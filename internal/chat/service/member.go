@@ -48,3 +48,41 @@ func (s *Service) ListMembers(ctx context.Context, actorID, roomID, cursor strin
 	}
 	return page, nil
 }
+
+// RemoveMember asks storage to atomically verify ownership and remove another
+// member. The target is not resolved through Auth: removal must also work for
+// identities that no longer exist, and removing a nonmember is a no-op.
+func (s *Service) RemoveMember(ctx context.Context, actorID, roomID, userID string) error {
+	actor, err := validator.CanonicalID(actorID)
+	if err != nil {
+		return fmt.Errorf("removal actor: %w", err)
+	}
+	id, err := validator.CanonicalID(roomID)
+	if err != nil {
+		return fmt.Errorf("removal room: %w", err)
+	}
+	user, err := validator.CanonicalID(userID)
+	if err != nil {
+		return fmt.Errorf("removal user: %w", err)
+	}
+	if err := s.rooms.RemoveChannelMember(ctx, id, actor, user); err != nil {
+		return fmt.Errorf("remove member: %w", err)
+	}
+	return nil
+}
+
+// LeaveRoom removes the actor's own channel membership.
+func (s *Service) LeaveRoom(ctx context.Context, actorID, roomID string) error {
+	actor, err := validator.CanonicalID(actorID)
+	if err != nil {
+		return fmt.Errorf("leave actor: %w", err)
+	}
+	id, err := validator.CanonicalID(roomID)
+	if err != nil {
+		return fmt.Errorf("leave room: %w", err)
+	}
+	if err := s.rooms.LeaveRoom(ctx, id, actor); err != nil {
+		return fmt.Errorf("leave room: %w", err)
+	}
+	return nil
+}

@@ -23,6 +23,8 @@ type RoomRepository interface {
 	ListForMember(ctx context.Context, userID string, after domain.RoomPosition, limit int) ([]*domain.RoomSummary, error)
 	AddChannelMember(ctx context.Context, roomID, actorID, userID string) error
 	ListMembers(ctx context.Context, roomID, actorID, after string, limit int) ([]*domain.Member, error)
+	RemoveChannelMember(ctx context.Context, roomID, actorID, userID string) error
+	LeaveRoom(ctx context.Context, roomID, actorID string) error
 }
 
 // Service validates inputs and delegates atomic access checks to storage.

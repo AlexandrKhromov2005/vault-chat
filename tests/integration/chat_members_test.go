@@ -57,6 +57,73 @@ func TestChatMembers_ListedOnlyToMembersInUserOrder(t *testing.T) {
 	require.Len(t, page, 2)
 }
 
+func TestChatMembers_OwnerRemovesAndAccessEndsImmediately(t *testing.T) {
+	pool := newChatPool(t)
+	repo := repository.NewRoomRepository(pool)
+	ctx := context.Background()
+	owner, member, other, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	room, err := repo.CreateChannel(ctx, owner, "team", false)
+	require.NoError(t, err)
+	require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+	require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, other))
+	_, err = repo.SendMessage(ctx, room.ID, member, uuid.NewString(), "before removal")
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.RemoveChannelMember(ctx, room.ID, member, other), domain.ErrForbidden)
+	require.ErrorIs(t, repo.RemoveChannelMember(ctx, room.ID, outsider, member), domain.ErrNotFound)
+	require.ErrorIs(t, repo.RemoveChannelMember(ctx, room.ID, owner, owner), domain.ErrOwnerMembership)
+	require.NoError(t, repo.RemoveChannelMember(ctx, room.ID, owner, member))
+	require.NoError(t, repo.RemoveChannelMember(ctx, room.ID, owner, member))
+	require.NoError(t, repo.RemoveChannelMember(ctx, room.ID, owner, outsider))
+	_, err = repo.GetForMember(ctx, room.ID, member)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	_, err = repo.ListMessages(ctx, room.ID, member, 0, 10)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	_, err = repo.SendMessage(ctx, room.ID, member, uuid.NewString(), "after removal")
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	_, err = repo.ListMembers(ctx, room.ID, member, "", 10)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	rooms, err := repo.ListForMember(ctx, member, domain.RoomPosition{}, 10)
+	require.NoError(t, err)
+	require.Empty(t, rooms)
+	members, err := repo.ListMembers(ctx, room.ID, owner, "", 10)
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+	direct, err := repo.GetOrCreateDirect(ctx, owner, member)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.RemoveChannelMember(ctx, direct.ID, owner, member), domain.ErrForbidden)
+	_, err = repo.GetForMember(ctx, direct.ID, member)
+	require.NoError(t, err)
+}
+
+func TestChatMembers_LeaveChannelButNotDialogOrOwnership(t *testing.T) {
+	pool := newChatPool(t)
+	repo := repository.NewRoomRepository(pool)
+	ctx := context.Background()
+	owner, member, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	room, err := repo.CreateChannel(ctx, owner, "leaving", true)
+	require.NoError(t, err)
+	require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+	require.ErrorIs(t, repo.LeaveRoom(ctx, room.ID, owner), domain.ErrOwnerMembership)
+	require.ErrorIs(t, repo.LeaveRoom(ctx, room.ID, outsider), domain.ErrNotFound)
+	require.ErrorIs(t, repo.LeaveRoom(ctx, uuid.NewString(), member), domain.ErrNotFound)
+	require.NoError(t, repo.LeaveRoom(ctx, room.ID, member))
+	require.ErrorIs(t, repo.LeaveRoom(ctx, room.ID, member), domain.ErrNotFound)
+	_, err = repo.ListMessages(ctx, room.ID, member, 0, 10)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	_, err = repo.GetForMember(ctx, room.ID, owner)
+	require.NoError(t, err)
+	// A former member can be invited again.
+	require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+	_, err = repo.ListMessages(ctx, room.ID, member, 0, 10)
+	require.NoError(t, err)
+	direct, err := repo.GetOrCreateDirect(ctx, owner, member)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.LeaveRoom(ctx, direct.ID, member), domain.ErrForbidden)
+	members, err := repo.ListMembers(ctx, direct.ID, owner, "", 10)
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+}
+
 // behindRoomLock runs op while another transaction holds the room lock and has
 // already changed membership, and commits that change once op waits for the lock.
 func behindRoomLock(t *testing.T, pool *pgxpool.Pool, roomID, change string, args []any, op func() error) error {
@@ -121,6 +188,13 @@ func TestChatMembers_WaitersSeeMembershipCommittedBeforeTheLock(t *testing.T) {
 		})
 		require.ErrorIs(t, err, domain.ErrNotFound)
 		require.Zero(t, countSent(member))
+	})
+	t.Run("leave after removal", func(t *testing.T) {
+		require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+		err := behindRoomLock(t, pool, room.ID, remove, []any{room.ID, member}, func() error {
+			return repo.LeaveRoom(ctx, room.ID, member)
+		})
+		require.ErrorIs(t, err, domain.ErrNotFound)
 	})
 	t.Run("send after enrollment", func(t *testing.T) {
 		err := behindRoomLock(t, pool, room.ID, add, []any{room.ID, invited}, func() error {

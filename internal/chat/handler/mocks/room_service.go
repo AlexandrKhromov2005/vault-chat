@@ -255,6 +255,54 @@ func (_c *MockRoomService_GetRoom_Call) RunAndReturn(run func(context.Context, s
 	return _c
 }
 
+// LeaveRoom provides a mock function with given fields: _a0, _a1, _a2
+func (_m *MockRoomService) LeaveRoom(_a0 context.Context, _a1 string, _a2 string) error {
+	ret := _m.Called(_a0, _a1, _a2)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LeaveRoom")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(_a0, _a1, _a2)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRoomService_LeaveRoom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LeaveRoom'
+type MockRoomService_LeaveRoom_Call struct {
+	*mock.Call
+}
+
+// LeaveRoom is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 string
+//   - _a2 string
+func (_e *MockRoomService_Expecter) LeaveRoom(_a0 interface{}, _a1 interface{}, _a2 interface{}) *MockRoomService_LeaveRoom_Call {
+	return &MockRoomService_LeaveRoom_Call{Call: _e.mock.On("LeaveRoom", _a0, _a1, _a2)}
+}
+
+func (_c *MockRoomService_LeaveRoom_Call) Run(run func(_a0 context.Context, _a1 string, _a2 string)) *MockRoomService_LeaveRoom_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockRoomService_LeaveRoom_Call) Return(_a0 error) *MockRoomService_LeaveRoom_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRoomService_LeaveRoom_Call) RunAndReturn(run func(context.Context, string, string) error) *MockRoomService_LeaveRoom_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListMembers provides a mock function with given fields: _a0, _a1, _a2, _a3, _a4
 func (_m *MockRoomService) ListMembers(_a0 context.Context, _a1 string, _a2 string, _a3 string, _a4 int) (*service.MemberPage, error) {
 	ret := _m.Called(_a0, _a1, _a2, _a3, _a4)
@@ -374,6 +422,55 @@ func (_c *MockRoomService_ListRooms_Call) Return(_a0 *service.RoomPage, _a1 erro
 }
 
 func (_c *MockRoomService_ListRooms_Call) RunAndReturn(run func(context.Context, string, string, int) (*service.RoomPage, error)) *MockRoomService_ListRooms_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveMember provides a mock function with given fields: _a0, _a1, _a2, _a3
+func (_m *MockRoomService) RemoveMember(_a0 context.Context, _a1 string, _a2 string, _a3 string) error {
+	ret := _m.Called(_a0, _a1, _a2, _a3)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(_a0, _a1, _a2, _a3)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRoomService_RemoveMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveMember'
+type MockRoomService_RemoveMember_Call struct {
+	*mock.Call
+}
+
+// RemoveMember is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 string
+//   - _a2 string
+//   - _a3 string
+func (_e *MockRoomService_Expecter) RemoveMember(_a0 interface{}, _a1 interface{}, _a2 interface{}, _a3 interface{}) *MockRoomService_RemoveMember_Call {
+	return &MockRoomService_RemoveMember_Call{Call: _e.mock.On("RemoveMember", _a0, _a1, _a2, _a3)}
+}
+
+func (_c *MockRoomService_RemoveMember_Call) Run(run func(_a0 context.Context, _a1 string, _a2 string, _a3 string)) *MockRoomService_RemoveMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockRoomService_RemoveMember_Call) Return(_a0 error) *MockRoomService_RemoveMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRoomService_RemoveMember_Call) RunAndReturn(run func(context.Context, string, string, string) error) *MockRoomService_RemoveMember_Call {
 	_c.Call.Return(run)
 	return _c
 }
