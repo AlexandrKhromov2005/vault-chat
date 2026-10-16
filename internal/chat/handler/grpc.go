@@ -27,6 +27,7 @@ type RoomService interface {
 	GetRoom(context.Context, string, string) (*domain.Room, error)
 	ListRooms(context.Context, string, string, int) (*service.RoomPage, error)
 	AddMember(context.Context, string, string, string) error
+	ListMembers(context.Context, string, string, string, int) (*service.MemberPage, error)
 }
 
 // MessageService is the message business logic consumed by the gRPC handler.
@@ -188,6 +189,10 @@ func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 		return status.Error(codes.InvalidArgument, "invalid room list cursor")
 	case errors.Is(err, service.ErrInvalidRoomLimit):
 		return status.Error(codes.InvalidArgument, "room list limit must be 1–100")
+	case errors.Is(err, validator.ErrInvalidMemberCursor):
+		return status.Error(codes.InvalidArgument, "invalid member list cursor")
+	case errors.Is(err, service.ErrInvalidMemberLimit):
+		return status.Error(codes.InvalidArgument, "member list limit must be 1–100")
 	case errors.Is(err, domain.ErrNotFound):
 		return status.Error(codes.NotFound, "room not found")
 	case errors.Is(err, domain.ErrForbidden):

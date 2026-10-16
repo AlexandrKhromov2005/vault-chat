@@ -61,6 +61,18 @@ mTLS remains a separate implementation task.
   behind a membership deletion fails as a nonmember. Reads check membership in
   the same statement as the data they return.
 
+## Members
+
+All member operations authenticate the caller like other room operations.
+Absent rooms and rooms without the caller's membership return `NOT_FOUND`.
+
+- `ListMembers` returns `members` (`user_id`, `joined_at`) and `next_cursor` to
+  any member, ordered by user ID. A direct dialog lists both participants.
+  Paging follows the room list rules: default 50, explicit limits 1–100, and the
+  cursor is the canonical UUID of the last returned member. The roster is read
+  in the same statement as the membership check, so a former member loses it as
+  soon as their membership is gone.
+
 ## Room list
 
 `GET /api/v1/rooms?limit=50` (`ListRooms` in gRPC) returns the caller's rooms:

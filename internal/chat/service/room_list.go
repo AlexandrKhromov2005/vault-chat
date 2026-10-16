@@ -29,11 +29,9 @@ func (s *Service) ListRooms(ctx context.Context, actorID, cursor string, limit i
 	if err != nil {
 		return nil, err
 	}
-	if limit == 0 {
-		limit = 50
-	}
-	if limit < 1 || limit > 100 {
-		return nil, ErrInvalidRoomLimit
+	limit, err = pageSize(limit, ErrInvalidRoomLimit)
+	if err != nil {
+		return nil, err
 	}
 	rooms, err := s.rooms.ListForMember(ctx, actor, after, limit+1)
 	if err != nil {
