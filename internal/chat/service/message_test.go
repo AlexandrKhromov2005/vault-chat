@@ -12,6 +12,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service/mocks"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/validator"
 )
 
 func TestMessages_ValidationAndDelegation(t *testing.T) {
@@ -63,4 +64,64 @@ func TestMessages_HistoryPages(t *testing.T) {
 	repo.EXPECT().ListMessages(mock.Anything, room, a, int64(0), 2).Return(nil, context.Canceled).Once()
 	_, err = svc.ListMessages(ctx, a, room, "", 1)
 	require.True(t, errors.Is(err, context.Canceled))
+}
+
+func TestMessages_CatchUpPagesOldestFirst(t *testing.T) {
+	ctx := context.Background()
+	a, room := uuid.NewString(), uuid.NewString()
+	repo := mocks.NewMockMessageRepository(t)
+	svc := service.NewMessageService(repo)
+	rows := []*domain.Message{{Sequence: 4}, {Sequence: 5}, {Sequence: 6}}
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(3), 3).Return(rows, nil).Once()
+	page, err := svc.CatchUp(ctx, a, room, "3", 2)
+	require.NoError(t, err)
+	require.Equal(t, rows[:2], page.Messages)
+	require.Equal(t, "5", page.NextCursor)
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(5), 3).Return(rows[2:], nil).Once()
+	page, err = svc.CatchUp(ctx, a, room, page.NextCursor, 2)
+	require.NoError(t, err)
+	require.Equal(t, rows[2:], page.Messages)
+	require.Empty(t, page.NextCursor)
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(0), 51).Return([]*domain.Message{}, nil).Once()
+	page, err = svc.CatchUp(ctx, a, room, "0", 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Messages)
+	require.Empty(t, page.NextCursor)
+	for _, args := range []struct {
+		actor, room, after string
+		limit              int
+		err                error
+	}{
+		{"bad", room, "0", 1, validator.ErrInvalidID}, {a, "bad", "0", 1, validator.ErrInvalidID},
+		{a, room, "", 1, validator.ErrInvalidCatchUp}, {a, room, "01", 1, validator.ErrInvalidCatchUp},
+		{a, room, "-1", 1, validator.ErrInvalidCatchUp}, {a, room, "0", 101, service.ErrInvalidLimit},
+	} {
+		_, err := svc.CatchUp(ctx, args.actor, args.room, args.after, args.limit)
+		require.ErrorIs(t, err, args.err)
+	}
+	repo.EXPECT().ListMessagesAfter(mock.Anything, room, a, int64(0), 2).Return(nil, domain.ErrNotFound).Once()
+	_, err = svc.CatchUp(ctx, a, room, "0", 1)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func TestMessages_HistoryTakesOnePosition(t *testing.T) {
+	ctx := context.Background()
+	a, room := uuid.NewString(), uuid.NewString()
+	repo := mocks.NewMockMessageRepository(t)
+	svc := service.NewMessageService(repo)
+	rows := []*domain.Message{{Sequence: 4}}
+	repo.EXPECT().ListMessages(ctx, room, a, int64(5), 3).Return(rows, nil).Once()
+	page, err := svc.History(ctx, a, room, "5", "", 2)
+	require.NoError(t, err)
+	require.Equal(t, rows, page.Messages)
+	repo.EXPECT().ListMessagesAfter(ctx, room, a, int64(3), 3).Return(rows, nil).Once()
+	page, err = svc.History(ctx, a, room, "", "3", 2)
+	require.NoError(t, err)
+	require.Equal(t, rows, page.Messages)
+	// A cursor pages back from a position and after catches up from one; both
+	// at once contradict each other and never reach storage.
+	_, err = svc.History(ctx, a, room, "9", "3", 2)
+	require.ErrorIs(t, err, service.ErrCatchUpWithCursor)
+	_, err = svc.History(ctx, a, room, "", "01", 2)
+	require.ErrorIs(t, err, validator.ErrInvalidCatchUp)
 }

@@ -555,21 +555,30 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
     get:
-      summary: Read member-only message history, newest first
+      summary: Read member-only message history, newest first, or catch up after a position
       tags: [chat]
       security: [{bearerAuth: []}]
-      description: Duplicate or unknown query parameters are rejected. An empty page still requires membership.
+      description: |
+        Without after, messages are newest first and next_cursor pages to older
+        messages. With after, messages with a greater sequence are returned
+        oldest first and next_cursor is the after value of the next page.
+        cursor and after cannot be combined. Duplicate or unknown query
+        parameters are rejected. An empty page still requires membership.
       parameters:
         - name: cursor
           in: query
           schema: {type: string, pattern: "^$|^[1-9][0-9]{0,18}$"}
           description: Empty starts at newest. Otherwise use next_cursor from this room, at most 9223372036854775807.
+        - name: after
+          in: query
+          schema: {type: string, pattern: "^(0|[1-9][0-9]{0,18})$"}
+          description: Catch-up position, "0" for the start of the room or the last sequence the client has, at most 9223372036854775807.
         - name: limit
           in: query
           schema: {type: integer, minimum: 1, maximum: 100, default: 50}
       responses:
         "200":
-          description: Messages and an exclusive older-page cursor; empty cursor means the end.
+          description: Messages and the exclusive position of the next page in the same direction; empty means the end.
           content:
             application/json:
               schema:
@@ -610,13 +619,18 @@ components:
   schemas:
     Message:
       type: object
-      required: [message_id, room_id, sender_id, client_message_id, text, created_at]
+      required: [message_id, room_id, sender_id, client_message_id, text, sequence, created_at]
       properties:
         message_id: {type: string, format: uuid}
         room_id: {type: string, format: uuid}
         sender_id: {type: string, format: uuid}
         client_message_id: {type: string, format: uuid}
         text: {type: string, minLength: 1, maxLength: 4096}
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Position in the room. Committed messages are numbered 1, 2, 3, ... without gaps.
         created_at: {type: string, format: date-time}
     Member:
       type: object

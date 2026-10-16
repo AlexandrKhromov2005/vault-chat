@@ -13,6 +13,8 @@ var (
 	ErrInvalidText = errors.New("chat: invalid message text")
 	// ErrInvalidCursor rejects noncanonical history positions.
 	ErrInvalidCursor = errors.New("chat: invalid history cursor")
+	// ErrInvalidCatchUp rejects noncanonical catch-up positions.
+	ErrInvalidCatchUp = errors.New("chat: invalid catch-up position")
 )
 
 // MessageText preserves whitespace but requires visible content and at most
@@ -41,5 +43,15 @@ func HistoryCursor(input string) (int64, error) {
 	return value, nil
 }
 
-// FormatHistoryCursor produces the canonical position of an older-history page.
+// CatchUpCursor accepts "0", the start of a room, or a canonical positive room
+// sequence. Messages after it are read oldest first.
+func CatchUpCursor(input string) (int64, error) {
+	value, err := strconv.ParseInt(input, 10, 64)
+	if err != nil || value < 0 || FormatHistoryCursor(value) != input {
+		return 0, ErrInvalidCatchUp
+	}
+	return value, nil
+}
+
+// FormatHistoryCursor produces the canonical text of a room sequence position.
 func FormatHistoryCursor(value int64) string { return strconv.FormatInt(value, 10) }

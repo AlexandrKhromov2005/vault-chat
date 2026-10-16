@@ -36,7 +36,8 @@ service ChatService {
   // SendMessage retries are idempotent per room, caller and client_message_id.
   // Reusing that key with different text returns ALREADY_EXISTS.
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
-  // ListMessages returns newest first; membership is required even for empty pages.
+  // ListMessages returns newest first, or oldest first after a position when
+  // after is set; membership is required even for empty pages.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
 }
 
@@ -154,6 +155,9 @@ message Message {
   string client_message_id = 4;
   string text = 5;
   google.protobuf.Timestamp created_at = 6;
+  // Position in the room: committed messages have consecutive sequences
+  // starting at 1, so a client can detect a gap and catch up after it.
+  int64 sequence = 7;
 }
 
 message SendMessageRequest {
@@ -173,10 +177,14 @@ message ListMessagesRequest {
   string cursor = 2;
   // Zero defaults to 50; explicit limits must be 1–100.
   int32 limit = 3;
+  // Catch-up: "0" or a canonical positive sequence. Returns messages after it,
+  // oldest first. Cannot be combined with cursor.
+  string after = 4;
 }
 
 message ListMessagesResponse {
   repeated Message messages = 1;
-  // Empty means the end of history at the time this page was read.
+  // Empty means the end of the page direction at the time this page was read.
+  // Pass it back in the same field, cursor or after, for the next page.
   string next_cursor = 2;
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
@@ -18,11 +19,12 @@ type messageResponse struct {
 	SenderID  string    `json:"sender_id"`
 	ClientID  string    `json:"client_message_id"`
 	Text      string    `json:"text"`
+	Sequence  int64     `json:"sequence"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func messageJSON(message *chatv1.Message) messageResponse {
-	return messageResponse{ID: message.GetId(), RoomID: message.GetRoomId(), SenderID: message.GetSenderId(), ClientID: message.GetClientMessageId(), Text: message.GetText(), CreatedAt: message.GetCreatedAt().AsTime()}
+	return messageResponse{ID: message.GetId(), RoomID: message.GetRoomId(), SenderID: message.GetSenderId(), ClientID: message.GetClientMessageId(), Text: message.GetText(), Sequence: message.GetSequence(), CreatedAt: message.GetCreatedAt().AsTime()}
 }
 
 // SendMessage returns 200 for both the initial send and an identical retry.
@@ -47,18 +49,19 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, messageJSON(resp.GetMessage()))
 }
 
-// Messages returns member-only newest-first history with an older-page cursor.
+// Messages returns member-only newest-first history with an older-page cursor,
+// or oldest-first messages after a catch-up position.
 func (h *ChatHandler) Messages(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := chatContext(w, r)
 	if !ok {
 		return
 	}
-	cursor, limit, err := historyQuery(r.URL.RawQuery)
+	cursor, after, limit, err := historyQuery(r.URL.RawQuery)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid_argument", "invalid history query")
 		return
 	}
-	resp, err := h.client.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: r.PathValue("room_id"), Cursor: cursor, Limit: limit})
+	resp, err := h.client.ListMessages(ctx, &chatv1.ListMessagesRequest{RoomId: r.PathValue("room_id"), Cursor: cursor, After: after, Limit: limit})
 	if err != nil {
 		h.backendError(w, r, err)
 		return
@@ -73,35 +76,56 @@ func (h *ChatHandler) Messages(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, page)
 }
 
-func historyQuery(raw string) (string, int32, error) {
-	return pageQuery(raw, func(cursor string) error {
-		_, err := validator.HistoryCursor(cursor)
-		return err
-	})
+// historyQuery accepts an older-page cursor or a catch-up position, not both.
+func historyQuery(raw string) (string, string, int32, error) {
+	query, limit, err := pageValues(raw, "cursor", "after")
+	if err != nil {
+		return "", "", 0, err
+	}
+	cursor, after := query.Get("cursor"), query.Get("after")
+	if _, err := validator.HistoryCursor(cursor); err != nil {
+		return "", "", 0, err
+	}
+	if _, catchUp := query["after"]; catchUp {
+		if _, err := validator.CatchUpCursor(after); err != nil || query.Has("cursor") {
+			return "", "", 0, fmt.Errorf("invalid catch-up position")
+		}
+	}
+	return cursor, after, limit, nil
 }
 
 // pageQuery accepts at most one cursor and one canonical limit of 1–100;
 // an absent limit is returned as zero so that the backend applies its default.
 func pageQuery(raw string, validCursor func(string) error) (string, int32, error) {
-	query, err := url.ParseQuery(raw)
+	query, limit, err := pageValues(raw, "cursor")
 	if err != nil {
 		return "", 0, err
-	}
-	for key, values := range query {
-		if (key != "cursor" && key != "limit") || len(values) != 1 {
-			return "", 0, fmt.Errorf("unexpected page parameter")
-		}
 	}
 	cursor := query.Get("cursor")
 	if err := validCursor(cursor); err != nil {
 		return "", 0, err
 	}
+	return cursor, limit, nil
+}
+
+// pageValues accepts only the named position parameters and limit, each at
+// most once, and parses the limit; positions are left to the caller.
+func pageValues(raw string, positions ...string) (url.Values, int32, error) {
+	query, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, 0, err
+	}
+	for key, values := range query {
+		if (key != "limit" && !slices.Contains(positions, key)) || len(values) != 1 {
+			return nil, 0, fmt.Errorf("unexpected page parameter")
+		}
+	}
 	var limit int64
 	if value, exists := query["limit"]; exists {
 		limit, err = strconv.ParseInt(value[0], 10, 32)
 		if err != nil || limit < 1 || limit > 100 || strconv.FormatInt(limit, 10) != value[0] {
-			return "", 0, fmt.Errorf("invalid page limit")
+			return nil, 0, fmt.Errorf("invalid page limit")
 		}
 	}
-	return cursor, int32(limit), nil
+	return query, int32(limit), nil
 }

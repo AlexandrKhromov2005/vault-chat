@@ -65,7 +65,8 @@ type ChatServiceClient interface {
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
-	// ListMessages returns newest first; membership is required even for empty pages.
+	// ListMessages returns newest first, or oldest first after a position when
+	// after is set; membership is required even for empty pages.
 	ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error)
 }
 
@@ -211,7 +212,8 @@ type ChatServiceServer interface {
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
-	// ListMessages returns newest first; membership is required even for empty pages.
+	// ListMessages returns newest first, or oldest first after a position when
+	// after is set; membership is required even for empty pages.
 	ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error)
 	mustEmbedUnimplementedChatServiceServer()
 }

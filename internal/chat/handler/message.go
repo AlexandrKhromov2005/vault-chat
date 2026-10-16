@@ -22,13 +22,14 @@ func (h *GRPCHandler) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	return &chatv1.SendMessageResponse{Message: messageProto(message)}, nil
 }
 
-// ListMessages authenticates every page, including empty pages.
+// ListMessages authenticates every page, including empty pages. A catch-up
+// position selects oldest-first messages after it instead of older history.
 func (h *GRPCHandler) ListMessages(ctx context.Context, req *chatv1.ListMessagesRequest) (*chatv1.ListMessagesResponse, error) {
 	actor, _, err := h.identity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	page, err := h.messages.ListMessages(ctx, actor, req.GetRoomId(), req.GetCursor(), int(req.GetLimit()))
+	page, err := h.messages.History(ctx, actor, req.GetRoomId(), req.GetCursor(), req.GetAfter(), int(req.GetLimit()))
 	if err != nil {
 		return nil, h.roomStatus(ctx, err)
 	}
@@ -40,5 +41,5 @@ func (h *GRPCHandler) ListMessages(ctx context.Context, req *chatv1.ListMessages
 }
 
 func messageProto(message *domain.Message) *chatv1.Message {
-	return &chatv1.Message{Id: message.ID, RoomId: message.RoomID, SenderId: message.SenderID, ClientMessageId: message.ClientID, Text: message.Text, CreatedAt: timestamppb.New(message.CreatedAt)}
+	return &chatv1.Message{Id: message.ID, RoomId: message.RoomID, SenderId: message.SenderID, ClientMessageId: message.ClientID, Text: message.Text, CreatedAt: timestamppb.New(message.CreatedAt), Sequence: message.Sequence}
 }

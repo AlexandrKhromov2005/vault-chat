@@ -61,12 +61,23 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 // ListMessages returns newest first with an exclusive room-local cursor.
 // Membership and the page use one snapshot, including for an empty room.
 func (r *RoomRepository) ListMessages(ctx context.Context, roomID, actorID string, before int64, limit int) ([]*domain.Message, error) {
+	return r.memberMessages(ctx, `($3::bigint=0 OR sequence<$3) ORDER BY sequence DESC`, `DESC`, roomID, actorID, before, limit)
+}
+
+// ListMessagesAfter returns messages with a sequence above after, oldest first.
+// Membership and the page use one snapshot, including for an empty page.
+func (r *RoomRepository) ListMessagesAfter(ctx context.Context, roomID, actorID string, after int64, limit int) ([]*domain.Message, error) {
+	return r.memberMessages(ctx, `sequence>$3 ORDER BY sequence`, `ASC`, roomID, actorID, after, limit)
+}
+
+// memberMessages reads one page selected and ordered by page, a constant SQL
+// fragment over $3, only if the actor is a member of the room.
+func (r *RoomRepository) memberMessages(ctx context.Context, page, order, roomID, actorID string, position int64, limit int) ([]*domain.Message, error) {
 	rows, err := r.pool.Query(ctx, `SELECT m.id::text, m.room_id::text, m.sender_id::text,
  m.client_id::text, m.text, m.sequence, m.created_at FROM rooms r
- LEFT JOIN LATERAL (SELECT * FROM messages WHERE room_id=r.id AND ($3::bigint=0 OR sequence<$3)
- ORDER BY sequence DESC LIMIT $4) m ON true
+ LEFT JOIN LATERAL (SELECT * FROM messages WHERE room_id=r.id AND `+page+` LIMIT $4) m ON true
  WHERE r.id=$1::uuid AND EXISTS (SELECT 1 FROM room_members WHERE room_id=r.id AND user_id=$2::uuid)
- ORDER BY m.sequence DESC`, roomID, actorID, before, limit)
+ ORDER BY m.sequence `+order, roomID, actorID, position, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}

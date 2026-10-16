@@ -60,7 +60,10 @@ func TestMessageREST_RejectsAmbiguousInputs(t *testing.T) {
 		h.SendMessage(rec, chatRequest(http.MethodPost, body))
 		require.Equal(t, 400, rec.Code)
 	}
-	for _, query := range []string{"limit=101", "limit=-1", "limit=0", "limit=01", "limit=", "limit=1&limit=2", "cursor=1&cursor=2", "cursor=%zz", "actor=x", "cursor=01"} {
+	for _, query := range []string{
+		"limit=101", "limit=-1", "limit=0", "limit=01", "limit=", "limit=1&limit=2", "cursor=1&cursor=2", "cursor=%zz", "actor=x", "cursor=01",
+		"after=", "after=01", "after=-1", "after=x", "after=0&after=1", "cursor=2&after=1", "after=1&cursor=",
+	} {
 		req := chatRequest(http.MethodGet, "")
 		req.URL.RawQuery = query
 		rec := httptest.NewRecorder()
@@ -68,4 +71,23 @@ func TestMessageREST_RejectsAmbiguousInputs(t *testing.T) {
 		require.Equal(t, 400, rec.Code, query)
 	}
 	require.Empty(t, client.Calls)
+}
+
+func TestMessageREST_CatchUpAfterPosition(t *testing.T) {
+	client := mocks.NewMockChatClient(t)
+	h := handler.NewChatHandler(client, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	message := &chatv1.Message{Id: "message", RoomId: "room", SenderId: "actor", ClientMessageId: "key", Text: "missed", Sequence: 8}
+	client.EXPECT().ListMessages(mock.Anything, &chatv1.ListMessagesRequest{RoomId: "room", After: "7", Limit: 100}).Return(&chatv1.ListMessagesResponse{Messages: []*chatv1.Message{message}, NextCursor: "8"}, nil).Once()
+	req := chatRequest(http.MethodGet, "")
+	req.SetPathValue("room_id", "room")
+	req.URL.RawQuery = "after=7&limit=100"
+	rec := httptest.NewRecorder()
+	h.Messages(rec, req)
+	require.Equal(t, 200, rec.Code)
+	require.JSONEq(t, `{"messages":[{"message_id":"message","room_id":"room","sender_id":"actor","client_message_id":"key","text":"missed","sequence":8,"created_at":"1970-01-01T00:00:00Z"}],"next_cursor":"8"}`, rec.Body.String())
+	client.EXPECT().ListMessages(mock.Anything, &chatv1.ListMessagesRequest{RoomId: "room", After: "0"}).Return(&chatv1.ListMessagesResponse{}, nil).Once()
+	req.URL.RawQuery = "after=0"
+	rec = httptest.NewRecorder()
+	h.Messages(rec, req)
+	require.Equal(t, 200, rec.Code)
 }
