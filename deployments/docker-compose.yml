@@ -175,11 +175,24 @@ services:
       CHAT_GRPC_ADDR: ":50052"
       CHAT_AUTH_GRPC_ADDR: passthrough:///auth:50051
       CHAT_DATABASE_URL: postgres://chat:chat@chat-postgres:5432/chat_db?sslmode=disable
+      # Real-time events go to the Redis the gateway subscribes to. Redis has
+      # no password in development, as for the gateway.
+      CHAT_REDIS_ADDR: redis:6379
+      CHAT_EVENT_QUEUE_SIZE: "1024"
+      CHAT_EVENT_PUBLISH_TIMEOUT: 1s
+      # stop_grace_period below depends on this value.
+      CHAT_EVENT_DRAIN_TIMEOUT: 5s
       CHAT_LOG_LEVEL: ${CHAT_LOG_LEVEL:-info}
+    # Redis only orders the startup, so events of the first requests are not
+    # lost. It is not part of Chat's healthcheck: when Redis fails later, Chat
+    # keeps serving, drops the events it cannot publish and clients recover
+    # them through catch-up.
     depends_on:
       chat-postgres:
         condition: service_healthy
       auth:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck", "-grpc", "127.0.0.1:50052", "-timeout", "2s"]
@@ -187,6 +200,10 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+    # Lets in-flight RPCs and queued events finish: Chat waits up to 5s for
+    # RPCs, then publishes queued events for up to CHAT_EVENT_DRAIN_TIMEOUT
+    # (5s). The rest is headroom for closing connections.
+    stop_grace_period: 15s
 
   # media: planned, cmd/media does not exist yet. Add it here with the same
   # build (SERVICE: media), depends_on minio (and nats once events are used)

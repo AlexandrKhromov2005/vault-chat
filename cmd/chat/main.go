@@ -21,6 +21,7 @@ import (
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/events"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
@@ -71,14 +72,23 @@ func run() error {
 		return fmt.Errorf("listen chat: %w", err)
 	}
 	defer func() { _ = listener.Close() }()
+	// Redis is not a startup or readiness dependency: publishing is best effort
+	// and clients recover missed events through catch-up.
+	redisClient := events.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword)
+	defer func() { _ = redisClient.Close() }()
+	publisher := events.NewPublisher(redisClient, logger,
+		events.WithQueueSize(cfg.EventQueueSize), events.WithPublishTimeout(cfg.EventPublishTimeout))
+	// Runs after the gRPC server stopped, so no request enqueues events any more.
+	defer closePublisher(publisher, cfg.EventDrainTimeout, logger)
+	rooms := repository.NewRoomRepository(pool, repository.WithNotifier(publisher))
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
-	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(repository.NewRoomRepository(pool)), service.NewMessageService(repository.NewRoomRepository(pool)), authv1.NewAuthServiceClient(authConn), logger))
+	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(rooms), service.NewMessageService(rooms), authv1.NewAuthServiceClient(authConn), logger))
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	reflection.Register(server)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
-	logger.Info("chat service listening", "addr", cfg.GRPCAddr)
+	logger.Info("chat service listening", "addr", cfg.GRPCAddr, "redis_addr", cfg.RedisAddr)
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
@@ -100,4 +110,16 @@ func run() error {
 	}
 	logger.Info("chat service stopped")
 	return nil
+}
+
+// closePublisher publishes the queued events for at most timeout; the rest
+// are lost like any other dropped event and clients catch up.
+func closePublisher(publisher *events.Publisher, timeout time.Duration, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := publisher.Close(ctx); err != nil {
+		logger.Warn("chat events not drained", "error", err, "dropped_total", publisher.Dropped())
+		return
+	}
+	logger.Info("chat events drained", "dropped_total", publisher.Dropped())
 }

@@ -50,7 +50,7 @@ func (r *RoomRepository) ListMembers(ctx context.Context, roomID, actorID, after
 // RemoveChannelMember lets the owner remove another member under the room lock.
 // Removing a nonmember succeeds, so a retried removal is idempotent.
 func (r *RoomRepository) RemoveChannelMember(ctx context.Context, roomID, actorID, userID string) error {
-	return r.changeMembership(ctx, roomID, actorID, userID, func(room *domain.Room) error {
+	return r.changeMembership(ctx, roomID, actorID, userID, domain.MemberRemoved, func(room *domain.Room) error {
 		if err := requireOwner(room, actorID); err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func (r *RoomRepository) RemoveChannelMember(ctx context.Context, roomID, actorI
 // LeaveRoom removes the actor from a channel under the room lock. Dialogs cannot
 // be left and the owner stays until ownership can be transferred.
 func (r *RoomRepository) LeaveRoom(ctx context.Context, roomID, actorID string) error {
-	return r.changeMembership(ctx, roomID, actorID, actorID, func(room *domain.Room) error {
+	return r.changeMembership(ctx, roomID, actorID, actorID, domain.MemberLeft, func(room *domain.Room) error {
 		if room.Kind != domain.Channel {
 			return domain.ErrForbidden
 		}
@@ -75,8 +75,9 @@ func (r *RoomRepository) LeaveRoom(ctx context.Context, roomID, actorID string) 
 	})
 }
 
-// changeMembership deletes a membership after authorize accepts the locked room.
-func (r *RoomRepository) changeMembership(ctx context.Context, roomID, actorID, userID string, authorize func(*domain.Room) error) error {
+// changeMembership deletes a membership after authorize accepts the locked room
+// and announces an effective deletion as kind.
+func (r *RoomRepository) changeMembership(ctx context.Context, roomID, actorID, userID string, kind domain.EventKind, authorize func(*domain.Room) error) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin membership change: %w", err)
@@ -89,11 +90,20 @@ func (r *RoomRepository) changeMembership(ctx context.Context, roomID, actorID, 
 	if err := authorize(room); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM room_members WHERE room_id=$1::uuid AND user_id=$2::uuid`, roomID, userID); err != nil {
+	tag, err := tx.Exec(ctx, `DELETE FROM room_members WHERE room_id=$1::uuid AND user_id=$2::uuid`, roomID, userID)
+	if err != nil {
 		return fmt.Errorf("delete membership: %w", err)
+	}
+	var events []domain.Event
+	if tag.RowsAffected() > 0 {
+		events, err = r.membershipEvent(ctx, tx, kind, room.ID, userID)
+		if err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit membership change: %w", err)
 	}
+	r.notify(ctx, events...)
 	return nil
 }

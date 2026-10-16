@@ -77,5 +77,6 @@ snapshot. The unique `(room_id, sequence)` index supports history pagination.
 The room lock serializes sends to one room; this is a deliberate initial
 throughput tradeoff, not a guarantee of large-channel scalability.
 
-There are no attachments, edits, deletion or WebSocket delivery yet. History
-is available by request; sending a message does not publish a NATS event.
+There are no attachments, edits, deletion or WebSocket delivery yet. A new
+message is announced through Redis Pub/Sub, see [Real-time events](realtime.md);
+no NATS event is published.

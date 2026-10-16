@@ -15,7 +15,8 @@ import (
 const messageColumns = `id::text, room_id::text, sender_id::text, client_id::text, text, sequence, created_at`
 
 // SendMessage serializes writes within a room so a committed cursor cannot skip
-// an earlier, still-uncommitted send. Retries never advance the room sequence.
+// an earlier, still-uncommitted send. Retries never advance the room sequence
+// and announce nothing; a new message is announced to the members at its commit.
 func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clientID, text string) (*domain.Message, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -52,9 +53,19 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 	if err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
 	}
+	var events []domain.Event
+	if r.notifier != nil {
+		// The room lock is held, so membership cannot change before the commit.
+		users, err := members(ctx, tx, message.RoomID)
+		if err != nil {
+			return nil, err
+		}
+		events = []domain.Event{{Kind: domain.MessageCreated, RoomID: message.RoomID, Message: message, Recipients: users}}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit message: %w", err)
 	}
+	r.notify(ctx, events...)
 	return message, nil
 }
 
