@@ -25,6 +25,7 @@ type RoomService interface {
 	GetOrCreateDirect(context.Context, string, string) (*domain.Room, error)
 	CreateChannel(context.Context, string, string, bool) (*domain.Room, error)
 	GetRoom(context.Context, string, string) (*domain.Room, error)
+	ListRooms(context.Context, string, string, int) (*service.RoomPage, error)
 	AddMember(context.Context, string, string, string) error
 }
 
@@ -183,6 +184,10 @@ func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 		return status.Error(codes.InvalidArgument, "invalid history cursor")
 	case errors.Is(err, service.ErrInvalidLimit):
 		return status.Error(codes.InvalidArgument, "history limit must be 1–100")
+	case errors.Is(err, validator.ErrInvalidRoomCursor):
+		return status.Error(codes.InvalidArgument, "invalid room list cursor")
+	case errors.Is(err, service.ErrInvalidRoomLimit):
+		return status.Error(codes.InvalidArgument, "room list limit must be 1–100")
 	case errors.Is(err, domain.ErrNotFound):
 		return status.Error(codes.NotFound, "room not found")
 	case errors.Is(err, domain.ErrForbidden):
