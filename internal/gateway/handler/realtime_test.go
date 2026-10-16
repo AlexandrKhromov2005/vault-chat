@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -50,6 +51,7 @@ func (nopStream) Unsubscribe(context.Context, string) error { return nil }
 
 func testOptions() handler.RealtimeOptions {
 	return handler.RealtimeOptions{
+		AllowedOrigins: []string{"https://app.example"},
 		AuthTimeout:    200 * time.Millisecond,
 		ReauthInterval: 20 * time.Millisecond,
 		PingInterval:   time.Hour,
@@ -234,6 +236,47 @@ func TestRealtime_ReauthenticationKeepsTheIdentityAndPace(t *testing.T) {
 	authenticate(t, conn, "alice-token")
 	send(t, conn, `{"type":"auth","token":"alice-token"}`)
 	require.Equal(t, websocket.StatusPolicyViolation, closedWith(t, conn))
+}
+
+func TestRealtime_ChecksTheOriginBeforeUpgrading(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed []string
+		origin  string
+		ok      bool
+	}{
+		{"listed origin", []string{"https://app.example"}, "https://app.example", true},
+		{"no origin from a non-browser client", []string{"https://app.example"}, "", true},
+		{"same origin", nil, "same", true},
+		{"unlisted origin", []string{"https://app.example"}, "https://evil.example", false},
+		{"listed host with another scheme", []string{"https://app.example"}, "http://app.example", false},
+		{"no origins configured", nil, "https://app.example", false},
+		{"any origin", []string{"*"}, "https://evil.example", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := testOptions()
+			options.AllowedOrigins = tc.allowed
+			url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{}, options)
+			header := http.Header{}
+			switch tc.origin {
+			case "":
+			case "same":
+				header.Set("Origin", "http"+strings.TrimPrefix(url, "ws"))
+			default:
+				header.Set("Origin", tc.origin)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
+			if tc.ok {
+				require.NoError(t, err)
+				_ = conn.CloseNow()
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode)
+		})
+	}
 }
 
 func TestRealtime_HubEndsConnections(t *testing.T) {
