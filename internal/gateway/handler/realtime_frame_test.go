@@ -6,11 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 )
 
 func TestAuthFrame(t *testing.T) {
@@ -101,4 +103,16 @@ func FuzzEventFrame(f *testing.F) {
 		require.NoError(t, json.Unmarshal(frame, &decoded))
 		require.Contains(t, []any{"message.created", "member.added", "member.removed", "member.left"}, decoded["type"])
 	})
+}
+
+func TestClientEnd(t *testing.T) {
+	for reason, code := range map[realtime.Reason]websocket.StatusCode{
+		realtime.ReasonLagging:     4002,
+		realtime.ReasonInterrupted: websocket.StatusTryAgainLater,
+		realtime.ReasonShutdown:    websocket.StatusGoingAway,
+	} {
+		end := clientEnd(reason)
+		require.Equal(t, code, end.code)
+		require.LessOrEqual(t, len(end.reason), 123, "close reasons are limited by the control frame size")
+	}
 }
