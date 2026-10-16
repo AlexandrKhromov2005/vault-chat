@@ -21,7 +21,7 @@ REST; комнаты, отправка сообщений и история до
 | Данные | Миграции пользователей и сессий Auth, отдельные миграции комнат, участников и сообщений Chat | Auth и Chat применяют миграции своих отдельных БД при запуске |
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
 | Проверки | Unit-, PostgreSQL integration- и race-тесты, 21 цель фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
-| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth и Chat, Redis, NATS и MinIO | Контейнеризована инфраструктура; NATS и MinIO ещё не используются кодом приложения |
+| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth и Chat, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Gateway с PostgreSQL и Redis запускаются одной командой; Media ещё нет, NATS и MinIO не используются кодом приложения и вынесены в профили Compose |
 
 Правила и ограничения комнат описаны в [документации Chat](docs/chat/rooms.md).
 Chat хранит свои данные отдельно и не обращается к таблицам Auth.
@@ -47,6 +47,8 @@ Chat хранит свои данные отдельно и не обращае�
   к вложениям, ограничения размера и типа файлов.
 - [x] Обновление Go и зависимостей с проверкой `govulncheck`.
 - [ ] Контейнеризация Auth, Gateway, Chat и Media; запуск всего MVP одной командой.
+  Сделано для Auth, Chat и Gateway: образы, healthchecks и запуск стека одной
+  командой Compose. Осталось добавить Media.
 - [ ] Сквозной тест: два пользователя входят, создают диалог, обмениваются
   сообщениями и вложением; третий не получает доступ к чужому диалогу.
 
@@ -58,7 +60,7 @@ Chat хранит свои данные отдельно и не обращае�
 1. Добавить список комнат и поиск собеседников.
 2. Подключить WebSocket и восстановление истории при переподключении.
 3. Добавить Media и вложения.
-4. Собрать воспроизводимый запуск и сквозные проверки MVP.
+4. Добавить Media в общий запуск через Docker Compose и сквозные проверки MVP.
 
 ### Остальные запланированные возможности
 
@@ -94,19 +96,86 @@ presence и уведомления. Также не реализованы mTLS 
 Это результат статического анализа; проверку нужно повторять после обновления
 зависимостей и перед внешним развёртыванием.
 
-## Проверка здоровья в контейнерах
+## Запуск всего стека в Docker
 
-Runtime-образы сервисов будут без shell и curl, поэтому healthcheck выполняет
-встроенный бинарник `cmd/healthcheck`:
+Нужны Docker с Compose v2 и OpenSSL; Go для этого режима не нужен.
+Команды выполняются из корня репозитория.
 
 ```sh
-healthcheck -grpc 127.0.0.1:50051              # стандартный gRPC health check (Auth, Chat)
-healthcheck -http http://127.0.0.1:8080/health # ответ 2xx без редиректов (Gateway)
+sh scripts/gen-jwt-keys.sh
+docker compose -f deployments/docker-compose.yml up -d --build --wait
 ```
 
-Ровно один из флагов `-grpc` и `-http` обязателен; `-timeout` (по умолчанию 3s)
-ограничивает всю проверку. Код выхода: 0 — сервис здоров, 1 — нет,
-2 — неверные аргументы.
+Скрипт один раз создаёт в `secrets/` пару ключей RS256 для разработки и не
+перезаписывает существующие ключи. Вторая команда собирает образы Auth, Chat и
+Gateway, поднимает PostgreSQL для Auth и Chat, Redis и ждёт, пока все контейнеры
+станут healthy. Auth и Chat применяют миграции при старте.
+Media-сервиса пока нет: в `deployments/docker-compose.yml` оставлено место для него.
+
+NATS и MinIO код приложения пока не использует, поэтому они вынесены в
+профили Compose `events` и `media` и по умолчанию не запускаются. Их можно
+запустить явно: `docker compose -f deployments/docker-compose.yml up -d nats`
+или с флагом `--profile events`. Закреплённый в Compose образ
+`minio/minio:RELEASE.2025-04-22T22-12-26Z` сейчас не скачивается из Docker Hub;
+его нужно заменить вместе с добавлением Media.
+
+Gateway доступен на `http://localhost:8080`; Auth и Chat открыты только внутри
+сети Compose. Проверка — те же запросы, что и при локальном запуске ниже:
+
+```sh
+curl --fail http://localhost:8080/health
+curl --fail http://localhost:8080/ready
+```
+
+Полезные команды:
+
+```sh
+docker compose -f deployments/docker-compose.yml ps        # состояние и health
+docker compose -f deployments/docker-compose.yml logs -f gateway
+docker compose -f deployments/docker-compose.yml up -d --build   # пересобрать после изменений
+docker compose -f deployments/docker-compose.yml down      # остановить, данные сохраняются
+docker compose -f deployments/docker-compose.yml down -v   # остановить и удалить данные
+```
+
+Если порт на хосте занят, переопределите его переменной окружения: например,
+`POSTGRES_HOST_PORT=55432 GATEWAY_HOST_PORT=18080 docker compose ... up -d`.
+
+| Переменная | Сервис | По умолчанию |
+|---|---|---|
+| `GATEWAY_HOST_PORT` | Gateway (HTTP) | 8080 |
+| `POSTGRES_HOST_PORT` | PostgreSQL Auth | 5432 |
+| `CHAT_POSTGRES_HOST_PORT` | PostgreSQL Chat | 5433 |
+| `REDIS_HOST_PORT` | Redis | 6379 |
+| `NATS_HOST_PORT`, `NATS_MONITOR_HOST_PORT` | NATS | 4222, 8222 |
+| `MINIO_HOST_PORT`, `MINIO_CONSOLE_HOST_PORT` | MinIO | 9000, 9001 |
+
+Уровни логов задаются через `AUTH_LOG_LEVEL`, `CHAT_LOG_LEVEL` и
+`GATEWAY_LOG_LEVEL`, разрешённые CORS-источники — через
+`GATEWAY_CORS_ALLOWED_ORIGINS`. Остальная конфигурация задана в Compose-файле
+и совпадает с `.env.example`, только вместо `localhost` указаны имена сервисов.
+
+Как устроены образы:
+
+- Один `Dockerfile` для всех сервисов: сервис выбирается аргументом сборки
+  `SERVICE`, версия Go — аргументом `GO_VERSION` (держите её равной `go.mod`).
+  Бинарники собираются статически (`CGO_ENABLED=0`, `-trimpath`).
+- Runtime-образ — `distroless/static` без shell, запуск от непривилегированного
+  пользователя (uid 65532), корневая ФС только для чтения.
+- Healthcheck выполняет встроенный бинарник `cmd/healthcheck`: для Auth и Chat —
+  стандартный gRPC health check, для Gateway — `GET /health`. Порядок старта:
+  Chat ждёт healthy Auth, Gateway — healthy Auth, Chat и Redis.
+- Ключи и сертификаты не попадают в образы: `.dockerignore` исключает
+  `secrets/` и `.env`, а ключи JWT монтируются в Auth только для чтения в
+  `/run/secrets/`. Скрипт делает файлы ключей читаемыми для пользователя
+  контейнера, а каталог `secrets/` — доступным только владельцу. Если ключи
+  создавались вручную на Linux, перезапустите скрипт, чтобы исправить права.
+- Если запустить стек до создания ключей, на Linux `up` завершится ошибкой
+  `bind source path does not exist`, а Docker Desktop создаст на месте ключей
+  пустые каталоги и Auth не стартует (`is a directory`). В обоих случаях
+  выполните `docker compose ... down`, `sh scripts/gen-jwt-keys.sh` (он удалит
+  такие пустые каталоги) и запустите стек снова.
+- Gateway в Compose работает по HTTP без TLS; для TLS смонтируйте сертификат
+  так же, как ключи, и задайте `GATEWAY_TLS_CERT_PATH` и `GATEWAY_TLS_KEY_PATH`.
 
 ## Локальный запуск Auth, Chat и Gateway
 
@@ -117,12 +186,15 @@ healthcheck -http http://127.0.0.1:8080/health # ответ 2xx без реди�
 
 ```sh
 cp .env.example .env
-mkdir -p secrets
-openssl genrsa -out secrets/auth_jwt_private.pem 4096
-openssl rsa -in secrets/auth_jwt_private.pem -pubout -out secrets/auth_jwt_public.pem
+sh scripts/gen-jwt-keys.sh
 go mod download
 docker compose -f deployments/docker-compose.yml up -d postgres chat-postgres redis
 ```
+
+Здесь из Compose запускается только инфраструктура. Если порт занят, задайте
+`POSTGRES_HOST_PORT` и другие переменные из таблицы выше и поправьте адреса в `.env`.
+Не запускайте одновременно полный стек в Docker и сервисы через `go run`:
+они займут одни и те же порты.
 
 В первом терминале загрузите переменные и запустите Auth:
 
