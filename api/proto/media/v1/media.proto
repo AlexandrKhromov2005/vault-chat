@@ -1,0 +1,50 @@
+syntax = "proto3";
+package media.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1;mediav1";
+
+// MediaService authenticates every RPC through Auth and checks current room
+// membership through Chat. Send one authorization: Bearer token metadata value.
+service MediaService {
+  // First frame: room_id and filename, no data. Then data-only frames <=64KiB.
+  // A file is visible only after EOF, validation and successful persistence.
+  rpc Upload(stream UploadRequest) returns (UploadResponse);
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  // First frame contains file metadata; subsequent frames contain only data.
+  rpc Download(DownloadRequest) returns (stream DownloadResponse);
+}
+message UploadRequest {
+  string room_id = 1;
+  string filename = 2;
+  bytes data = 3;
+}
+message GetFileRequest {
+  string file_id = 1;
+}
+
+// File exposes metadata, never an object key, S3 credential or public URL.
+message File {
+  string id = 1;
+  string room_id = 2;
+  string owner_id = 3;
+  string filename = 4;
+  string content_type = 5;
+  int64 size = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+message DownloadResponse {
+  File file = 1;
+  bytes data = 2;
+}
+
+message UploadResponse {
+  File file = 1;
+}
+message GetFileResponse {
+  File file = 1;
+}
+message DownloadRequest {
+  string file_id = 1;
+}
