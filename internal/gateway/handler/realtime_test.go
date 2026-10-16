@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -501,31 +504,101 @@ func TestRealtime_ShutdownInterruptsAuthentication(t *testing.T) {
 	}
 }
 
-// dialStatus tries to upgrade and reports the HTTP status, 101 on success,
-// without failing the test, so that it can run inside require.Never.
-func dialStatus(t *testing.T, url string) int {
+// heldWrites is a client connection whose writes wait from hold until resume,
+// reporting on held that one is waiting.
+type heldWrites struct {
+	net.Conn
+	holding atomic.Bool
+	held    chan struct{}
+	resumed chan struct{}
+	once    sync.Once
+}
+
+func (c *heldWrites) hold() { c.holding.Store(true) }
+
+func (c *heldWrites) resume() { c.once.Do(func() { close(c.resumed) }) }
+
+func (c *heldWrites) Write(p []byte) (int, error) {
+	if c.holding.Load() {
+		select {
+		case c.held <- struct{}{}:
+		default:
+		}
+		<-c.resumed
+	}
+	return c.Conn.Write(p)
+}
+
+// dialHeld connects through a heldWrites, so that the test decides when the
+// server receives what the client writes.
+func dialHeld(t *testing.T, url string) (*websocket.Conn, *heldWrites) {
+	t.Helper()
+	writes := &heldWrites{held: make(chan struct{}, 1), resumed: make(chan struct{})}
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		writes.Conn = conn
+		return writes, nil
+	}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	conn, resp, err := websocket.Dial(ctx, url, nil)
-	if err == nil {
-		t.Cleanup(func() { _ = conn.CloseNow() })
-		return http.StatusSwitchingProtocols
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: client})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	// Cleanups run last to first: a held write must end before CloseNow,
+	// which waits for it.
+	t.Cleanup(writes.resume)
+	return conn, writes
+}
+
+// await fails the test unless ch is ready within a few seconds.
+func await(t *testing.T, ch <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal(failure)
 	}
-	if resp == nil {
-		return 0
-	}
-	return resp.StatusCode
 }
 
 func TestRealtime_ConnectionHoldsItsSlotUntilClosed(t *testing.T) {
 	options := testOptions()
 	options.AuthTimeout = 50 * time.Millisecond
 	options.MaxConnections = 1
-	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
-	conn := dial(t, url)
-	// The authentication times out, but the client does not read the close
-	// frame, so the close handshake and with it the connection go on.
-	require.Never(t, func() bool { return dialStatus(t, url) != http.StatusServiceUnavailable }, 300*time.Millisecond, 20*time.Millisecond)
-	require.Equal(t, websocket.StatusCode(4001), closedWith(t, conn))
-	require.Eventually(t, func() bool { return dialStatus(t, url) == http.StatusSwitchingProtocols }, 3*time.Second, 20*time.Millisecond)
+	h := handler.NewRealtime(realtime.NewHub(nopStream{}, 5, 8), tokens{}, options, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	// served is closed when the handler of the first connection returns, by
+	// which time the connection has given up its slot.
+	served := make(chan struct{})
+	var first sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isFirst := false
+		first.Do(func() { isFirst = true })
+		h.ServeHTTP(w, r)
+		if isFirst {
+			close(served)
+		}
+	}))
+	t.Cleanup(server.Close)
+	url := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, writes := dialHeld(t, url)
+	writes.hold()
+	// The authentication times out and the server sends its close frame; the
+	// client reads it, but its answer is held, so the close handshake goes on.
+	code := make(chan websocket.StatusCode, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _, err := conn.Read(ctx)
+		code <- websocket.CloseStatus(err)
+	}()
+	await(t, writes.held, "the client did not answer a close frame")
+	requireRefused(t, url)
+	writes.resume()
+	require.Equal(t, websocket.StatusCode(4001), <-code)
+	// Once the handshake ends and the handler returns, the slot admits a new
+	// connection at once.
+	await(t, served, "the handler did not return after the close handshake")
+	dial(t, url)
 }
