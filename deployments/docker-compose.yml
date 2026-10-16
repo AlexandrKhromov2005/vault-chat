@@ -224,6 +224,9 @@ services:
       GATEWAY_REDIS_ADDR: redis:6379
       # Plain HTTP for local use; TLS needs a certificate mounted like the
       # JWT keys and GATEWAY_TLS_CERT_PATH / GATEWAY_TLS_KEY_PATH set.
+      # WebSocket upgrades (/api/v1/ws) also accept clients without an Origin
+      # header and the gateway's own origin; other browser origins must be
+      # listed here. The GATEWAY_WS_* limits keep their defaults.
       GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-}
       GATEWAY_LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-info}
     ports:
@@ -243,7 +246,10 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
-    # Lets in-flight requests finish: the gateway drains for up to 15s.
+    # Lets in-flight requests finish and WebSocket connections close: the
+    # gateway closes every connection with 1001 and drains REST requests
+    # within one 15s shutdown timeout. The rest is headroom for closing
+    # Redis and gRPC connections.
     stop_grace_period: 20s
 
 volumes:
