@@ -13,7 +13,7 @@ import (
 )
 
 func TestRouter_ChatRoutesRequireIdentity(t *testing.T) {
-	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}, {"GET", "/api/v1/rooms"}, {"GET", "/api/v1/rooms/id/members"}} {
+	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}, {"GET", "/api/v1/rooms"}, {"GET", "/api/v1/rooms/id/members"}, {"DELETE", "/api/v1/rooms/id/members/peer"}, {"DELETE", "/api/v1/rooms/id/members/me"}} {
 		f := newFixture(t)
 		f.allow("ip:203.0.113.7")
 		rec := f.serve(httptest.NewRequest(tc.method, tc.path, nil))
@@ -43,4 +43,21 @@ func TestRouter_RoomListRoute(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer tok")
 	rec := f.serve(req)
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRouter_MemberRoutesSeparateLeavingFromRemoval(t *testing.T) {
+	f := newFixture(t)
+	for range 2 {
+		f.allow("ip:203.0.113.7")
+		f.allow("user:u-1")
+	}
+	f.validator.EXPECT().ValidateToken(mock.Anything, &authv1.ValidateTokenRequest{Token: "tok"}).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1"}, nil).Times(2)
+	f.chat.EXPECT().LeaveRoom(mock.Anything, &chatv1.LeaveRoomRequest{RoomId: "room"}).Return(&chatv1.LeaveRoomResponse{}, nil).Once()
+	f.chat.EXPECT().RemoveMember(mock.Anything, &chatv1.RemoveMemberRequest{RoomId: "room", UserId: "peer"}).Return(&chatv1.RemoveMemberResponse{}, nil).Once()
+	for _, path := range []string{"/api/v1/rooms/room/members/me", "/api/v1/rooms/room/members/peer"} {
+		req := httptest.NewRequest(http.MethodDelete, path, nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := f.serve(req)
+		require.Equal(t, http.StatusNoContent, rec.Code, path)
+	}
 }

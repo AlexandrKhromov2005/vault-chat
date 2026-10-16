@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
@@ -18,7 +20,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
 )
 
-func TestMembersREST_ListPages(t *testing.T) {
+func TestMembersREST_ListRemoveAndLeave(t *testing.T) {
 	client := mocks.NewMockChatClient(t)
 	h := handler.NewChatHandler(client, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	cursor := uuid.NewString()
@@ -38,14 +40,30 @@ func TestMembersREST_ListPages(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.Members(rec, req)
 	require.JSONEq(t, `{"members":[],"next_cursor":""}`, rec.Body.String())
+	client.EXPECT().RemoveMember(mock.Anything, &chatv1.RemoveMemberRequest{RoomId: "room", UserId: "member"}).Return(&chatv1.RemoveMemberResponse{}, nil).Once()
+	req = chatRequest(http.MethodDelete, "")
+	req.SetPathValue("room_id", "room")
+	req.SetPathValue("user_id", "member")
+	rec = httptest.NewRecorder()
+	h.RemoveMember(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	client.EXPECT().LeaveRoom(mock.Anything, &chatv1.LeaveRoomRequest{RoomId: "room"}).Return(nil, status.Error(codes.FailedPrecondition, "channel owner cannot leave or be removed")).Once()
+	req = chatRequest(http.MethodDelete, "")
+	req.SetPathValue("room_id", "room")
+	rec = httptest.NewRecorder()
+	h.LeaveRoom(rec, req)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Contains(t, rec.Body.String(), `"failed_precondition"`)
 }
 
 func TestMembersREST_RejectsMissingIdentityAndInvalidQueries(t *testing.T) {
 	client := mocks.NewMockChatClient(t)
 	h := handler.NewChatHandler(client, slog.New(slog.NewJSONHandler(io.Discard, nil)))
-	rec := httptest.NewRecorder()
-	h.Members(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	for _, method := range []http.HandlerFunc{h.Members, h.RemoveMember, h.LeaveRoom} {
+		rec := httptest.NewRecorder()
+		method(rec, httptest.NewRequest(http.MethodDelete, "/", nil))
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+	}
 	id := uuid.NewString()
 	for _, query := range []string{"limit=0", "limit=101", "cursor=1", "cursor=" + id + "&cursor=" + id, "cursor=urn:uuid:" + id, "room_id=" + id} {
 		req := chatRequest(http.MethodGet, "")
