@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -12,6 +13,49 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
 )
+
+func TestChatMembers_ListedOnlyToMembersInUserOrder(t *testing.T) {
+	pool := newChatPool(t)
+	repo := repository.NewRoomRepository(pool)
+	ctx := context.Background()
+	owner, outsider := uuid.NewString(), uuid.NewString()
+	room, err := repo.CreateChannel(ctx, owner, "roster", true)
+	require.NoError(t, err)
+	want := []string{owner}
+	for range 4 {
+		member := uuid.NewString()
+		require.NoError(t, repo.AddChannelMember(ctx, room.ID, owner, member))
+		want = append(want, member)
+	}
+	sort.Strings(want)
+	var got []string
+	after := ""
+	for {
+		page, err := repo.ListMembers(ctx, room.ID, want[1], after, 2)
+		require.NoError(t, err)
+		if len(page) == 0 {
+			break
+		}
+		for _, member := range page {
+			require.False(t, member.JoinedAt.IsZero())
+			got = append(got, member.UserID)
+			after = member.UserID
+		}
+	}
+	require.Equal(t, want, got)
+	for _, id := range []string{room.ID, uuid.NewString()} {
+		_, err = repo.ListMembers(ctx, id, outsider, "", 10)
+		require.ErrorIs(t, err, domain.ErrNotFound)
+	}
+	page, err := repo.ListMembers(ctx, room.ID, owner, want[len(want)-1], 10)
+	require.NoError(t, err)
+	require.Empty(t, page)
+	direct, err := repo.GetOrCreateDirect(ctx, owner, outsider)
+	require.NoError(t, err)
+	page, err = repo.ListMembers(ctx, direct.ID, outsider, "", 10)
+	require.NoError(t, err)
+	require.Len(t, page, 2)
+}
 
 // behindRoomLock runs op while another transaction holds the room lock and has
 // already changed membership, and commits that change once op waits for the lock.
