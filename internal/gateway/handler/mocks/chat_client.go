@@ -321,6 +321,80 @@ func (_c *MockChatClient_GetRoom_Call) RunAndReturn(run func(context.Context, *c
 	return _c
 }
 
+// ListMembers provides a mock function with given fields: _a0, _a1, _a2
+func (_m *MockChatClient) ListMembers(_a0 context.Context, _a1 *chatv1.ListMembersRequest, _a2 ...grpc.CallOption) (*chatv1.ListMembersResponse, error) {
+	_va := make([]interface{}, len(_a2))
+	for _i := range _a2 {
+		_va[_i] = _a2[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _a0, _a1)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListMembers")
+	}
+
+	var r0 *chatv1.ListMembersResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.ListMembersRequest, ...grpc.CallOption) (*chatv1.ListMembersResponse, error)); ok {
+		return rf(_a0, _a1, _a2...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.ListMembersRequest, ...grpc.CallOption) *chatv1.ListMembersResponse); ok {
+		r0 = rf(_a0, _a1, _a2...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*chatv1.ListMembersResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *chatv1.ListMembersRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(_a0, _a1, _a2...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockChatClient_ListMembers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListMembers'
+type MockChatClient_ListMembers_Call struct {
+	*mock.Call
+}
+
+// ListMembers is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *chatv1.ListMembersRequest
+//   - _a2 ...grpc.CallOption
+func (_e *MockChatClient_Expecter) ListMembers(_a0 interface{}, _a1 interface{}, _a2 ...interface{}) *MockChatClient_ListMembers_Call {
+	return &MockChatClient_ListMembers_Call{Call: _e.mock.On("ListMembers",
+		append([]interface{}{_a0, _a1}, _a2...)...)}
+}
+
+func (_c *MockChatClient_ListMembers_Call) Run(run func(_a0 context.Context, _a1 *chatv1.ListMembersRequest, _a2 ...grpc.CallOption)) *MockChatClient_ListMembers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*chatv1.ListMembersRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockChatClient_ListMembers_Call) Return(_a0 *chatv1.ListMembersResponse, _a1 error) *MockChatClient_ListMembers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockChatClient_ListMembers_Call) RunAndReturn(run func(context.Context, *chatv1.ListMembersRequest, ...grpc.CallOption) (*chatv1.ListMembersResponse, error)) *MockChatClient_ListMembers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListMessages provides a mock function with given fields: _a0, _a1, _a2
 func (_m *MockChatClient) ListMessages(_a0 context.Context, _a1 *chatv1.ListMessagesRequest, _a2 ...grpc.CallOption) (*chatv1.ListMessagesResponse, error) {
 	_va := make([]interface{}, len(_a2))
