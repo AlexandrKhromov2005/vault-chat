@@ -51,3 +51,9 @@ type RoomPosition struct {
 	Activity time.Time
 	ID       string
 }
+
+// Member is one membership of a room, as seen by another member.
+type Member struct {
+	UserID   string
+	JoinedAt time.Time
+}
