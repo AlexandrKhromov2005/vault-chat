@@ -36,3 +36,18 @@ type Room struct {
 	// ParticipantIDs holds both direct participants in UUID order; nil for channels.
 	ParticipantIDs []string
 }
+
+// RoomSummary is a room in its member's list. Activity is the later of the last
+// message and the member's enrollment; LastMessageAt is nil without messages.
+type RoomSummary struct {
+	Room
+	LastMessageAt *time.Time
+	Activity      time.Time
+}
+
+// RoomPosition is an exclusive keyset position in a member's room list, ordered
+// by Activity and then ID, both descending. The zero value starts at the newest.
+type RoomPosition struct {
+	Activity time.Time
+	ID       string
+}
