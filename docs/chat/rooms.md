@@ -50,6 +50,33 @@ mTLS remains a separate implementation task.
 - The repository checks membership and management rights itself; a transport
   cannot authorize a write using a separate, potentially stale membership read.
 
+## Room list
+
+The internal room service lists the caller's rooms. Each item is the room
+metadata plus the time of the room's latest message, absent when the room has
+no messages. Only rooms with the caller's membership are listed.
+
+Rooms are ordered by activity, newest first, then by room ID descending.
+Activity is the later of the latest message and the caller's own enrollment.
+A channel the caller was just invited to therefore appears at the top even if
+it has been quiet for a long time; for other rooms activity starts at creation.
+The default limit is 50, explicit limits are 1–100. Each page returns the
+cursor of the next one; an empty next cursor means that the page reached the
+end at the time of the read. Noncanonical cursors and limits are rejected
+before storage is queried.
+
+Cursors are keyset positions `<activity Unix microseconds>_<room UUID>`,
+exclusive of the last returned room. Clients must treat them as opaque; they are
+not credentials and every page is filtered by the caller's current membership.
+A room with new activity after the first page moves to the top and is not shown
+again on later pages, while rooms that were not touched are neither skipped nor
+repeated. Fetch the first page again to see newly active rooms.
+
+The latest message is found through the room's message sequence and the unique
+`(room_id, sequence)` index, so no activity column is maintained. Each page
+sorts all of the caller's memberships; this is adequate for the expected number
+of rooms per user and can be replaced by a maintained activity index later.
+
 ## Verification
 
 Unit and fuzz tests do not need infrastructure. PostgreSQL integration tests use
