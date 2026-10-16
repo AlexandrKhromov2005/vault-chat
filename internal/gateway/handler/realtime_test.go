@@ -22,6 +22,7 @@ import (
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 )
 
@@ -61,9 +62,17 @@ func testOptions() handler.RealtimeOptions {
 
 func startRealtime(t *testing.T, hub *realtime.Hub, validator tokens, options handler.RealtimeOptions) string {
 	t.Helper()
-	server := httptest.NewServer(handler.NewRealtime(hub, validator, options, slog.New(slog.NewJSONHandler(io.Discard, nil))))
+	_, url := startRealtimeHandler(t, hub, validator, options)
+	return url
+}
+
+// startRealtimeHandler serves the endpoint and also returns its handler.
+func startRealtimeHandler(t *testing.T, hub *realtime.Hub, validator middleware.TokenValidator, options handler.RealtimeOptions) (*handler.Realtime, string) {
+	t.Helper()
+	h := handler.NewRealtime(hub, validator, options, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-	return "ws" + strings.TrimPrefix(server.URL, "http")
+	return h, "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
 func dial(t *testing.T, url string) *websocket.Conn {
@@ -333,4 +342,44 @@ func requireReady(t *testing.T, url string) {
 		_, ok := tryReady(t, url, "alice-token")
 		return ok
 	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRealtime_ShutdownClosesEveryConnectionWithGoingAway(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	h, url := startRealtimeHandler(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
+	authenticated, pending := dial(t, url), dial(t, url)
+	authenticate(t, authenticated, "alice-token")
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- h.Shutdown(context.Background()) }()
+	// The clients are not reading yet, so their close handshakes cannot
+	// complete and Shutdown must keep waiting for them.
+	require.Never(t, func() bool { return len(shutdown) > 0 }, 300*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, authenticated))
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, pending), "a connection that has not authenticated yet")
+	select {
+	case err := <-shutdown:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Shutdown did not return after the connections closed")
+	}
+	// New connections are refused before upgrading.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, url, nil)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	require.NotEmpty(t, resp.Header.Get("Retry-After"))
+}
+
+func TestRealtime_ShutdownGivesUpWhenTheContextEnds(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	h, url := startRealtimeHandler(t, realtime.NewHub(nopStream{}, 5, 8), tokens{}, options)
+	conn := dial(t, url)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	// The client never answers the close frame.
+	require.ErrorIs(t, h.Shutdown(ctx), context.DeadlineExceeded)
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
 }
