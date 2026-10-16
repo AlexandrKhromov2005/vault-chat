@@ -64,6 +64,8 @@ func FromGRPC(err error) (statusCode int, code, message string) {
 		return http.StatusNotFound, "not_found", st.Message()
 	case codes.AlreadyExists:
 		return http.StatusConflict, "already_exists", st.Message()
+	case codes.FailedPrecondition:
+		return http.StatusConflict, "failed_precondition", st.Message()
 	case codes.ResourceExhausted:
 		return http.StatusTooManyRequests, "rate_limited", st.Message()
 	case codes.DeadlineExceeded:

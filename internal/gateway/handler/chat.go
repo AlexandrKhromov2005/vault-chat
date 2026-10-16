@@ -24,6 +24,8 @@ type ChatClient interface {
 	ListRooms(context.Context, *chatv1.ListRoomsRequest, ...grpc.CallOption) (*chatv1.ListRoomsResponse, error)
 	AddMember(context.Context, *chatv1.AddMemberRequest, ...grpc.CallOption) (*chatv1.AddMemberResponse, error)
 	ListMembers(context.Context, *chatv1.ListMembersRequest, ...grpc.CallOption) (*chatv1.ListMembersResponse, error)
+	RemoveMember(context.Context, *chatv1.RemoveMemberRequest, ...grpc.CallOption) (*chatv1.RemoveMemberResponse, error)
+	LeaveRoom(context.Context, *chatv1.LeaveRoomRequest, ...grpc.CallOption) (*chatv1.LeaveRoomResponse, error)
 }
 
 // ChatHandler translates authenticated REST requests into Chat RPC calls.

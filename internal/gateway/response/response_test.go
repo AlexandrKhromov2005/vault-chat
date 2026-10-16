@@ -53,6 +53,8 @@ func TestFromGRPC(t *testing.T) {
 			http.StatusNotFound, "not_found", "no such user"},
 		{"already exists", status.Error(codes.AlreadyExists, "email already registered"),
 			http.StatusConflict, "already_exists", "email already registered"},
+		{"failed precondition", status.Error(codes.FailedPrecondition, "channel owner cannot leave or be removed"),
+			http.StatusConflict, "failed_precondition", "channel owner cannot leave or be removed"},
 		{"resource exhausted", status.Error(codes.ResourceExhausted, "quota exceeded"),
 			http.StatusTooManyRequests, "rate_limited", "quota exceeded"},
 		// Server-side failures never leak upstream messages to clients.

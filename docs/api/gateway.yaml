@@ -447,7 +447,49 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/rooms/{room_id}/members/me:
+    delete:
+      summary: Leave a channel
+      description: |
+        Removes the caller's membership; access ends immediately. Direct
+        dialogs cannot be left (403). The owner cannot leave until ownership
+        transfer exists (409). A former member receives 404.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/RoomID"}
+      responses:
+        "204": {description: The caller is no longer a member.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/OwnerMembership"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
   /api/v1/rooms/{room_id}/members/{user_id}:
+    delete:
+      summary: Remove a member from a channel as its owner
+      description: |
+        Idempotent: removing a nonmember returns 204. The target's access ends
+        immediately. Direct dialogs are forbidden; the owner cannot be removed.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/RoomID"}
+        - {$ref: "#/components/parameters/UserID"}
+      responses:
+        "204": {description: User is not a member of the channel.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/OwnerMembership"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
     put:
       summary: Add an existing user to a channel as its owner
       description: Idempotent; adding a third direct-dialog participant is forbidden.
@@ -648,7 +690,7 @@ components:
             code:
               type: string
               enum: [invalid_argument, invalid_json, unauthenticated, permission_denied, not_found,
-                     already_exists, body_too_large, unsupported_media_type, rate_limited,
+                     already_exists, failed_precondition, body_too_large, unsupported_media_type, rate_limited,
                      cors_forbidden, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
@@ -660,6 +702,11 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
       description: Caller is not the channel owner, or the room is a direct dialog.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    OwnerMembership:
+      description: The channel owner cannot leave or be removed (`failed_precondition`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
