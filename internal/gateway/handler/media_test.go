@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -14,8 +15,11 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
@@ -27,6 +31,9 @@ type mediaServer struct {
 }
 
 func (s *mediaServer) Upload(stream grpc.ClientStreamingServer[mediav1.UploadRequest, mediav1.UploadResponse]) error {
+	if ids := metadata.ValueFromIncomingContext(stream.Context(), requestid.MetadataKey); len(ids) != 1 || ids[0] != "media-test-id" {
+		return fmt.Errorf("missing correlation ID")
+	}
 	first, err := stream.Recv()
 	if err != nil {
 		return err
@@ -78,7 +85,7 @@ func TestMediaHTTP(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/", &body)
 		r.Header.Set("Content-Type", writer.FormDataContentType())
 		r.SetPathValue("room_id", "room")
-		r = r.WithContext(middleware.WithIdentity(r.Context(), middleware.Identity{Token: "good", UserID: "actor"}))
+		r = r.WithContext(middleware.WithIdentity(requestid.NewContext(r.Context(), "media-test-id"), middleware.Identity{Token: "good", UserID: "actor"}))
 		w := httptest.NewRecorder()
 		h.Upload(w, r)
 		want := http.StatusCreated
@@ -101,7 +108,7 @@ func TestMediaHTTP(t *testing.T) {
 		t.Fatal("invalid multipart committed")
 	}
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r = r.WithContext(middleware.WithIdentity(r.Context(), middleware.Identity{Token: "good", UserID: "actor"}))
+	r = r.WithContext(middleware.WithIdentity(requestid.NewContext(r.Context(), "media-test-id"), middleware.Identity{Token: "good", UserID: "actor"}))
 	w := httptest.NewRecorder()
 	h.Download(w, r)
 	if w.Code != 200 || w.Body.String() != "hello" || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Disposition") != "attachment; filename=a.txt" {

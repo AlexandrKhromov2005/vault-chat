@@ -12,7 +12,10 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
@@ -54,7 +57,7 @@ func fileJSON(f *mediav1.File) fileResponse {
 
 // Upload accepts exactly one multipart field named file, up to ten MiB.
 func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := chatContext(w, r)
+	ctx, ok := mediaContext(w, r)
 	if !ok {
 		return
 	}
@@ -135,7 +138,7 @@ func (h *MediaHandler) uploadError(w http.ResponseWriter, r *http.Request, strea
 
 // File returns metadata only after Media checks current room membership.
 func (h *MediaHandler) File(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := chatContext(w, r)
+	ctx, ok := mediaContext(w, r)
 	if !ok {
 		return
 	}
@@ -149,7 +152,7 @@ func (h *MediaHandler) File(w http.ResponseWriter, r *http.Request) {
 
 // Download forces attachment handling and never serves active content inline.
 func (h *MediaHandler) Download(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := chatContext(w, r)
+	ctx, ok := mediaContext(w, r)
 	if !ok {
 		return
 	}
@@ -195,4 +198,16 @@ func (h *MediaHandler) backendError(w http.ResponseWriter, r *http.Request, err 
 	}
 	h.logger.WarnContext(r.Context(), "media request failed", "code", status.Code(err))
 	response.GRPCError(w, err)
+}
+
+// Streaming RPCs do not run the unary correlation interceptor.
+func mediaContext(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
+	ctx, ok := chatContext(w, r)
+	if !ok {
+		return ctx, false
+	}
+	if id := requestid.FromContext(ctx); id != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, requestid.MetadataKey, id)
+	}
+	return ctx, true
 }
