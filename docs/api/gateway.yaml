@@ -477,6 +477,12 @@ components:
         owner_id: {type: string, format: uuid, description: Only present for channels.}
         private: {type: boolean}
         created_at: {type: string, format: date-time}
+        participant_ids:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: {type: string, format: uuid}
+          description: Only present for direct dialogs. Both participants, including the caller, in UUID order.
     User:
       type: object
       properties:
