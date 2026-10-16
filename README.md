@@ -193,7 +193,12 @@ loopback; чтобы открыть его в сети (например, для
   пользователя (uid 65532), корневая ФС только для чтения.
 - Healthcheck выполняет встроенный бинарник `cmd/healthcheck`: для Auth и Chat —
   стандартный gRPC health check, для Gateway — `GET /health`. Порядок старта:
-  Chat ждёт healthy Auth, Gateway — healthy Auth, Chat и Redis.
+  Chat ждёт healthy Auth и Redis, Gateway — healthy Auth, Chat и Redis.
+  Redis задаёт только порядок старта Chat и не входит в его healthcheck: если
+  Redis недоступен, Chat продолжает работать без событий.
+- Chat публикует события в Redis сети Compose (`redis:6379`). При остановке
+  Compose ждёт до 15 секунд (`stop_grace_period`): до 5 секунд на текущие
+  RPC и до 5 секунд (`CHAT_EVENT_DRAIN_TIMEOUT`) на публикацию очереди событий.
 - Ключи и сертификаты не попадают в образы: `.dockerignore` исключает
   `secrets/` и `.env`, а ключи JWT монтируются в Auth только для чтения в
   `/run/secrets/`. Скрипт делает файлы ключей читаемыми для пользователя
