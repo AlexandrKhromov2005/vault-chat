@@ -34,7 +34,7 @@ enum RoomKind {
   ROOM_KIND_CHANNEL = 2;
 }
 
-// Room contains metadata visible to members. It does not expose the roster.
+// Room contains metadata visible to members. It does not expose a channel roster.
 message Room {
   string id = 1;
   RoomKind kind = 2;
@@ -44,6 +44,8 @@ message Room {
   string owner_id = 4;
   bool private = 5;
   google.protobuf.Timestamp created_at = 6;
+  // Both direct participants, including the caller, in UUID order; empty for channels.
+  repeated string participant_ids = 7;
 }
 
 message GetOrCreateDirectRequest {

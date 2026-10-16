@@ -39,7 +39,9 @@ mTLS remains a separate implementation task.
 - A direct dialog contains two distinct nonzero user UUIDs and is always private.
   Both participants have equal rights; there is no owner and no operation for
   adding a third participant. Repeated creation in either order returns the same
-  room, including concurrent creation.
+  room, including concurrent creation. Every operation returning a dialog reports
+  both participants, including the caller, in `participant_ids` in UUID order.
+  Channels leave it empty; their roster is not part of room metadata.
 - A channel has one owner, enrolled atomically during creation. Names contain
   1–80 Unicode code points, without control characters or surrounding whitespace;
   they need not be unique. The owner can add members idempotently. Adding an

@@ -169,7 +169,8 @@ func roomProto(room *domain.Room) *chatv1.Room {
 	if room.Kind == domain.Direct {
 		kind = chatv1.RoomKind_ROOM_KIND_DIRECT
 	}
-	return &chatv1.Room{Id: room.ID, Kind: kind, Name: room.Name, OwnerId: room.OwnerID, Private: room.Private, CreatedAt: timestamppb.New(room.CreatedAt)}
+	return &chatv1.Room{Id: room.ID, Kind: kind, Name: room.Name, OwnerId: room.OwnerID, Private: room.Private,
+		CreatedAt: timestamppb.New(room.CreatedAt), ParticipantIds: room.ParticipantIDs}
 }
 
 func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {

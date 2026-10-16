@@ -19,7 +19,8 @@ type RoomRepository struct{ pool *pgxpool.Pool }
 // NewRoomRepository binds the repository to Chat's database pool.
 func NewRoomRepository(pool *pgxpool.Pool) *RoomRepository { return &RoomRepository{pool: pool} }
 
-const roomColumns = `id::text, kind, COALESCE(name, ''), COALESCE(owner_id::text, ''), private, created_at`
+const roomColumns = `id::text, kind, COALESCE(name, ''), COALESCE(owner_id::text, ''), private, created_at,
+  COALESCE(direct_user_low::text, ''), COALESCE(direct_user_high::text, '')`
 
 // GetOrCreateDirect creates both memberships atomically. PostgreSQL compares the
 // UUIDs, so input ordering and alternate textual encodings cannot create duplicates.
@@ -90,13 +91,27 @@ func (r *RoomRepository) AddChannelMember(ctx context.Context, roomID, actorID, 
 
 func scanRoom(row pgx.Row) (*domain.Room, error) {
 	var room domain.Room
-	if err := row.Scan(&room.ID, &room.Kind, &room.Name, &room.OwnerID, &room.Private, &room.CreatedAt); err != nil {
+	if err := row.Scan(roomFields(&room)...); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("scan room: %w", err)
 	}
-	return &room, nil
+	return withParticipants(&room), nil
+}
+
+// roomFields scans roomColumns, temporarily storing both direct participants.
+func roomFields(room *domain.Room) []any {
+	room.ParticipantIDs = make([]string, 2)
+	return []any{&room.ID, &room.Kind, &room.Name, &room.OwnerID, &room.Private, &room.CreatedAt,
+		&room.ParticipantIDs[0], &room.ParticipantIDs[1]}
+}
+
+func withParticipants(room *domain.Room) *domain.Room {
+	if room.ParticipantIDs[0] == "" {
+		room.ParticipantIDs = nil
+	}
+	return room
 }
 
 // CreateChannel atomically stores a channel and its owner's membership.
