@@ -3,8 +3,7 @@
 This increment defines `chat.v1.ChatService`, Chat's PostgreSQL schema and the
 internal room service, authenticated gRPC server (`cmd/chat`) and REST routes
 through Gateway.
-Member removal, ownership transfer and public discovery are subsequent
-increments.
+Ownership transfer and public discovery are subsequent increments.
 
 ## Identity boundary
 
@@ -40,7 +39,8 @@ mTLS remains a separate implementation task.
 - A channel has one owner, enrolled atomically during creation. Names contain
   1–80 Unicode code points, without control characters or surrounding whitespace;
   they need not be unique. The owner can add members idempotently. Adding an
-  existing owner does not change ownership.
+  existing owner does not change ownership. Membership changes are described in
+  [Members](#members).
 - Both public and private channels currently require invitation. `private=false`
   reserves discoverability semantics for a later increment, not anonymous access.
 - Reading a nonexistent room or a room without membership returns the same
@@ -49,12 +49,6 @@ mTLS remains a separate implementation task.
   managed as a channel.
 - The repository checks membership and management rights itself; a transport
   cannot authorize a write using a separate, potentially stale membership read.
-- Sends and enrollment lock the room row, so they serialize with each other.
-  Writes check membership only after the room lock is held, in a separate
-  statement with a fresh snapshot: a write that waited behind a membership
-  change sees it, so a send queued behind an invitation succeeds and one queued
-  behind a membership deletion fails as a nonmember. Reads check membership in
-  the same statement as the data they return.
 
 ## Members
 
@@ -66,9 +60,32 @@ Absent rooms and rooms without the caller's membership return `404`
   `{"members":[{"user_id":"…","joined_at":"…"}],"next_cursor":""}` to any
   member, ordered by user ID. A direct dialog lists both participants. Paging
   follows the room list rules: default 50, explicit limits 1–100, and the
-  cursor is the canonical UUID of the last returned member. The roster is read
-  in the same statement as the membership check, so a former member loses it as
-  soon as their membership is gone.
+  cursor is the canonical UUID of the last returned member.
+- `RemoveMember` (gRPC) is channel-only and owner-only; other members get
+  `PERMISSION_DENIED`, as do direct dialogs. Removing a user who is not a
+  member succeeds, so retries are idempotent. The target is not resolved
+  through Auth, so deleted accounts can be removed.
+- `LeaveRoom` (gRPC) removes the caller from a channel. Direct dialogs cannot
+  be left (`PERMISSION_DENIED`). After leaving, the caller is a nonmember, so
+  repeating the request returns `NOT_FOUND`.
+
+The channel owner can neither leave nor be removed: `FAILED_PRECONDITION`. A
+channel without an owner could never be managed again; leaving will become
+possible together with ownership transfer.
+`FAILED_PRECONDITION` rather than `PERMISSION_DENIED` reflects that the request
+depends on the room's state, not on the caller's rights.
+
+Removal and leaving lock the room row and check the caller's membership and
+ownership in the same transaction, like enrollment, so they serialize with
+sends and other membership changes. Writes check membership only after the
+room lock is held, in a separate statement with a fresh snapshot: a send or
+membership change that waited behind a removal sees the removal and fails as a
+nonmember, and one that waited behind an invitation sees the new member. Reads
+check membership in the same statement as the data they return. A removed
+member loses access to metadata, history, sending
+and the roster as soon as the change commits, and the room disappears from
+their list. A former member can be invited again and then sees the whole
+history.
 
 ## Room list
 
