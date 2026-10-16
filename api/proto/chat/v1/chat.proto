@@ -23,6 +23,9 @@ service ChatService {
   // AddMember is owner-only, channel-only and idempotent for an existing member.
   // Public and private channels both require invitation in this first version.
   rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+  // ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
+  // and nonmembers. Direct dialogs list both participants.
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
   // SendMessage retries are idempotent per room, caller and client_message_id.
   // Reusing that key with different text returns ALREADY_EXISTS.
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
@@ -102,6 +105,26 @@ message AddMemberRequest {
 }
 
 message AddMemberResponse {}
+
+// Member is one membership visible to other members of the room.
+message Member {
+  string user_id = 1;
+  google.protobuf.Timestamp joined_at = 2;
+}
+
+message ListMembersRequest {
+  string room_id = 1;
+  // Empty starts at the lowest user ID; otherwise a next_cursor.
+  string cursor = 2;
+  // Zero defaults to 50; explicit limits must be 1–100.
+  int32 limit = 3;
+}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+  // Empty means the end of the roster at the time this page was read.
+  string next_cursor = 2;
+}
 
 // Message is immutable; text has 1–4096 Unicode code points and visible content.
 message Message {

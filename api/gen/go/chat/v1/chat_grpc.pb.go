@@ -24,6 +24,7 @@ const (
 	ChatService_GetRoom_FullMethodName           = "/chat.v1.ChatService/GetRoom"
 	ChatService_ListRooms_FullMethodName         = "/chat.v1.ChatService/ListRooms"
 	ChatService_AddMember_FullMethodName         = "/chat.v1.ChatService/AddMember"
+	ChatService_ListMembers_FullMethodName       = "/chat.v1.ChatService/ListMembers"
 	ChatService_SendMessage_FullMethodName       = "/chat.v1.ChatService/SendMessage"
 	ChatService_ListMessages_FullMethodName      = "/chat.v1.ChatService/ListMessages"
 )
@@ -49,6 +50,9 @@ type ChatServiceClient interface {
 	// AddMember is owner-only, channel-only and idempotent for an existing member.
 	// Public and private channels both require invitation in this first version.
 	AddMember(ctx context.Context, in *AddMemberRequest, opts ...grpc.CallOption) (*AddMemberResponse, error)
+	// ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
+	// and nonmembers. Direct dialogs list both participants.
+	ListMembers(ctx context.Context, in *ListMembersRequest, opts ...grpc.CallOption) (*ListMembersResponse, error)
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
@@ -114,6 +118,16 @@ func (c *chatServiceClient) AddMember(ctx context.Context, in *AddMemberRequest,
 	return out, nil
 }
 
+func (c *chatServiceClient) ListMembers(ctx context.Context, in *ListMembersRequest, opts ...grpc.CallOption) (*ListMembersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMembersResponse)
+	err := c.cc.Invoke(ctx, ChatService_ListMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendMessageResponse)
@@ -155,6 +169,9 @@ type ChatServiceServer interface {
 	// AddMember is owner-only, channel-only and idempotent for an existing member.
 	// Public and private channels both require invitation in this first version.
 	AddMember(context.Context, *AddMemberRequest) (*AddMemberResponse, error)
+	// ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
+	// and nonmembers. Direct dialogs list both participants.
+	ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error)
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
@@ -184,6 +201,9 @@ func (UnimplementedChatServiceServer) ListRooms(context.Context, *ListRoomsReque
 }
 func (UnimplementedChatServiceServer) AddMember(context.Context, *AddMemberRequest) (*AddMemberResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddMember not implemented")
+}
+func (UnimplementedChatServiceServer) ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMembers not implemented")
 }
 func (UnimplementedChatServiceServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
@@ -302,6 +322,24 @@ func _ChatService_AddMember_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_ListMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).ListMembers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_ListMembers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).ListMembers(ctx, req.(*ListMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendMessageRequest)
 	if err := dec(in); err != nil {
@@ -364,6 +402,10 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddMember",
 			Handler:    _ChatService_AddMember_Handler,
+		},
+		{
+			MethodName: "ListMembers",
+			Handler:    _ChatService_ListMembers_Handler,
 		},
 		{
 			MethodName: "SendMessage",
