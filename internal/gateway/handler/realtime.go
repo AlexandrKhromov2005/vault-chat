@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -33,6 +34,9 @@ const (
 // maxClientFrameBytes bounds client frames; an auth frame needs about 1 KiB.
 const maxClientFrameBytes = 4096
 
+// retryAfterSeconds is the Retry-After of refused upgrades.
+const retryAfterSeconds = "5"
+
 // RealtimeOptions are the limits of WebSocket connections.
 type RealtimeOptions struct {
 	// AllowedOrigins are the browser origins allowed besides the Gateway's own,
@@ -60,16 +64,66 @@ type Realtime struct {
 	allowAll  bool
 	origins   map[string]bool
 	logger    *slog.Logger
+
+	// stopping ends when Shutdown starts; every connection then closes.
+	stopping context.Context
+	stop     context.CancelFunc
+	mu       sync.Mutex
+	closed   bool // guarded by mu
+	// conns counts upgraded connections until they are fully closed.
+	conns sync.WaitGroup
 }
 
 // NewRealtime binds the event hub, the Auth token validator and the limits.
 func NewRealtime(hub *realtime.Hub, validator middleware.TokenValidator, options RealtimeOptions, logger *slog.Logger) *Realtime {
-	h := &Realtime{hub: hub, validator: validator, options: options, origins: make(map[string]bool), logger: logger}
+	stopping, stop := context.WithCancel(context.Background())
+	h := &Realtime{hub: hub, validator: validator, options: options, origins: make(map[string]bool), logger: logger,
+		stopping: stopping, stop: stop}
 	for _, origin := range options.AllowedOrigins {
 		h.allowAll = h.allowAll || origin == "*"
 		h.origins[origin] = true
 	}
 	return h
+}
+
+// Shutdown refuses new connections, closes every connection with 1001, whether
+// it has authenticated or not, and waits until all of them are closed or ctx
+// ends. http.Server.Shutdown does not wait for hijacked connections, so the
+// process must call this before it exits.
+func (h *Realtime) Shutdown(ctx context.Context) error {
+	h.mu.Lock()
+	h.closed = true
+	h.mu.Unlock()
+	h.stop()
+	closed := make(chan struct{})
+	go func() {
+		h.conns.Wait()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for WebSocket connections: %w", ctx.Err())
+	}
+}
+
+// admit registers a connection about to be upgraded, unless the endpoint is
+// shutting down. Registering under mu keeps Shutdown from missing it.
+func (h *Realtime) admit() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return false
+	}
+	h.conns.Add(1)
+	return true
+}
+
+// refuse answers an upgrade during shutdown with 503 and a hint when to retry.
+func refuse(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", retryAfterSeconds)
+	response.Error(w, http.StatusServiceUnavailable, "shutting_down", "server shutting down")
 }
 
 // closeError ends a connection with a close code and a fixed reason.
@@ -93,8 +147,8 @@ type connection struct {
 	// ended asks the writer to close; nil means the connection is already gone.
 	ended   chan *closeError
 	workers sync.WaitGroup
-	// closers counts closes scheduled from timers, each until it has run to
-	// completion or been canceled.
+	// closers counts closes scheduled from timers and Shutdown, each until
+	// it has run to completion or been canceled.
 	closers sync.WaitGroup
 }
 
@@ -128,6 +182,13 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusForbidden, "origin_forbidden", "origin not allowed")
 		return
 	}
+	// Refusing before the upgrade spares the connection and lets clients
+	// read the status and Retry-After.
+	if !h.admit() {
+		refuse(w)
+		return
+	}
+	defer h.conns.Done()
 	// The origin was checked above against the configured list.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
@@ -135,14 +196,20 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(maxClientFrameBytes)
 	c := &connection{Realtime: h, conn: conn, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	// Shutdown closes the connection at any stage; reads and writes in
+	// progress then fail and serve returns.
+	closeOnShutdown, keepOpen := c.closeLater(goingAway())
+	stopWatching := context.AfterFunc(h.stopping, closeOnShutdown)
 	// Reads must not be given a context that ends before the close handshake:
 	// coder/websocket drops the connection without a close frame when it does.
 	ctx, cancel := context.WithCancel(r.Context())
 	if end := c.serve(ctx); end != nil {
 		_ = conn.Close(end.code, end.reason)
 	}
-	// A close started by a timer must finish its handshake before the handler
-	// returns.
+	stopWatching()
+	keepOpen()
+	// A close started by a timer or Shutdown must finish its handshake before
+	// the handler returns and Shutdown stops waiting for it.
 	c.closers.Wait()
 	_ = conn.CloseNow()
 	cancel()
