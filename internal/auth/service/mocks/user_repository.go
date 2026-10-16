@@ -187,6 +187,67 @@ func (_c *MockUserRepository_GetByID_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// SearchByUsernamePrefix provides a mock function with given fields: ctx, prefix, excludeID, limit
+func (_m *MockUserRepository) SearchByUsernamePrefix(ctx context.Context, prefix string, excludeID string, limit int) ([]*domain.User, error) {
+	ret := _m.Called(ctx, prefix, excludeID, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SearchByUsernamePrefix")
+	}
+
+	var r0 []*domain.User
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) ([]*domain.User, error)); ok {
+		return rf(ctx, prefix, excludeID, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) []*domain.User); ok {
+		r0 = rf(ctx, prefix, excludeID, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*domain.User)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) error); ok {
+		r1 = rf(ctx, prefix, excludeID, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockUserRepository_SearchByUsernamePrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchByUsernamePrefix'
+type MockUserRepository_SearchByUsernamePrefix_Call struct {
+	*mock.Call
+}
+
+// SearchByUsernamePrefix is a helper method to define mock.On call
+//   - ctx context.Context
+//   - prefix string
+//   - excludeID string
+//   - limit int
+func (_e *MockUserRepository_Expecter) SearchByUsernamePrefix(ctx interface{}, prefix interface{}, excludeID interface{}, limit interface{}) *MockUserRepository_SearchByUsernamePrefix_Call {
+	return &MockUserRepository_SearchByUsernamePrefix_Call{Call: _e.mock.On("SearchByUsernamePrefix", ctx, prefix, excludeID, limit)}
+}
+
+func (_c *MockUserRepository_SearchByUsernamePrefix_Call) Run(run func(ctx context.Context, prefix string, excludeID string, limit int)) *MockUserRepository_SearchByUsernamePrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int))
+	})
+	return _c
+}
+
+func (_c *MockUserRepository_SearchByUsernamePrefix_Call) Return(_a0 []*domain.User, _a1 error) *MockUserRepository_SearchByUsernamePrefix_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockUserRepository_SearchByUsernamePrefix_Call) RunAndReturn(run func(context.Context, string, string, int) ([]*domain.User, error)) *MockUserRepository_SearchByUsernamePrefix_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockUserRepository creates a new instance of MockUserRepository. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockUserRepository(t interface {
