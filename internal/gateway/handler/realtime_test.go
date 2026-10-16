@@ -50,6 +50,27 @@ type nopStream struct{}
 func (nopStream) Subscribe(context.Context, string) error   { return nil }
 func (nopStream) Unsubscribe(context.Context, string) error { return nil }
 
+// blockingValidator holds every call until its context ends, reporting on
+// entered that a call is waiting.
+type blockingValidator struct{ entered chan struct{} }
+
+func (v blockingValidator) ValidateToken(ctx context.Context, _ *authv1.ValidateTokenRequest, _ ...grpc.CallOption) (*authv1.ValidateTokenResponse, error) {
+	v.entered <- struct{}{}
+	<-ctx.Done()
+	return nil, status.FromContextError(ctx.Err()).Err()
+}
+
+// blockingStream holds every subscription until its context ends.
+type blockingStream struct{ entered chan struct{} }
+
+func (s blockingStream) Subscribe(ctx context.Context, _ string) error {
+	s.entered <- struct{}{}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (blockingStream) Unsubscribe(context.Context, string) error { return nil }
+
 func testOptions() handler.RealtimeOptions {
 	return handler.RealtimeOptions{
 		AllowedOrigins: []string{"https://app.example"},
@@ -382,4 +403,54 @@ func TestRealtime_ShutdownGivesUpWhenTheContextEnds(t *testing.T) {
 	// The client never answers the close frame.
 	require.ErrorIs(t, h.Shutdown(ctx), context.DeadlineExceeded)
 	require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
+}
+
+func TestRealtime_ShutdownInterruptsAuthentication(t *testing.T) {
+	expires := time.Now().Add(time.Hour)
+	for _, tc := range []struct {
+		name      string
+		hub       func(entered chan struct{}) *realtime.Hub
+		validator func(entered chan struct{}) middleware.TokenValidator
+	}{
+		{
+			name: "token check in progress",
+			hub:  func(chan struct{}) *realtime.Hub { return realtime.NewHub(nopStream{}, 5, 8) },
+			validator: func(entered chan struct{}) middleware.TokenValidator {
+				return blockingValidator{entered: entered}
+			},
+		},
+		{
+			name: "subscription in progress",
+			hub: func(entered chan struct{}) *realtime.Hub {
+				return realtime.NewHub(blockingStream{entered: entered}, 5, 8)
+			},
+			validator: func(chan struct{}) middleware.TokenValidator {
+				return tokens{"alice-token": {"alice", expires}}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The limits would only end these calls after an hour.
+			options := testOptions()
+			options.AuthTimeout = time.Hour
+			entered := make(chan struct{}, 1)
+			h, url := startRealtimeHandler(t, tc.hub(entered), tc.validator(entered), options)
+			conn := dial(t, url)
+			send(t, conn, `{"type":"auth","token":"alice-token"}`)
+			select {
+			case <-entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("authentication did not start")
+			}
+			shutdown := make(chan error, 1)
+			go func() { shutdown <- h.Shutdown(context.Background()) }()
+			require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
+			select {
+			case err := <-shutdown:
+				require.NoError(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("Shutdown waited for the authentication to finish")
+			}
+		})
+	}
 }
