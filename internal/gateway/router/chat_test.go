@@ -13,7 +13,7 @@ import (
 )
 
 func TestRouter_ChatRoutesRequireIdentity(t *testing.T) {
-	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}} {
+	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}, {"GET", "/api/v1/rooms"}} {
 		f := newFixture(t)
 		f.allow("ip:203.0.113.7")
 		rec := f.serve(httptest.NewRequest(tc.method, tc.path, nil))
@@ -28,6 +28,18 @@ func TestRouter_RoomPathAndPerUserRateLimit(t *testing.T) {
 	f.validator.EXPECT().ValidateToken(mock.Anything, &authv1.ValidateTokenRequest{Token: "tok"}).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1"}, nil).Once()
 	f.chat.EXPECT().GetRoom(mock.Anything, &chatv1.GetRoomRequest{RoomId: "room"}).Return(&chatv1.GetRoomResponse{Room: &chatv1.Room{Id: "room"}}, nil).Once()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/rooms/room", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := f.serve(req)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRouter_RoomListRoute(t *testing.T) {
+	f := newFixture(t)
+	f.allow("ip:203.0.113.7")
+	f.allow("user:u-1")
+	f.validator.EXPECT().ValidateToken(mock.Anything, &authv1.ValidateTokenRequest{Token: "tok"}).Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1"}, nil).Once()
+	f.chat.EXPECT().ListRooms(mock.Anything, &chatv1.ListRoomsRequest{Limit: 5}).Return(&chatv1.ListRoomsResponse{}, nil).Once()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/rooms?limit=5", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	rec := f.serve(req)
 	require.Equal(t, http.StatusOK, rec.Code)
