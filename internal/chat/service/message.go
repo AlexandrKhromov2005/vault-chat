@@ -24,11 +24,18 @@ type MessageRepository interface {
 }
 
 // MessageService validates immutable text messages for authenticated actors.
-type MessageService struct{ messages MessageRepository }
+type MessageService struct {
+	messages    MessageRepository
+	attachments AttachmentChecker
+}
 
 // NewMessageService binds member-authorized message storage.
-func NewMessageService(messages MessageRepository) *MessageService {
-	return &MessageService{messages: messages}
+func NewMessageService(messages MessageRepository, options ...MessageOption) *MessageService {
+	s := &MessageService{messages: messages}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }
 
 // SendMessage canonicalizes the retry key and preserves the original text.

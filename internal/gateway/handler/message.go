@@ -14,17 +14,18 @@ import (
 )
 
 type messageResponse struct {
-	ID        string    `json:"message_id"`
-	RoomID    string    `json:"room_id"`
-	SenderID  string    `json:"sender_id"`
-	ClientID  string    `json:"client_message_id"`
-	Text      string    `json:"text"`
-	Sequence  int64     `json:"sequence"`
-	CreatedAt time.Time `json:"created_at"`
+	AttachmentIDs []string  `json:"attachment_ids,omitempty"`
+	ID            string    `json:"message_id"`
+	RoomID        string    `json:"room_id"`
+	SenderID      string    `json:"sender_id"`
+	ClientID      string    `json:"client_message_id"`
+	Text          string    `json:"text"`
+	Sequence      int64     `json:"sequence"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func messageJSON(message *chatv1.Message) messageResponse {
-	return messageResponse{ID: message.GetId(), RoomID: message.GetRoomId(), SenderID: message.GetSenderId(), ClientID: message.GetClientMessageId(), Text: message.GetText(), Sequence: message.GetSequence(), CreatedAt: message.GetCreatedAt().AsTime()}
+	return messageResponse{ID: message.GetId(), RoomID: message.GetRoomId(), SenderID: message.GetSenderId(), ClientID: message.GetClientMessageId(), Text: message.GetText(), Sequence: message.GetSequence(), CreatedAt: message.GetCreatedAt().AsTime(), AttachmentIDs: message.GetAttachmentIds()}
 }
 
 // SendMessage returns 200 for both the initial send and an identical retry.
@@ -34,14 +35,15 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ClientID string `json:"client_message_id"`
-		Text     string `json:"text"`
+		AttachmentIDs []string `json:"attachment_ids"`
+		ClientID      string   `json:"client_message_id"`
+		Text          string   `json:"text"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		err.write(w)
 		return
 	}
-	resp, err := h.client.SendMessage(ctx, &chatv1.SendMessageRequest{RoomId: r.PathValue("room_id"), ClientMessageId: req.ClientID, Text: req.Text})
+	resp, err := h.client.SendMessage(ctx, &chatv1.SendMessageRequest{RoomId: r.PathValue("room_id"), ClientMessageId: req.ClientID, Text: req.Text, AttachmentIds: req.AttachmentIDs})
 	if err != nil {
 		h.backendError(w, r, err)
 		return
