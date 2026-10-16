@@ -3,7 +3,7 @@
 > Corporate team messenger with security-first design.
 
 This document describes the target architecture, not an inventory of deployed
-features. The implementation in this branch contains Auth, Chat, Gateway and
+features. The implementation currently contains Auth, Chat, Gateway and
 private Media uploads/downloads with message attachments. Image resizing, malware
 scanning, retention, NATS application flows, application-data caching, mTLS,
 metrics and audit storage are planned. See [Media](docs/media/files.md) for the

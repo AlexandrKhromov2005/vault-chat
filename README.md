@@ -5,8 +5,7 @@ Media и API Gateway. Проект находится в разработке: �
 REST; комнаты, отправка сообщений и история доступны через авторизованный Chat API,
 события в реальном времени — через WebSocket.
 
-Статус ниже отражает реализацию в этой ветке на 17 октября 2026 года.
-Изменения Media проходят отдельное review перед включением в `main`.
+Статус ниже отражает реализацию на 17 октября 2026 года.
 [Архитектура](ARCHITECTURE.md) описывает целевую систему; не все её компоненты
 уже реализованы.
 [Требования и план подготовки к защите](docs/requirements.md) содержат статусы
@@ -27,7 +26,7 @@ REST; комнаты, отправка сообщений и история до
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
 | Проверки | Unit-, PostgreSQL integration- и race-тесты, 31 цель фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
 | Media | Загрузка и скачивание закрытых файлов, метаданные в отдельной БД, текущие права участника комнаты, вложения в сообщениях, истории и WebSocket; лимит 10 МиБ и проверка содержимого | gRPC и REST; [правила и ограничения](docs/media/files.md) |
-| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth и Chat, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Media и Gateway с тремя PostgreSQL, Redis и S3 запускаются одной командой; NATS остаётся опциональным |
+| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth, Chat и Media, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Media и Gateway с тремя PostgreSQL, Redis и S3 запускаются одной командой; NATS остаётся опциональным |
 
 Правила и ограничения комнат описаны в [документации Chat](docs/chat/rooms.md).
 Chat хранит свои данные отдельно и не обращается к таблицам Auth.
@@ -282,7 +281,7 @@ curl --fail http://localhost:8080/api/v1/auth/register \
   -d '{"email":"demo@example.com","username":"demo_user","password":"DemoPassword123"}'
 ```
 
-Этот запуск обслуживает Auth API, комнаты и сообщения Chat и WebSocket-события. `cmd/media` пока нет. Ключи и `.env` исключены из Git через `.gitignore`.
+Этот локальный запуск обслуживает Auth API, комнаты и сообщения Chat и WebSocket-события. Для вложений запустите также `cmd/media` с настройками `MEDIA_*` из `.env.example` или используйте полный Compose-стек. Ключи и `.env` исключены из Git через `.gitignore`.
 
 ## Доступные REST-маршруты
 
