@@ -17,6 +17,7 @@ import (
 
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
 const (
@@ -29,9 +30,6 @@ const (
 	// down or too slow; the total is kept in Dropped.
 	dropLogInterval = 10 * time.Second
 )
-
-// UserChannel is the Pub/Sub channel carrying the events of one user.
-func UserChannel(userID string) string { return "chat:user:" + userID }
 
 // Pipeliner is the part of the Redis client the publisher needs.
 type Pipeliner interface {
@@ -204,7 +202,7 @@ func (p *Publisher) publish(queued change) {
 	_, err := p.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		for _, publication := range queued.publications {
 			for _, user := range publication.recipients {
-				pipe.Publish(ctx, UserChannel(user), publication.payload)
+				pipe.Publish(ctx, eventbus.UserChannel(user), publication.payload)
 			}
 		}
 		return nil
