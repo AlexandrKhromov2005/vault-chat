@@ -354,6 +354,20 @@ VAULT_CHAT_TEST_CHAT_DATABASE_URL='postgres://auth:auth@localhost:5432/vault_cha
 Тесты очищают таблицы: используйте только отдельные тестовые БД.
 Команды `createdb` нужны один раз при подготовке окружения.
 
+Проверка запущенного Compose-стека: тест ждёт `/ready`, регистрирует двух
+новых пользователей, создаёт диалог, открывает WebSocket второго и отправляет
+сообщение первого через REST; второй должен получить `message.created` за
+10 секунд. Тест обращается к Gateway через опубликованный порт, поэтому
+проверяет и связь Chat и Gateway через общий Redis. Адрес Gateway задаётся
+переменной `VAULT_CHAT_COMPOSE_GATEWAY_URL` (с учётом `GATEWAY_HOST_PORT`);
+без неё тест пропускается:
+
+```sh
+docker compose -f deployments/docker-compose.yml up -d --build --wait && \
+  VAULT_CHAT_COMPOSE_GATEWAY_URL=http://127.0.0.1:8080 \
+  go test -tags compose -count=1 ./tests/compose/...
+```
+
 Фаззинг всех целей по 30 секунд:
 
 ```sh
