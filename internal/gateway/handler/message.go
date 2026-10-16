@@ -74,24 +74,33 @@ func (h *ChatHandler) Messages(w http.ResponseWriter, r *http.Request) {
 }
 
 func historyQuery(raw string) (string, int32, error) {
+	return pageQuery(raw, func(cursor string) error {
+		_, err := validator.HistoryCursor(cursor)
+		return err
+	})
+}
+
+// pageQuery accepts at most one cursor and one canonical limit of 1–100;
+// an absent limit is returned as zero so that the backend applies its default.
+func pageQuery(raw string, validCursor func(string) error) (string, int32, error) {
 	query, err := url.ParseQuery(raw)
 	if err != nil {
 		return "", 0, err
 	}
 	for key, values := range query {
 		if (key != "cursor" && key != "limit") || len(values) != 1 {
-			return "", 0, fmt.Errorf("unexpected history parameter")
+			return "", 0, fmt.Errorf("unexpected page parameter")
 		}
 	}
 	cursor := query.Get("cursor")
-	if _, err := validator.HistoryCursor(cursor); err != nil {
+	if err := validCursor(cursor); err != nil {
 		return "", 0, err
 	}
 	var limit int64
 	if value, exists := query["limit"]; exists {
 		limit, err = strconv.ParseInt(value[0], 10, 32)
 		if err != nil || limit < 1 || limit > 100 || strconv.FormatInt(limit, 10) != value[0] {
-			return "", 0, fmt.Errorf("invalid history limit")
+			return "", 0, fmt.Errorf("invalid page limit")
 		}
 	}
 	return cursor, int32(limit), nil
