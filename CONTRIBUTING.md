@@ -220,6 +220,13 @@ Closes #123, Relates to #456
 | **Tests** | New code covered by unit tests; fuzz tests added for parsers / validators; existing tests not broken. |
 | **Documentation** | `README.md`, `docs/`, or comments updated as needed. |
 
+### Releases
+
+Release tags use `vMAJOR.MINOR.PATCH` and point to verified commits in `main`.
+Record user-visible changes under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
+Follow [VERSIONING.md](VERSIONING.md) when publishing a release; published tags
+are immutable. The repository uses one shared version for all services.
+
 ### Merge Strategy
 
 - **Squash and merge** (recommended) — the entire PR history is squashed into a single commit in `main`.
