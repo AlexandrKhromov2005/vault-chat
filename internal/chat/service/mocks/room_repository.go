@@ -252,6 +252,54 @@ func (_c *MockRoomRepository_GetOrCreateDirect_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// LeaveRoom provides a mock function with given fields: ctx, roomID, actorID
+func (_m *MockRoomRepository) LeaveRoom(ctx context.Context, roomID string, actorID string) error {
+	ret := _m.Called(ctx, roomID, actorID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LeaveRoom")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, roomID, actorID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRoomRepository_LeaveRoom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LeaveRoom'
+type MockRoomRepository_LeaveRoom_Call struct {
+	*mock.Call
+}
+
+// LeaveRoom is a helper method to define mock.On call
+//   - ctx context.Context
+//   - roomID string
+//   - actorID string
+func (_e *MockRoomRepository_Expecter) LeaveRoom(ctx interface{}, roomID interface{}, actorID interface{}) *MockRoomRepository_LeaveRoom_Call {
+	return &MockRoomRepository_LeaveRoom_Call{Call: _e.mock.On("LeaveRoom", ctx, roomID, actorID)}
+}
+
+func (_c *MockRoomRepository_LeaveRoom_Call) Run(run func(ctx context.Context, roomID string, actorID string)) *MockRoomRepository_LeaveRoom_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockRoomRepository_LeaveRoom_Call) Return(_a0 error) *MockRoomRepository_LeaveRoom_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRoomRepository_LeaveRoom_Call) RunAndReturn(run func(context.Context, string, string) error) *MockRoomRepository_LeaveRoom_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListForMember provides a mock function with given fields: ctx, userID, after, limit
 func (_m *MockRoomRepository) ListForMember(ctx context.Context, userID string, after domain.RoomPosition, limit int) ([]*domain.RoomSummary, error) {
 	ret := _m.Called(ctx, userID, after, limit)
@@ -371,6 +419,55 @@ func (_c *MockRoomRepository_ListMembers_Call) Return(_a0 []*domain.Member, _a1 
 }
 
 func (_c *MockRoomRepository_ListMembers_Call) RunAndReturn(run func(context.Context, string, string, string, int) ([]*domain.Member, error)) *MockRoomRepository_ListMembers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveChannelMember provides a mock function with given fields: ctx, roomID, actorID, userID
+func (_m *MockRoomRepository) RemoveChannelMember(ctx context.Context, roomID string, actorID string, userID string) error {
+	ret := _m.Called(ctx, roomID, actorID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveChannelMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, roomID, actorID, userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRoomRepository_RemoveChannelMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveChannelMember'
+type MockRoomRepository_RemoveChannelMember_Call struct {
+	*mock.Call
+}
+
+// RemoveChannelMember is a helper method to define mock.On call
+//   - ctx context.Context
+//   - roomID string
+//   - actorID string
+//   - userID string
+func (_e *MockRoomRepository_Expecter) RemoveChannelMember(ctx interface{}, roomID interface{}, actorID interface{}, userID interface{}) *MockRoomRepository_RemoveChannelMember_Call {
+	return &MockRoomRepository_RemoveChannelMember_Call{Call: _e.mock.On("RemoveChannelMember", ctx, roomID, actorID, userID)}
+}
+
+func (_c *MockRoomRepository_RemoveChannelMember_Call) Run(run func(ctx context.Context, roomID string, actorID string, userID string)) *MockRoomRepository_RemoveChannelMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockRoomRepository_RemoveChannelMember_Call) Return(_a0 error) *MockRoomRepository_RemoveChannelMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRoomRepository_RemoveChannelMember_Call) RunAndReturn(run func(context.Context, string, string, string) error) *MockRoomRepository_RemoveChannelMember_Call {
 	_c.Call.Return(run)
 	return _c
 }
