@@ -25,6 +25,26 @@ type GatewayConfig struct {
 	RateLimitPerMinute uint32
 	RateLimitBurst     uint32
 	LogLevel           string
+	WebSocket          WebSocketConfig
+}
+
+// WebSocketConfig holds the limits of real-time connections (GATEWAY_WS_*).
+type WebSocketConfig struct {
+	// MaxConnectionsPerUser is enforced per Gateway instance.
+	MaxConnectionsPerUser uint32
+	// SendBuffer is the number of events queued per connection before a
+	// client that does not keep up is disconnected.
+	SendBuffer   uint32
+	AuthTimeout  time.Duration
+	PingInterval time.Duration
+	WriteTimeout time.Duration
+	// MaxConnections bounds the connections of one Gateway instance; further
+	// upgrades get 503. It holds even while the Redis rate limiter fails open.
+	MaxConnections uint32
+	// MaxUnauthenticatedConnections bounds the connections that have yet to
+	// send a valid token, so that they cannot take every slot. It defaults to
+	// 1000 or MaxConnections, whichever is lower, and may not exceed it.
+	MaxUnauthenticatedConnections uint32
 }
 
 // LoadGateway reads configuration from GATEWAY_* environment variables. All
@@ -64,8 +84,42 @@ func LoadGateway() (*GatewayConfig, error) {
 	if cfg.RateLimitBurst, err = uintEnv("GATEWAY_RATE_LIMIT_BURST", 30, 32); err != nil {
 		return nil, err
 	}
+	if cfg.WebSocket, err = loadWebSocket(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+func loadWebSocket() (WebSocketConfig, error) {
+	ws := WebSocketConfig{}
+	var err error
+	if ws.MaxConnectionsPerUser, err = uintEnv("GATEWAY_WS_MAX_CONNECTIONS_PER_USER", 5, 16); err != nil {
+		return ws, err
+	}
+	if ws.SendBuffer, err = uintEnv("GATEWAY_WS_SEND_BUFFER", 64, 16); err != nil {
+		return ws, err
+	}
+	if ws.AuthTimeout, err = durationEnv("GATEWAY_WS_AUTH_TIMEOUT", 5*time.Second); err != nil {
+		return ws, err
+	}
+	if ws.PingInterval, err = durationEnv("GATEWAY_WS_PING_INTERVAL", 30*time.Second); err != nil {
+		return ws, err
+	}
+	if ws.WriteTimeout, err = durationEnv("GATEWAY_WS_WRITE_TIMEOUT", 10*time.Second); err != nil {
+		return ws, err
+	}
+	// 24 bits keep the limits within int on every platform.
+	if ws.MaxConnections, err = uintEnv("GATEWAY_WS_MAX_CONNECTIONS", 10000, 24); err != nil {
+		return ws, err
+	}
+	if ws.MaxUnauthenticatedConnections, err = uintEnv("GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS", min(1000, ws.MaxConnections), 24); err != nil {
+		return ws, err
+	}
+	if ws.MaxUnauthenticatedConnections > ws.MaxConnections {
+		return ws, fmt.Errorf("environment variable GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS must not exceed GATEWAY_WS_MAX_CONNECTIONS (%d)", ws.MaxConnections)
+	}
+	return ws, nil
 }
 
 // parseOrigins parses a comma-separated list of CORS origins. Each origin must
