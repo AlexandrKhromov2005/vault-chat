@@ -247,6 +247,44 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/rooms:
+    get:
+      summary: List the caller's rooms, most recently active first
+      description: |
+        Activity is the later of the room's latest message and the caller's
+        enrollment; ties are ordered by room_id descending. Rooms with new
+        activity after the first page move to the top and are not repeated on
+        later pages; fetch the first page again to see them. Duplicate or
+        unknown query parameters are rejected.
+      tags: [rooms]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string, pattern: "^$|^(0|[1-9][0-9]{0,17})_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}
+          description: Empty starts at the most recently active room. Otherwise use next_cursor unchanged.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        "200":
+          description: Rooms and an exclusive next-page cursor; empty cursor means the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rooms, next_cursor]
+                properties:
+                  rooms:
+                    type: array
+                    items: {$ref: "#/components/schemas/RoomSummary"}
+                  next_cursor: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
   /api/v1/rooms/direct:
     post:
       summary: Get or create a direct dialog with an existing user
@@ -483,6 +521,12 @@ components:
           maxItems: 2
           items: {type: string, format: uuid}
           description: Only present for direct dialogs. Both participants, including the caller, in UUID order.
+    RoomSummary:
+      allOf:
+        - {$ref: "#/components/schemas/Room"}
+        - type: object
+          properties:
+            last_message_at: {type: string, format: date-time, description: Time of the latest message; absent without messages.}
     User:
       type: object
       properties:

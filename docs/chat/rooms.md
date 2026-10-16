@@ -52,10 +52,16 @@ mTLS remains a separate implementation task.
 
 ## Room list
 
-`ListRooms` in gRPC returns the caller's rooms as `RoomSummary` items. Each
-item is the room returned by the other room RPCs plus `last_message_at`, the
-time of the room's latest message, unset when the room has no messages. Only
-rooms with the caller's membership are listed.
+`GET /api/v1/rooms?limit=50` (`ListRooms` in gRPC) returns the caller's rooms:
+
+```json
+{"rooms":[{"room_id":"…","kind":"direct","private":true,"created_at":"…",
+  "participant_ids":["…","…"],"last_message_at":"…"}],"next_cursor":""}
+```
+
+Each item is the room object returned by the other room routes plus
+`last_message_at`, the time of the room's latest message, absent when the room
+has no messages. Only rooms with the caller's membership are listed.
 
 Rooms are ordered by activity, newest first, then by room ID descending.
 Activity is the later of the latest message and the caller's own enrollment.
@@ -63,8 +69,8 @@ A channel the caller was just invited to therefore appears at the top even if
 it has been quiet for a long time; for other rooms activity starts at creation.
 The default limit is 50, explicit limits are 1–100. Request the next page with
 the returned `next_cursor` in `cursor`; an empty next cursor means that the
-page reached the end at the time of the read. Noncanonical cursors or limits
-return `INVALID_ARGUMENT`.
+page reached the end at the time of the read. Duplicate or unknown query
+parameters and noncanonical cursors or limits return `400`.
 
 Cursors are keyset positions `<activity Unix microseconds>_<room UUID>`,
 exclusive of the last returned room. Clients must treat them as opaque; they are
