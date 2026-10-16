@@ -53,6 +53,14 @@ type RealtimeOptions struct {
 	PingInterval time.Duration
 	// WriteTimeout bounds every write to a client.
 	WriteTimeout time.Duration
+	// MaxConnections bounds the WebSocket connections of this instance,
+	// authenticated or not, since the rate limiter lets requests through
+	// while Redis is down. Zero means no limit.
+	MaxConnections int
+	// MaxUnauthenticated bounds the connections that have yet to authenticate,
+	// so that clients without a token cannot take every slot. Zero means no
+	// limit besides MaxConnections.
+	MaxUnauthenticated int
 }
 
 // Realtime serves GET /api/v1/ws: authenticated connections that receive the
@@ -70,6 +78,9 @@ type Realtime struct {
 	stop     context.CancelFunc
 	mu       sync.Mutex
 	closed   bool // guarded by mu
+	// open and unauthenticated count the admitted connections, guarded by mu.
+	open            int
+	unauthenticated int
 	// conns counts upgraded connections until they are fully closed.
 	conns sync.WaitGroup
 }
@@ -108,22 +119,42 @@ func (h *Realtime) Shutdown(ctx context.Context) error {
 	}
 }
 
-// admit registers a connection about to be upgraded, unless the endpoint is
-// shutting down. Registering under mu keeps Shutdown from missing it.
-func (h *Realtime) admit() bool {
+// admit registers a connection about to be upgraded as unauthenticated. It
+// refuses when the endpoint is shutting down or a limit is reached and then
+// returns the error code. Registering under mu keeps Shutdown from missing it.
+func (h *Realtime) admit() (refused string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed {
-		return false
+	switch {
+	case h.closed:
+		return "shutting_down"
+	case h.options.MaxConnections > 0 && h.open >= h.options.MaxConnections,
+		h.options.MaxUnauthenticated > 0 && h.unauthenticated >= h.options.MaxUnauthenticated:
+		return "too_many_connections"
 	}
+	h.open++
+	h.unauthenticated++
 	h.conns.Add(1)
-	return true
+	return ""
 }
 
-// refuse answers an upgrade during shutdown with 503 and a hint when to retry.
-func refuse(w http.ResponseWriter) {
+// release frees the slots of an admitted connection once it is closed.
+func (h *Realtime) release(c *connection) {
+	c.authenticated()
+	h.mu.Lock()
+	h.open--
+	h.mu.Unlock()
+	h.conns.Done()
+}
+
+// refuse answers an upgrade with 503 and a hint when to retry.
+func refuse(w http.ResponseWriter, code string) {
+	message := "too many WebSocket connections"
+	if code == "shutting_down" {
+		message = "server shutting down"
+	}
 	w.Header().Set("Retry-After", retryAfterSeconds)
-	response.Error(w, http.StatusServiceUnavailable, "shutting_down", "server shutting down")
+	response.Error(w, http.StatusServiceUnavailable, code, message)
 }
 
 // closeError ends a connection with a close code and a fixed reason.
@@ -147,6 +178,8 @@ type connection struct {
 	// ended asks the writer to close; nil means the connection is already gone.
 	ended   chan *closeError
 	workers sync.WaitGroup
+	// pending holds the connection's unauthenticated slot until authenticated.
+	pending sync.Once
 	// closers counts closes scheduled from timers and Shutdown, each until
 	// it has run to completion or been canceled.
 	closers sync.WaitGroup
@@ -175,6 +208,17 @@ func (c *connection) closeLater(end *closeError) (run func(), cancel func() bool
 	return run, cancel
 }
 
+// authenticated frees the connection's unauthenticated slot, whether or not
+// the authentication succeeded.
+func (c *connection) authenticated() { c.pending.Do(c.leaveUnauthenticated) }
+
+// leaveUnauthenticated frees one unauthenticated slot.
+func (h *Realtime) leaveUnauthenticated() {
+	h.mu.Lock()
+	h.unauthenticated--
+	h.mu.Unlock()
+}
+
 // ServeHTTP upgrades the request and serves the connection until it ends.
 // The access token is never accepted from the URL, which is logged.
 func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -184,18 +228,19 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Refusing before the upgrade spares the connection and lets clients
 	// read the status and Retry-After.
-	if !h.admit() {
-		refuse(w)
+	if refused := h.admit(); refused != "" {
+		refuse(w, refused)
 		return
 	}
-	defer h.conns.Done()
+	c := &connection{Realtime: h, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	defer h.release(c)
 	// The origin was checked above against the configured list.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
 	conn.SetReadLimit(maxClientFrameBytes)
-	c := &connection{Realtime: h, conn: conn, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	c.conn = conn
 	// Shutdown closes the connection at any stage; reads and writes in
 	// progress then fail and serve returns.
 	closeOnShutdown, keepOpen := c.closeLater(goingAway())
@@ -209,7 +254,7 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stopWatching()
 	keepOpen()
 	// A close started by a timer or Shutdown must finish its handshake before
-	// the handler returns and Shutdown stops waiting for it.
+	// the connection gives up its slot and Shutdown stops waiting for it.
 	c.closers.Wait()
 	_ = conn.CloseNow()
 	cancel()
@@ -231,6 +276,7 @@ func (h *Realtime) originAllowed(r *http.Request) bool {
 // It returns how to close the connection, or nil when it is already gone.
 func (c *connection) serve(ctx context.Context) *closeError {
 	current, end := c.authenticate(ctx)
+	c.authenticated()
 	if current.userID == "" {
 		return end
 	}
