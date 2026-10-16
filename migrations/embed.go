@@ -12,3 +12,8 @@ var AuthFS embed.FS
 //
 //go:embed chat
 var ChatFS embed.FS
+
+// MediaFS contains migrations for Media's independent metadata database.
+//
+//go:embed media
+var MediaFS embed.FS
