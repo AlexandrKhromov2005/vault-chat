@@ -13,7 +13,7 @@ import (
 )
 
 func TestRouter_ChatRoutesRequireIdentity(t *testing.T) {
-	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}, {"GET", "/api/v1/rooms"}} {
+	for _, tc := range []struct{ method, path string }{{"POST", "/api/v1/rooms/direct"}, {"POST", "/api/v1/rooms/channels"}, {"GET", "/api/v1/rooms/id"}, {"PUT", "/api/v1/rooms/id/members/peer"}, {"GET", "/api/v1/users/peer"}, {"GET", "/api/v1/rooms"}, {"GET", "/api/v1/rooms/id/members"}} {
 		f := newFixture(t)
 		f.allow("ip:203.0.113.7")
 		rec := f.serve(httptest.NewRequest(tc.method, tc.path, nil))

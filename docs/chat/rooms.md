@@ -64,11 +64,13 @@ mTLS remains a separate implementation task.
 ## Members
 
 All member operations authenticate the caller like other room operations.
-Absent rooms and rooms without the caller's membership return `NOT_FOUND`.
+Absent rooms and rooms without the caller's membership return `404`
+(`NOT_FOUND`).
 
-- `ListMembers` returns `members` (`user_id`, `joined_at`) and `next_cursor` to
-  any member, ordered by user ID. A direct dialog lists both participants.
-  Paging follows the room list rules: default 50, explicit limits 1–100, and the
+- `GET /api/v1/rooms/{room_id}/members?limit=50` (`ListMembers`) returns
+  `{"members":[{"user_id":"…","joined_at":"…"}],"next_cursor":""}` to any
+  member, ordered by user ID. A direct dialog lists both participants. Paging
+  follows the room list rules: default 50, explicit limits 1–100, and the
   cursor is the canonical UUID of the last returned member. The roster is read
   in the same statement as the membership check, so a former member loses it as
   soon as their membership is gone.
