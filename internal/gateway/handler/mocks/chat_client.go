@@ -321,6 +321,80 @@ func (_c *MockChatClient_GetRoom_Call) RunAndReturn(run func(context.Context, *c
 	return _c
 }
 
+// LeaveRoom provides a mock function with given fields: _a0, _a1, _a2
+func (_m *MockChatClient) LeaveRoom(_a0 context.Context, _a1 *chatv1.LeaveRoomRequest, _a2 ...grpc.CallOption) (*chatv1.LeaveRoomResponse, error) {
+	_va := make([]interface{}, len(_a2))
+	for _i := range _a2 {
+		_va[_i] = _a2[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _a0, _a1)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LeaveRoom")
+	}
+
+	var r0 *chatv1.LeaveRoomResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.LeaveRoomRequest, ...grpc.CallOption) (*chatv1.LeaveRoomResponse, error)); ok {
+		return rf(_a0, _a1, _a2...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.LeaveRoomRequest, ...grpc.CallOption) *chatv1.LeaveRoomResponse); ok {
+		r0 = rf(_a0, _a1, _a2...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*chatv1.LeaveRoomResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *chatv1.LeaveRoomRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(_a0, _a1, _a2...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockChatClient_LeaveRoom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LeaveRoom'
+type MockChatClient_LeaveRoom_Call struct {
+	*mock.Call
+}
+
+// LeaveRoom is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *chatv1.LeaveRoomRequest
+//   - _a2 ...grpc.CallOption
+func (_e *MockChatClient_Expecter) LeaveRoom(_a0 interface{}, _a1 interface{}, _a2 ...interface{}) *MockChatClient_LeaveRoom_Call {
+	return &MockChatClient_LeaveRoom_Call{Call: _e.mock.On("LeaveRoom",
+		append([]interface{}{_a0, _a1}, _a2...)...)}
+}
+
+func (_c *MockChatClient_LeaveRoom_Call) Run(run func(_a0 context.Context, _a1 *chatv1.LeaveRoomRequest, _a2 ...grpc.CallOption)) *MockChatClient_LeaveRoom_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*chatv1.LeaveRoomRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockChatClient_LeaveRoom_Call) Return(_a0 *chatv1.LeaveRoomResponse, _a1 error) *MockChatClient_LeaveRoom_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockChatClient_LeaveRoom_Call) RunAndReturn(run func(context.Context, *chatv1.LeaveRoomRequest, ...grpc.CallOption) (*chatv1.LeaveRoomResponse, error)) *MockChatClient_LeaveRoom_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListMembers provides a mock function with given fields: _a0, _a1, _a2
 func (_m *MockChatClient) ListMembers(_a0 context.Context, _a1 *chatv1.ListMembersRequest, _a2 ...grpc.CallOption) (*chatv1.ListMembersResponse, error) {
 	_va := make([]interface{}, len(_a2))
@@ -539,6 +613,80 @@ func (_c *MockChatClient_ListRooms_Call) Return(_a0 *chatv1.ListRoomsResponse, _
 }
 
 func (_c *MockChatClient_ListRooms_Call) RunAndReturn(run func(context.Context, *chatv1.ListRoomsRequest, ...grpc.CallOption) (*chatv1.ListRoomsResponse, error)) *MockChatClient_ListRooms_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveMember provides a mock function with given fields: _a0, _a1, _a2
+func (_m *MockChatClient) RemoveMember(_a0 context.Context, _a1 *chatv1.RemoveMemberRequest, _a2 ...grpc.CallOption) (*chatv1.RemoveMemberResponse, error) {
+	_va := make([]interface{}, len(_a2))
+	for _i := range _a2 {
+		_va[_i] = _a2[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _a0, _a1)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveMember")
+	}
+
+	var r0 *chatv1.RemoveMemberResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.RemoveMemberRequest, ...grpc.CallOption) (*chatv1.RemoveMemberResponse, error)); ok {
+		return rf(_a0, _a1, _a2...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *chatv1.RemoveMemberRequest, ...grpc.CallOption) *chatv1.RemoveMemberResponse); ok {
+		r0 = rf(_a0, _a1, _a2...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*chatv1.RemoveMemberResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *chatv1.RemoveMemberRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(_a0, _a1, _a2...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockChatClient_RemoveMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveMember'
+type MockChatClient_RemoveMember_Call struct {
+	*mock.Call
+}
+
+// RemoveMember is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *chatv1.RemoveMemberRequest
+//   - _a2 ...grpc.CallOption
+func (_e *MockChatClient_Expecter) RemoveMember(_a0 interface{}, _a1 interface{}, _a2 ...interface{}) *MockChatClient_RemoveMember_Call {
+	return &MockChatClient_RemoveMember_Call{Call: _e.mock.On("RemoveMember",
+		append([]interface{}{_a0, _a1}, _a2...)...)}
+}
+
+func (_c *MockChatClient_RemoveMember_Call) Run(run func(_a0 context.Context, _a1 *chatv1.RemoveMemberRequest, _a2 ...grpc.CallOption)) *MockChatClient_RemoveMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*chatv1.RemoveMemberRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockChatClient_RemoveMember_Call) Return(_a0 *chatv1.RemoveMemberResponse, _a1 error) *MockChatClient_RemoveMember_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockChatClient_RemoveMember_Call) RunAndReturn(run func(context.Context, *chatv1.RemoveMemberRequest, ...grpc.CallOption) (*chatv1.RemoveMemberResponse, error)) *MockChatClient_RemoveMember_Call {
 	_c.Call.Return(run)
 	return _c
 }

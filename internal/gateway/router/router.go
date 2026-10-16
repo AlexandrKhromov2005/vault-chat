@@ -58,6 +58,9 @@ func New(d Deps) http.Handler {
 		api.Handle("GET /api/v1/rooms/{room_id}", protected(d.Chat.Room))
 		api.Handle("PUT /api/v1/rooms/{room_id}/members/{user_id}", protected(d.Chat.AddMember))
 		api.Handle("GET /api/v1/rooms/{room_id}/members", protected(d.Chat.Members))
+		api.Handle("DELETE /api/v1/rooms/{room_id}/members/{user_id}", protected(d.Chat.RemoveMember))
+		// The literal segment takes precedence over {user_id}, which must be a UUID.
+		api.Handle("DELETE /api/v1/rooms/{room_id}/members/me", protected(d.Chat.LeaveRoom))
 	}
 	api.HandleFunc("/", notFound)
 

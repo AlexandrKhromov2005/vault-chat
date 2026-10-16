@@ -42,3 +42,30 @@ func (h *ChatHandler) Members(w http.ResponseWriter, r *http.Request) {
 	}
 	response.JSON(w, http.StatusOK, page)
 }
+
+// RemoveMember performs an idempotent, owner-authorized channel removal.
+func (h *ChatHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := chatContext(w, r)
+	if !ok {
+		return
+	}
+	_, err := h.client.RemoveMember(ctx, &chatv1.RemoveMemberRequest{RoomId: r.PathValue("room_id"), UserId: r.PathValue("user_id")})
+	if err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LeaveRoom removes the caller's own channel membership.
+func (h *ChatHandler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := chatContext(w, r)
+	if !ok {
+		return
+	}
+	if _, err := h.client.LeaveRoom(ctx, &chatv1.LeaveRoomRequest{RoomId: r.PathValue("room_id")}); err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
