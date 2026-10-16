@@ -2,7 +2,7 @@
 #
 #   docker build --build-arg SERVICE=auth -t vault-chat-auth .
 #
-# SERVICE is the directory name under cmd/ (auth, chat, gateway; media later).
+# SERVICE is the directory name under cmd/ (auth, chat, gateway, media).
 # deployments/docker-compose.yml builds all services with this file.
 #
 # The image contains no configuration or secrets: everything is supplied at

@@ -6,14 +6,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func uploadFile(t *testing.T, url, token, name string, data []byte) (int, map[string]any) {

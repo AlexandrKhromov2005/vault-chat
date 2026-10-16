@@ -3,6 +3,7 @@ package validator
 
 import (
 	"bytes"
+	"encoding/xml"
 	"errors"
 	"image"
 	_ "image/jpeg" // Register the supported image decoder.
@@ -55,6 +56,22 @@ func Content(data []byte) (string, error) {
 			return "", ErrInvalidFile
 		}
 	case "text/plain; charset=utf-8":
+		// The standard sniffer labels SVG without an XML declaration as text.
+		// Reject active XML roots even when comments precede the root element.
+		decoder := xml.NewDecoder(bytes.NewReader(data))
+		for {
+			token, err := decoder.Token()
+			if err != nil {
+				break
+			}
+			if root, ok := token.(xml.StartElement); ok {
+				switch strings.ToLower(root.Name.Local) {
+				case "svg", "html", "script":
+					return "", ErrUnsupported
+				}
+				break
+			}
+		}
 		if !utf8.Valid(data) {
 			return "", ErrUnsupported
 		}
