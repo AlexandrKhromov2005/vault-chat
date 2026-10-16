@@ -1,4 +1,4 @@
-# Text messages
+# Messages and attachments
 
 Chat stores immutable text messages in its own database. Both gRPC methods
 authenticate through Auth and check room membership in PostgreSQL. Gateway
@@ -25,6 +25,15 @@ Text must be valid UTF-8, contain non-whitespace content and be at most 4096
 Unicode code points / 16384 bytes. Newline and tab are allowed; other Unicode
 control characters are rejected. Text is preserved without trimming or Unicode
 normalization. Clients must render it as text rather than executable HTML.
+
+## Attachments
+
+An optional `attachment_ids` array accepts up to five distinct Media file UUIDs.
+Each file must be complete, uploaded by the sender and belong to the same room.
+Text may be empty with attachments; otherwise the text rules above apply.
+Retries compare both text and the ordered attachment list. References are
+included in REST, history, catch-up and WebSocket messages; empty arrays are
+omitted from JSON. See [Media](../media/files.md) for upload and download routes.
 
 ## History
 

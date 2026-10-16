@@ -2,12 +2,14 @@ package media
 
 import (
 	"context"
-	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
+	"testing"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"testing"
+
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 )
 
 type metadataClient struct {
