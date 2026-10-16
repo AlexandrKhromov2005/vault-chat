@@ -1,8 +1,9 @@
 package validator
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilename(t *testing.T) {

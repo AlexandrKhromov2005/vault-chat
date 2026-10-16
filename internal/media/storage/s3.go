@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"io"
 )
 
 // S3 stores immutable objects; no public policy or presigned URLs are used.

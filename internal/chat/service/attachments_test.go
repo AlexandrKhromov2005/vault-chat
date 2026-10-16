@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service/mocks"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type attachmentRepo struct {
