@@ -21,6 +21,7 @@ info:
     `GATEWAY_REQUEST_TIMEOUT` (10s by default), covering rate limiting,
     reading the body, and backend calls. A body not received within it gets
     `408`; a request that runs out of it anywhere else gets `504`.
+    `/api/v1/ws` is exempt: it is a long-lived WebSocket.
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -267,6 +268,49 @@ paths:
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
+  /api/v1/ws:
+    get:
+      summary: Open a WebSocket for real-time events (not a REST endpoint)
+      tags: [realtime]
+      description: |
+        WebSocket upgrade (RFC 6455); the protocol is described in
+        docs/chat/realtime.md. No Authorization header is used, because
+        browsers cannot set it on a WebSocket, and a token in the URL is
+        ignored. Within `GATEWAY_WS_AUTH_TIMEOUT` the client sends the text
+        frame `{"type":"auth","token":"<access token>"}`; the server answers
+        `{"type":"ready","user_id":"...","expires_at":"..."}` and then sends
+        `message.created`, `member.added`, `member.removed` and `member.left`
+        events of the caller's rooms. The connection closes with 4001 when
+        the token expires unless a new auth frame for the same user arrives
+        first. Other close codes: 1001 shutdown, 1003 binary frame, 1008
+        protocol violation, 1009 frame over 4096 bytes, 1013 retry later
+        (per-user connection limit, Auth or event stream unavailable), 4002
+        client fell behind. On shutdown every connection, authenticated or
+        not, is closed with 1001. The upgrade is rate limited per client IP.
+        Each Gateway instance also caps its connections
+        (`GATEWAY_WS_MAX_CONNECTIONS`) and those not yet authenticated
+        (`GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS`) independently of
+        Redis. Browser origins must be the Gateway's own or listed in
+        `GATEWAY_CORS_ALLOWED_ORIGINS`.
+      responses:
+        "101": {description: Switching to the WebSocket protocol.}
+        "403":
+          description: Browser origin not allowed (`origin_forbidden`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "426": {description: The request is not a WebSocket upgrade.}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503":
+          description: |
+            The instance holds as many connections as allowed
+            (`too_many_connections`) or is shutting down (`shutting_down`).
+            Nothing is upgraded; retry after `Retry-After` seconds.
+          headers:
+            Retry-After: {schema: {type: integer}, description: Seconds to wait before retrying.}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/users/{user_id}:
     get:
@@ -705,7 +749,7 @@ components:
               type: string
               enum: [invalid_argument, invalid_json, unauthenticated, permission_denied, not_found,
                      already_exists, failed_precondition, body_too_large, unsupported_media_type, rate_limited,
-                     cors_forbidden, request_timeout, timeout, unavailable, internal]
+                     cors_forbidden, origin_forbidden, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
   responses:
