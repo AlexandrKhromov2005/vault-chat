@@ -15,11 +15,15 @@ func TestValidateUsernameQuery(t *testing.T) {
 		query   string
 		wantErr bool
 	}{
-		{"single letter", "a", false},
+		{"minimum length", "ab", false},
+		{"letter and digit", "a1", false},
+		{"letter and dash", "a-", false},
 		{"mixed case", "BoB", false},
 		{"full username alphabet", "a_b-C9", false},
 		{"maximum length", "a" + strings.Repeat("b", 31), false},
 		{"empty", "", true},
+		{"single letter", "a", true},
+		{"single underscore", "_", true},
 		{"too long", "a" + strings.Repeat("b", 32), true},
 		{"leading digit", "1ab", true},
 		{"leading underscore", "_ab", true},
@@ -67,18 +71,19 @@ func TestSearchLimit(t *testing.T) {
 	}
 }
 
-// FuzzValidateUsernameQuery verifies that every accepted query is a prefix of
-// some valid username and carries no LIKE metacharacter other than '_'.
+// FuzzValidateUsernameQuery verifies that every accepted query has at least
+// two characters, uses only the ASCII username alphabet and is a prefix of
+// some valid username.
 func FuzzValidateUsernameQuery(f *testing.F) {
-	for _, query := range []string{"a", "Bob", "a_b-c", "", "1a", "a%", `a\`, "a b", strings.Repeat("a", 40)} {
+	for _, query := range []string{"a", "ab", "a-", "Z9", "Bob", "a_b-c", "", "_", "1a", "a%", `a\`, "a b", strings.Repeat("a", 40)} {
 		f.Add(query)
 	}
 	f.Fuzz(func(t *testing.T, query string) {
 		if validator.ValidateUsernameQuery(query) != nil {
 			return
 		}
-		require.NotContains(t, query, "%")
-		require.NotContains(t, query, `\`)
+		require.GreaterOrEqual(t, len(query), 2, query)
+		require.Empty(t, strings.Trim(query, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"), query)
 		username := query
 		if len(username) < 3 {
 			username += strings.Repeat("a", 3-len(username))
