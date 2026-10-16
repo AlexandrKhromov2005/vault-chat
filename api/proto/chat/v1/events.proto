@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package chat.v1;
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1;chatv1";
+
+import "chat/v1/chat.proto";
+
+// Event is a committed Chat change. After the commit Chat publishes it, best
+// effort, to the Redis Pub/Sub channel "chat:user:<user_id>" of every user
+// entitled to see it; recipients are read in the committing transaction.
+// Delivery can be lost or reordered: clients recover with message sequences
+// and catch-up. Consumers must skip events whose kind they do not know.
+message Event {
+  oneof kind {
+    // A newly stored message, sent to the room members at its commit.
+    // A retry of an already stored message publishes nothing.
+    Message message_created = 1;
+    // A user became a member, including when a room is created. Sent to all
+    // members, the new one included.
+    MemberChange member_added = 2;
+    // The owner removed a member. Sent to the remaining members and to the
+    // removed user.
+    MemberChange member_removed = 3;
+    // A member left the room. Sent to the remaining members and to the user
+    // who left.
+    MemberChange member_left = 4;
+  }
+}
+
+// MemberChange identifies a membership that began or ended.
+message MemberChange {
+  string room_id = 1;
+  string user_id = 2;
+}
