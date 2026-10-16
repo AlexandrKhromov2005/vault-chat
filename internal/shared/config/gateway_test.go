@@ -15,7 +15,9 @@ func clearGatewayEnv(t *testing.T) {
 		"GATEWAY_HTTP_ADDR", "GATEWAY_AUTH_GRPC_ADDR", "GATEWAY_CHAT_GRPC_ADDR", "GATEWAY_REDIS_ADDR", "GATEWAY_REDIS_PASSWORD",
 		"GATEWAY_TLS_CERT_PATH", "GATEWAY_TLS_KEY_PATH", "GATEWAY_CORS_ALLOWED_ORIGINS",
 		"GATEWAY_MAX_BODY_BYTES", "GATEWAY_REQUEST_TIMEOUT", "GATEWAY_RATE_LIMIT_PER_MINUTE",
-		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL",
+		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL", "GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "GATEWAY_WS_SEND_BUFFER",
+		"GATEWAY_WS_AUTH_TIMEOUT", "GATEWAY_WS_PING_INTERVAL", "GATEWAY_WS_WRITE_TIMEOUT",
+		"GATEWAY_WS_MAX_CONNECTIONS", "GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS",
 	} {
 		t.Setenv(key, "")
 	}
@@ -40,6 +42,10 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(120), cfg.RateLimitPerMinute)
 		require.Equal(t, uint32(30), cfg.RateLimitBurst)
 		require.Equal(t, "info", cfg.LogLevel)
+		require.Equal(t, config.WebSocketConfig{
+			MaxConnectionsPerUser: 5, SendBuffer: 64, AuthTimeout: 5 * time.Second, PingInterval: 30 * time.Second, WriteTimeout: 10 * time.Second,
+			MaxConnections: 10000, MaxUnauthenticatedConnections: 1000,
+		}, cfg.WebSocket)
 	})
 
 	t.Run("explicit values win", func(t *testing.T) {
@@ -57,6 +63,13 @@ func TestLoadGateway(t *testing.T) {
 		t.Setenv("GATEWAY_RATE_LIMIT_PER_MINUTE", "600")
 		t.Setenv("GATEWAY_RATE_LIMIT_BURST", "50")
 		t.Setenv("GATEWAY_LOG_LEVEL", "debug")
+		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "2")
+		t.Setenv("GATEWAY_WS_SEND_BUFFER", "16")
+		t.Setenv("GATEWAY_WS_AUTH_TIMEOUT", "2s")
+		t.Setenv("GATEWAY_WS_PING_INTERVAL", "15s")
+		t.Setenv("GATEWAY_WS_WRITE_TIMEOUT", "4s")
+		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS", "500")
+		t.Setenv("GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS", "500")
 
 		cfg, err := config.LoadGateway()
 		require.NoError(t, err)
@@ -73,6 +86,20 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(600), cfg.RateLimitPerMinute)
 		require.Equal(t, uint32(50), cfg.RateLimitBurst)
 		require.Equal(t, "debug", cfg.LogLevel)
+		require.Equal(t, config.WebSocketConfig{
+			MaxConnectionsPerUser: 2, SendBuffer: 16, AuthTimeout: 2 * time.Second, PingInterval: 15 * time.Second, WriteTimeout: 4 * time.Second,
+			MaxConnections: 500, MaxUnauthenticatedConnections: 500,
+		}, cfg.WebSocket)
+	})
+
+	t.Run("unauthenticated WebSocket limit follows a lower total", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS", "100")
+
+		cfg, err := config.LoadGateway()
+		require.NoError(t, err)
+		require.Equal(t, uint32(100), cfg.WebSocket.MaxConnections)
+		require.Equal(t, uint32(100), cfg.WebSocket.MaxUnauthenticatedConnections)
 	})
 
 	t.Run("wildcard origin", func(t *testing.T) {
@@ -103,6 +130,15 @@ func TestLoadGateway_InvalidValues(t *testing.T) {
 		"GATEWAY_REQUEST_TIMEOUT":       {"0s", "-1s", "soon"},
 		"GATEWAY_RATE_LIMIT_PER_MINUTE": {"0", "-1", "many"},
 		"GATEWAY_RATE_LIMIT_BURST":      {"0", "-1", "many"},
+		// Per-connection queues are allocated upfront, so they are bounded.
+		"GATEWAY_WS_MAX_CONNECTIONS_PER_USER": {"0", "-1", "65536"},
+		"GATEWAY_WS_SEND_BUFFER":              {"0", "many", "65536"},
+		"GATEWAY_WS_AUTH_TIMEOUT":             {"0s", "soon"},
+		"GATEWAY_WS_PING_INTERVAL":            {"-1s", "often"},
+		"GATEWAY_WS_WRITE_TIMEOUT":            {"0s", "never"},
+		// The unauthenticated limit may not exceed the default total of 10000.
+		"GATEWAY_WS_MAX_CONNECTIONS":                 {"0", "-1", "many", "16777216"},
+		"GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS": {"0", "-1", "many", "10001"},
 		"GATEWAY_CORS_ALLOWED_ORIGINS": {
 			"chat.example.com",
 			"ftp://chat.example.com",
