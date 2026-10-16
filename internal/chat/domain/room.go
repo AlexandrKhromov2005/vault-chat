@@ -22,6 +22,8 @@ var (
 	ErrNotFound = errors.New("chat: room not found")
 	// ErrForbidden denies a management operation to an existing room member.
 	ErrForbidden = errors.New("chat: room operation forbidden")
+	// ErrOwnerMembership keeps a channel owned while ownership cannot be transferred.
+	ErrOwnerMembership = errors.New("chat: channel owner cannot leave or be removed")
 )
 
 // Room is the stored room metadata. Direct rooms have empty Name and OwnerID;

@@ -46,3 +46,54 @@ func (r *RoomRepository) ListMembers(ctx context.Context, roomID, actorID, after
 	}
 	return members, nil
 }
+
+// RemoveChannelMember lets the owner remove another member under the room lock.
+// Removing a nonmember succeeds, so a retried removal is idempotent.
+func (r *RoomRepository) RemoveChannelMember(ctx context.Context, roomID, actorID, userID string) error {
+	return r.changeMembership(ctx, roomID, actorID, userID, func(room *domain.Room) error {
+		if err := requireOwner(room, actorID); err != nil {
+			return err
+		}
+		if sameID(room.OwnerID, userID) {
+			return domain.ErrOwnerMembership
+		}
+		return nil
+	})
+}
+
+// LeaveRoom removes the actor from a channel under the room lock. Dialogs cannot
+// be left and the owner stays until ownership can be transferred.
+func (r *RoomRepository) LeaveRoom(ctx context.Context, roomID, actorID string) error {
+	return r.changeMembership(ctx, roomID, actorID, actorID, func(room *domain.Room) error {
+		if room.Kind != domain.Channel {
+			return domain.ErrForbidden
+		}
+		if sameID(room.OwnerID, actorID) {
+			return domain.ErrOwnerMembership
+		}
+		return nil
+	})
+}
+
+// changeMembership deletes a membership after authorize accepts the locked room.
+func (r *RoomRepository) changeMembership(ctx context.Context, roomID, actorID, userID string, authorize func(*domain.Room) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin membership change: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	room, err := lockMemberRoom(ctx, tx, roomID, actorID)
+	if err != nil {
+		return err
+	}
+	if err := authorize(room); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM room_members WHERE room_id=$1::uuid AND user_id=$2::uuid`, roomID, userID); err != nil {
+		return fmt.Errorf("delete membership: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit membership change: %w", err)
+	}
+	return nil
+}
