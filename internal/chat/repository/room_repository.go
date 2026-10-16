@@ -116,12 +116,23 @@ func (r *RoomRepository) AddChannelMember(ctx context.Context, roomID, actorID, 
 
 // lockMemberRoom locks a room visible to the actor until the transaction ends,
 // serializing membership changes with sends and other membership changes.
+// Membership is checked by a separate statement after the lock is held: under
+// READ COMMITTED it takes a fresh snapshot, so an operation that waited for the
+// lock sees a membership change committed by the previous holder. A subquery in
+// the locking statement would keep the snapshot taken before the wait.
 func lockMemberRoom(ctx context.Context, tx pgx.Tx, roomID, actorID string) (*domain.Room, error) {
 	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM rooms
-  WHERE id=$1::uuid AND EXISTS (SELECT 1 FROM room_members WHERE room_id=rooms.id AND user_id=$2::uuid)
-  FOR UPDATE`, roomID, actorID))
+  WHERE id=$1::uuid FOR UPDATE`, roomID))
 	if err != nil {
-		return nil, fmt.Errorf("load managed room: %w", err)
+		return nil, fmt.Errorf("lock room: %w", err)
+	}
+	var member bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM room_members
+  WHERE room_id=$1::uuid AND user_id=$2::uuid)`, roomID, actorID).Scan(&member); err != nil {
+		return nil, fmt.Errorf("check room membership: %w", err)
+	}
+	if !member {
+		return nil, domain.ErrNotFound
 	}
 	return room, nil
 }

@@ -49,6 +49,12 @@ mTLS remains a separate implementation task.
   managed as a channel.
 - The repository checks membership and management rights itself; a transport
   cannot authorize a write using a separate, potentially stale membership read.
+- Sends and enrollment lock the room row, so they serialize with each other.
+  Writes check membership only after the room lock is held, in a separate
+  statement with a fresh snapshot: a write that waited behind a membership
+  change sees it, so a send queued behind an invitation succeeds and one queued
+  behind a membership deletion fails as a nonmember. Reads check membership in
+  the same statement as the data they return.
 
 ## Room list
 
