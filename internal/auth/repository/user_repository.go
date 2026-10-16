@@ -77,9 +77,28 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 	return r.scanUser(r.pool.QueryRow(ctx, query, id))
 }
 
-// likeEscaper makes LIKE metacharacters match literally under the default
-// backslash escape.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+// errUnsupportedPrefix is returned for a search prefix without a computed
+// byte-order upper bound. Every query accepted by the auth validator is
+// supported: a non-empty ASCII string without DEL.
+var errUnsupportedPrefix = errors.New("repository: unsupported username prefix")
+
+// usernamePrefixRange returns the lowercased prefix and the smallest string
+// that is greater, in byte order, than every string starting with it: the
+// prefix with its last byte incremented. Bytes from 0x7f up are rejected, so
+// the bound stays ASCII and valid UTF-8.
+func usernamePrefixRange(prefix string) (lower, upper string, err error) {
+	if prefix == "" {
+		return "", "", errUnsupportedPrefix
+	}
+	for i := range len(prefix) {
+		if prefix[i] >= 0x7f {
+			return "", "", errUnsupportedPrefix
+		}
+	}
+	lower = strings.ToLower(prefix)
+	last := len(lower) - 1
+	return lower, lower[:last] + string(lower[last]+1), nil
+}
 
 // SearchByUsernamePrefix returns at most limit users other than excludeID
 // whose username starts with prefix, ignoring case. Only ID and Username are
@@ -90,14 +109,19 @@ func (r *UserRepository) SearchByUsernamePrefix(
 	prefix, excludeID string,
 	limit int,
 ) ([]*domain.User, error) {
-	// The COLLATE "C" expression matches users_username_lower_idx.
+	// The COLLATE "C" expression matches users_username_lower_idx, so the
+	// byte-order range [$1, $2) is an index range scan with no recheck.
 	const query = `SELECT id::text, username FROM users
-		WHERE lower(username) COLLATE "C" LIKE $1 AND id <> $2::uuid
+		WHERE lower(username) COLLATE "C" >= $1 AND lower(username) COLLATE "C" < $2
+			AND id <> $3::uuid
 		ORDER BY lower(username) COLLATE "C", username COLLATE "C"
-		LIMIT $3`
+		LIMIT $4`
 
-	pattern := likeEscaper.Replace(strings.ToLower(prefix)) + "%"
-	rows, err := r.pool.Query(ctx, query, pattern, excludeID, limit)
+	lower, upper, err := usernamePrefixRange(prefix)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, query, lower, upper, excludeID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search users: %w", err)
 	}
