@@ -19,8 +19,9 @@ type RoomRepository struct{ pool *pgxpool.Pool }
 // NewRoomRepository binds the repository to Chat's database pool.
 func NewRoomRepository(pool *pgxpool.Pool) *RoomRepository { return &RoomRepository{pool: pool} }
 
-const roomColumns = `id::text, kind, COALESCE(name, ''), COALESCE(owner_id::text, ''), private, created_at,
-  COALESCE(direct_user_low::text, ''), COALESCE(direct_user_high::text, '')`
+// roomColumns qualifies every column so that queries can join messages and memberships.
+const roomColumns = `rooms.id::text, rooms.kind, COALESCE(rooms.name, ''), COALESCE(rooms.owner_id::text, ''),
+  rooms.private, rooms.created_at, COALESCE(rooms.direct_user_low::text, ''), COALESCE(rooms.direct_user_high::text, '')`
 
 // GetOrCreateDirect creates both memberships atomically. PostgreSQL compares the
 // UUIDs, so input ordering and alternate textual encodings cannot create duplicates.
@@ -57,6 +58,39 @@ func (r *RoomRepository) GetForMember(ctx context.Context, roomID, userID string
 		return nil, fmt.Errorf("get member room: %w", err)
 	}
 	return room, nil
+}
+
+// ListForMember returns the member's rooms after an exclusive position, most
+// recently active first. The latest message is found through its room sequence.
+func (r *RoomRepository) ListForMember(ctx context.Context, userID string, after domain.RoomPosition, limit int) ([]*domain.RoomSummary, error) {
+	var activity, roomID any
+	if after.ID != "" {
+		activity, roomID = after.Activity, after.ID
+	}
+	rows, err := r.pool.Query(ctx, `SELECT `+roomColumns+`, messages.created_at, activity.at FROM room_members
+  JOIN rooms ON rooms.id=room_members.room_id
+  LEFT JOIN messages ON messages.room_id=rooms.id AND messages.sequence=rooms.message_sequence
+  CROSS JOIN LATERAL (SELECT GREATEST(messages.created_at, room_members.joined_at) AS at) activity
+  WHERE room_members.user_id=$1::uuid
+  AND ($2::timestamptz IS NULL OR (activity.at, rooms.id) < ($2::timestamptz, $3::uuid))
+  ORDER BY activity.at DESC, rooms.id DESC LIMIT $4`, userID, activity, roomID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query member rooms: %w", err)
+	}
+	defer rows.Close()
+	rooms := make([]*domain.RoomSummary, 0)
+	for rows.Next() {
+		summary := &domain.RoomSummary{}
+		if err := rows.Scan(roomFields(&summary.Room, &summary.LastMessageAt, &summary.Activity)...); err != nil {
+			return nil, fmt.Errorf("scan member room: %w", err)
+		}
+		withParticipants(&summary.Room)
+		rooms = append(rooms, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read member rooms: %w", err)
+	}
+	return rooms, nil
 }
 
 // AddChannelMember locks the room while checking membership and ownership and
@@ -101,10 +135,10 @@ func scanRoom(row pgx.Row) (*domain.Room, error) {
 }
 
 // roomFields scans roomColumns, temporarily storing both direct participants.
-func roomFields(room *domain.Room) []any {
+func roomFields(room *domain.Room, extra ...any) []any {
 	room.ParticipantIDs = make([]string, 2)
-	return []any{&room.ID, &room.Kind, &room.Name, &room.OwnerID, &room.Private, &room.CreatedAt,
-		&room.ParticipantIDs[0], &room.ParticipantIDs[1]}
+	return append([]any{&room.ID, &room.Kind, &room.Name, &room.OwnerID, &room.Private, &room.CreatedAt,
+		&room.ParticipantIDs[0], &room.ParticipantIDs[1]}, extra...)
 }
 
 func withParticipants(room *domain.Room) *domain.Room {
