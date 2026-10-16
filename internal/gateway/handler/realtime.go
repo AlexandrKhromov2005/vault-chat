@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 )
 
 // Close codes of the WebSocket endpoint in the range RFC 6455 leaves to
@@ -20,6 +22,9 @@ const (
 	// closeUnauthorized: authentication is missing, invalid or expired; the
 	// client refreshes its access token before reconnecting.
 	closeUnauthorized websocket.StatusCode = 4001
+	// closeLagging: the client did not keep up with its events; it reconnects
+	// and catches up.
+	closeLagging websocket.StatusCode = 4002
 )
 
 // maxClientFrameBytes bounds client frames; an auth frame needs about 1 KiB.
@@ -27,26 +32,31 @@ const maxClientFrameBytes = 4096
 
 // RealtimeOptions are the limits of WebSocket connections.
 type RealtimeOptions struct {
-	// AuthTimeout bounds waiting for the first auth frame and each token check.
+	// AuthTimeout bounds waiting for the first auth frame, each token check
+	// and subscribing to the user's events.
 	AuthTimeout time.Duration
 	// ReauthInterval is the shortest time between auth frames of a connection,
 	// so a client cannot turn its connection into a stream of Auth calls.
 	ReauthInterval time.Duration
+	// PingInterval is the time between server pings; a client that does not
+	// answer within WriteTimeout is disconnected.
+	PingInterval time.Duration
 	// WriteTimeout bounds every write to a client.
 	WriteTimeout time.Duration
 }
 
-// Realtime serves GET /api/v1/ws: connections that authenticate in-band and
-// stay open while their access token is valid.
+// Realtime serves GET /api/v1/ws: authenticated connections that receive the
+// Chat events of their user.
 type Realtime struct {
+	hub       *realtime.Hub
 	validator middleware.TokenValidator
 	options   RealtimeOptions
 	logger    *slog.Logger
 }
 
-// NewRealtime binds the Auth token validator and the limits.
-func NewRealtime(validator middleware.TokenValidator, options RealtimeOptions, logger *slog.Logger) *Realtime {
-	return &Realtime{validator: validator, options: options, logger: logger}
+// NewRealtime binds the event hub, the Auth token validator and the limits.
+func NewRealtime(hub *realtime.Hub, validator middleware.TokenValidator, options RealtimeOptions, logger *slog.Logger) *Realtime {
+	return &Realtime{hub: hub, validator: validator, options: options, logger: logger}
 }
 
 // closeError ends a connection with a close code and a fixed reason.
@@ -107,7 +117,7 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(maxClientFrameBytes)
-	c := &connection{Realtime: h, conn: conn, renewed: make(chan time.Time), ended: make(chan *closeError, 1)}
+	c := &connection{Realtime: h, conn: conn, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
 	// Reads must not be given a context that ends before the close handshake:
 	// coder/websocket drops the connection without a close frame when it does.
 	ctx, cancel := context.WithCancel(r.Context())
@@ -122,20 +132,35 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.workers.Wait()
 }
 
-// serve authenticates the connection and keeps it open while it stays
-// authenticated. It returns how to close the connection, or nil when it is
-// already gone.
+// serve authenticates the connection, attaches it to the hub and relays events.
+// It returns how to close the connection, or nil when it is already gone.
 func (c *connection) serve(ctx context.Context) *closeError {
 	current, end := c.authenticate(ctx)
 	if current.userID == "" {
 		return end
 	}
+	attachCtx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	client, err := c.hub.Attach(attachCtx, current.userID)
+	cancel()
+	switch {
+	case err == nil:
+	case errors.Is(err, realtime.ErrClosed):
+		return goingAway()
+	case errors.Is(err, realtime.ErrTooManyConnections):
+		return &closeError{websocket.StatusTryAgainLater, "too many connections"}
+	default:
+		c.logger.WarnContext(ctx, "subscribe to user events failed", "error", err)
+		return &closeError{websocket.StatusTryAgainLater, "events unavailable"}
+	}
+	defer c.hub.Detach(client)
+	// Events queued since Attach wait in the client's queue until ready is sent.
 	if err := c.writeReady(ctx, current); err != nil {
 		return nil
 	}
-	c.workers.Add(1)
+	c.workers.Add(2)
 	go c.readFrames(ctx, current.userID)
-	return c.relay(ctx, current)
+	go c.ping(ctx)
+	return c.relay(ctx, client, current)
 }
 
 // authenticate reads the first frame within AuthTimeout and validates it. A
@@ -169,6 +194,11 @@ func (c *connection) nextToken(ctx context.Context) (string, *closeError) {
 		return "", &closeError{websocket.StatusPolicyViolation, "expected an auth frame"}
 	}
 	return token, nil
+}
+
+// goingAway ends a connection because the Gateway is shutting down.
+func goingAway() *closeError {
+	return &closeError{websocket.StatusGoingAway, "server shutting down"}
 }
 
 // validate checks a token with Auth, as for every protected REST request.
@@ -218,6 +248,27 @@ func (c *connection) readFrames(ctx context.Context, userID string) {
 	}
 }
 
+// ping disconnects a client that stops answering pings.
+func (c *connection) ping(ctx context.Context) {
+	defer c.workers.Done()
+	ticker := time.NewTicker(c.options.PingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pingCtx, cancel := context.WithTimeout(ctx, c.options.WriteTimeout)
+			err := c.conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				c.finish(ctx, nil)
+				return
+			}
+		}
+	}
+}
+
 // finish asks relay to end the connection.
 func (c *connection) finish(ctx context.Context, end *closeError) {
 	select {
@@ -226,13 +277,24 @@ func (c *connection) finish(ctx context.Context, end *closeError) {
 	}
 }
 
-// relay confirms re-authentications until the token expires or the reader
-// finishes the connection.
-func (c *connection) relay(ctx context.Context, current session) *closeError {
+// relay writes the user's events until the token expires, the hub ends the
+// client or a reader or pinger finishes the connection.
+func (c *connection) relay(ctx context.Context, client *realtime.Client, current session) *closeError {
 	expiry := time.NewTimer(time.Until(current.expiresAt))
 	defer expiry.Stop()
 	for {
 		select {
+		case payload := <-client.Frames():
+			frame, known, err := eventFrame(payload)
+			if err != nil {
+				c.logger.WarnContext(ctx, "skipping undecodable chat event", "error", err)
+			}
+			if !known {
+				continue
+			}
+			if err := c.write(ctx, frame); err != nil {
+				return nil
+			}
 		case current.expiresAt = <-c.renewed:
 			expiry.Reset(time.Until(current.expiresAt))
 			if err := c.writeReady(ctx, current); err != nil {
@@ -240,9 +302,23 @@ func (c *connection) relay(ctx context.Context, current session) *closeError {
 			}
 		case <-expiry.C:
 			return &closeError{closeUnauthorized, "access token expired"}
+		case <-client.Done():
+			return clientEnd(client.Reason())
 		case end := <-c.ended:
 			return end
 		}
+	}
+}
+
+// clientEnd maps why the hub ended a client to a close code.
+func clientEnd(reason realtime.Reason) *closeError {
+	switch reason {
+	case realtime.ReasonLagging:
+		return &closeError{closeLagging, "too slow, reconnect and catch up"}
+	case realtime.ReasonShutdown:
+		return goingAway()
+	default:
+		return &closeError{websocket.StatusTryAgainLater, "event stream interrupted"}
 	}
 }
 
