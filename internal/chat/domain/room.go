@@ -25,7 +25,7 @@ var (
 )
 
 // Room is the stored room metadata. Direct rooms have empty Name and OwnerID;
-// their participants have equal rights. Memberships are stored separately.
+// their participants have equal rights. Channel memberships are stored separately.
 type Room struct {
 	ID        string
 	Kind      Kind
@@ -33,4 +33,6 @@ type Room struct {
 	OwnerID   string
 	Private   bool
 	CreatedAt time.Time
+	// ParticipantIDs holds both direct participants in UUID order; nil for channels.
+	ParticipantIDs []string
 }
