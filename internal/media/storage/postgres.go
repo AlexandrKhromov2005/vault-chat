@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 )
 
 // Postgres owns file metadata, independently of Auth and Chat databases.

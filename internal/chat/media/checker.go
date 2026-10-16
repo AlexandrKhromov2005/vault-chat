@@ -3,11 +3,13 @@ package media
 
 import (
 	"context"
-	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 )
 
 // Client is Media's authenticated metadata API.

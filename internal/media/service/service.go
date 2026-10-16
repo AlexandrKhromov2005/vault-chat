@@ -8,9 +8,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
-	"github.com/google/uuid"
 )
 
 // Repository owns Media metadata. Pending rows are never visible to readers.

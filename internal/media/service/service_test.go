@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 )
 
 type memoryRepo struct {

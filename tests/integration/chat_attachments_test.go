@@ -2,11 +2,13 @@ package integration
 
 import (
 	"context"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"testing"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
 )
 
 func TestChatAttachments_PersistenceAndRetry(t *testing.T) {

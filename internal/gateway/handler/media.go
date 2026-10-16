@@ -3,18 +3,20 @@ package handler
 import (
 	"context"
 	"errors"
-	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
 	"strconv"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
 )
 
 // MediaClient is the file API consumed by Gateway.
