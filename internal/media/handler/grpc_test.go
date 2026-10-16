@@ -2,9 +2,15 @@ package handler
 
 import (
 	"context"
-	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
-	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
+	"errors"
+	"io"
+	"net"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
+
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,10 +18,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
-	"io"
-	"net"
-	"testing"
-	"time"
+
+	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 )
 
 type testAuth struct{ actor string }
@@ -83,5 +89,82 @@ func TestUploadProtocol(t *testing.T) {
 	}
 	if len(files.uploaded) != 1 {
 		t.Fatalf("invalid uploads committed: %d", len(files.uploaded))
+	}
+}
+
+type readableFiles struct {
+	testFiles
+	fail error
+}
+
+func (f *readableFiles) Get(context.Context, string) (*domain.File, error) {
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	return &domain.File{ID: uuid.NewString(), Name: "a.txt", Size: 5, CreatedAt: time.Now()}, nil
+}
+func (f *readableFiles) Download(ctx context.Context, id string) (*domain.File, io.ReadCloser, error) {
+	file, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return file, io.NopCloser(strings.NewReader("hello")), nil
+}
+func TestReadRPCsAndErrorMapping(t *testing.T) {
+	files := &readableFiles{}
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	mediav1.RegisterMediaServiceServer(server, New(files, testAuth{uuid.NewString()}))
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///test", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	client := mediav1.NewMediaServiceClient(conn)
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+	req := &mediav1.GetFileRequest{FileId: uuid.NewString()}
+	file, err := client.GetFile(ctx, req)
+	if err != nil || file.GetFile().GetFilename() != "a.txt" {
+		t.Fatalf("file=%v %v", file, err)
+	}
+	stream, err := client.Download(ctx, &mediav1.DownloadRequest{FileId: req.FileId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := stream.Recv()
+	if err != nil || first.GetFile() == nil {
+		t.Fatalf("metadata=%v %v", first, err)
+	}
+	chunk, err := stream.Recv()
+	if err != nil || string(chunk.Data) != "hello" {
+		t.Fatalf("data=%v %v", chunk, err)
+	}
+	if _, err := stream.Recv(); err != io.EOF {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		err  error
+		code codes.Code
+	}{{validator.ErrTooLarge, codes.ResourceExhausted}, {validator.ErrInvalidFile, codes.InvalidArgument}, {validator.ErrUnsupported, codes.InvalidArgument}, {domain.ErrNotFound, codes.NotFound}, {context.Canceled, codes.Canceled}, {context.DeadlineExceeded, codes.DeadlineExceeded}, {errors.New("database password"), codes.Internal}, {status.Error(codes.PermissionDenied, "private detail"), codes.PermissionDenied}} {
+		got := safeError(tc.err)
+		if status.Code(got) != tc.code || strings.Contains(got.Error(), "password") || strings.Contains(got.Error(), "private detail") {
+			t.Fatalf("mapping=%v", got)
+		}
+	}
+	for _, auth := range []metadata.MD{nil, metadata.Pairs("authorization", "Basic token"), metadata.Pairs("authorization", "Bearer a b"), metadata.Pairs("authorization", "Bearer good", "authorization", "Bearer good")} {
+		_, err := client.GetFile(metadata.NewOutgoingContext(context.Background(), auth), req)
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestMissingAndForbiddenRoomHideFileExistence(t *testing.T) {
+	missing := safeError(domain.ErrNotFound)
+	hidden := safeError(status.Error(codes.NotFound, "room not found"))
+	if missing.Error() != hidden.Error() {
+		t.Fatalf("existence leaked: missing=%v hidden=%v", missing, hidden)
 	}
 }
