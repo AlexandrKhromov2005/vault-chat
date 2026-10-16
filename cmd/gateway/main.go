@@ -22,6 +22,7 @@ import (
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
@@ -31,6 +32,10 @@ import (
 // shutdownTimeout bounds how long in-flight requests may take to finish
 // after SIGINT/SIGTERM.
 const shutdownTimeout = 15 * time.Second
+
+// reauthInterval is the shortest time between in-band token refreshes of a
+// WebSocket connection; clients refresh minutes before their token expires.
+const reauthInterval = 10 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -79,11 +84,32 @@ func run() error {
 		return fmt.Errorf("failed to init rate limiter: %w", err)
 	}
 
+	// Every instance subscribes to the event channels of its own WebSocket
+	// users on the same Redis; nothing is shared between instances.
+	stream := realtime.NewRedisStream(redisClient)
+	hub := realtime.NewHub(stream, int(cfg.WebSocket.MaxConnectionsPerUser), int(cfg.WebSocket.SendBuffer))
+	go func() {
+		if err := stream.Run(ctx, hub); err != nil {
+			logger.Error("event stream stopped", "error", err)
+		}
+	}()
+
 	// Redis is deliberately not a readiness dependency: the rate limiter
 	// fails open, so the gateway keeps serving without it.
 	health := handler.NewHealth(map[string]handler.Check{
 		"auth": checkGRPCHealth(authHealth, "auth"),
 		"chat": checkGRPCHealth(chatHealth, "chat"),
+	}, logger)
+
+	websockets := handler.NewRealtime(hub, authClient, handler.RealtimeOptions{
+		AllowedOrigins: cfg.CORSAllowedOrigins,
+		AuthTimeout:    cfg.WebSocket.AuthTimeout,
+		ReauthInterval: reauthInterval,
+		PingInterval:   cfg.WebSocket.PingInterval,
+		WriteTimeout:   cfg.WebSocket.WriteTimeout,
+		// The rate limiter fails open without Redis; these limits do not.
+		MaxConnections:     int(cfg.WebSocket.MaxConnections),
+		MaxUnauthenticated: int(cfg.WebSocket.MaxUnauthenticatedConnections),
 	}, logger)
 
 	server := &http.Server{
@@ -98,10 +124,12 @@ func run() error {
 			CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 			MaxBodyBytes:       cfg.MaxBodyBytes,
 			RequestTimeout:     cfg.RequestTimeout,
+			Realtime:           websockets,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Backstop only: API request bodies are cut off at the request
-		// deadline by middleware.Timeout.
+		// deadline by middleware.Timeout. Hijacking clears both deadlines,
+		// so they do not limit WebSocket connections.
 		ReadTimeout:  cfg.RequestTimeout + 5*time.Second,
 		WriteTimeout: cfg.RequestTimeout + 5*time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -133,8 +161,22 @@ func run() error {
 	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	// server.Shutdown does not see hijacked WebSocket connections. The
+	// handler closes all of them with 1001, authenticated or not, so that
+	// clients reconnect to another instance, and waits until the close
+	// handshakes are done; the hub stops accepting subscriptions meanwhile.
+	websocketsDone := make(chan error, 1)
+	go func() { websocketsDone <- websockets.Shutdown(shutdownCtx) }()
+	hubDone := make(chan error, 1)
+	go func() { hubDone <- hub.Shutdown(shutdownCtx) }()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("failed to shut down gracefully: %w", err)
+	}
+	if err := <-websocketsDone; err != nil {
+		return fmt.Errorf("failed to close WebSocket connections: %w", err)
+	}
+	if err := <-hubDone; err != nil {
+		return fmt.Errorf("failed to detach WebSocket connections: %w", err)
 	}
 	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("HTTP server failed: %w", err)
