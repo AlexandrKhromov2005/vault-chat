@@ -42,6 +42,8 @@ type roomResponse struct {
 	OwnerID   string    `json:"owner_id,omitempty"`
 	Private   bool      `json:"private"`
 	CreatedAt time.Time `json:"created_at"`
+	// ParticipantIDs is present only for direct dialogs.
+	ParticipantIDs []string `json:"participant_ids,omitempty"`
 }
 
 func roomJSON(room *chatv1.Room) roomResponse {
@@ -49,7 +51,8 @@ func roomJSON(room *chatv1.Room) roomResponse {
 	if room.GetKind() == chatv1.RoomKind_ROOM_KIND_DIRECT {
 		kind = "direct"
 	}
-	return roomResponse{ID: room.GetId(), Kind: kind, Name: room.GetName(), OwnerID: room.GetOwnerId(), Private: room.GetPrivate(), CreatedAt: room.GetCreatedAt().AsTime()}
+	return roomResponse{ID: room.GetId(), Kind: kind, Name: room.GetName(), OwnerID: room.GetOwnerId(), Private: room.GetPrivate(),
+		CreatedAt: room.GetCreatedAt().AsTime(), ParticipantIDs: room.GetParticipantIds()}
 }
 
 func chatContext(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
