@@ -22,7 +22,7 @@ REST; комнаты, отправка сообщений и история до
 | Контракт Chat | Protobuf-контракт операций с комнатами и сгенерированный gRPC-код | Реализованы все шесть RPC; актор проверяется через Auth |
 | Данные | Миграции пользователей и сессий Auth, отдельные миграции комнат, участников и сообщений Chat | Auth и Chat применяют миграции своих отдельных БД при запуске |
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
-| Проверки | Unit-, PostgreSQL integration- и race-тесты, 21 цель фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
+| Проверки | Unit-, PostgreSQL integration- и race-тесты, 22 цели фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
 | Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth и Chat, Redis, NATS и MinIO | Контейнеризована инфраструктура; NATS и MinIO ещё не используются кодом приложения |
 
 Правила и ограничения комнат описаны в [документации Chat](docs/chat/rooms.md).
