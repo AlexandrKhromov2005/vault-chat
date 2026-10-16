@@ -1,0 +1,30 @@
+# Keep the build context small and free of secrets. Only Go sources,
+# generated API code and embedded migrations are needed to build services.
+
+# Hidden files and directories: VCS data, .env files, editor and tool
+# state. None of them are needed to compile the services.
+.*
+
+# Secrets: never send them to the daemon
+secrets
+**/*.pem
+**/*.key
+**/*.crt
+
+# Build and test artifacts
+bin
+*.exe
+coverage.out
+coverage.html
+cover_*.out
+fuzzcache
+
+# Not needed to compile the services
+tests
+**/*_test.go
+**/testdata
+docs
+deployments
+scripts
+*.md
+Dockerfile

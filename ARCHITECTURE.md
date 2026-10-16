@@ -2,6 +2,13 @@
 
 > Corporate team messenger with security-first design.
 
+This document describes the target architecture, not an inventory of deployed
+features. The implementation currently contains Auth, Chat and Gateway; Media,
+NATS application flows, application-data caching, mTLS, metrics and audit storage
+are planned. See [README](README.md) for implemented features and
+[requirements and acceptance criteria](docs/requirements.md) for delivery stages,
+open PRs and course coverage. Target features below are not evidence of completion.
+
 ---
 
 ## 1. Architectural Style
@@ -118,6 +125,7 @@ Used for request/response operations requiring immediate consistency.
 |------|------|-----|---------|
 | `ValidateToken` | Gateway | Auth | JWT verification on every request |
 | `GetUser` | Chat | Auth | Resolve sender info for messages |
+| `SearchUsers` | Gateway | Auth | Find conversation partners by username prefix |
 | `CheckPermission` | Chat | Auth | Verify room membership / admin rights |
 | `GetFileACL` | Gateway | Media | Verify download permissions |
 
@@ -134,7 +142,9 @@ Used for events, notifications, decoupled side effects.
 
 ### 3.3 Service Mesh (Future)
 
-For now: direct gRPC with mTLS certificates. Future: Linkerd or Istio for automatic mTLS, retries, circuit breakers.
+Current implementation: direct plaintext gRPC. Planned: direct gRPC with mTLS
+certificates and verified service identities. Linkerd or Istio remain future options
+for managing mTLS, retries and circuit breakers.
 
 ---
 
@@ -206,7 +216,7 @@ For now: direct gRPC with mTLS certificates. Future: Linkerd or Istio for automa
 |-------|--------|-------|
 | Transport | TLS 1.3 | Client ↔ Gateway, Gateway ↔ Services |
 | Service mesh | mTLS | Service ↔ Service |
-| Database | AES-256 | PostgreSQL transparent data encryption |
+| Database | At-rest encryption (planned) | Select and verify a storage-level or database-supported mechanism; not implemented |
 | Backup | AES-256-GCM | Encrypted before upload to backup storage |
 | End-to-end (DMs) | Signal Protocol / Double Ratchet | Optional; server sees only ciphertext |
 
@@ -299,7 +309,10 @@ For now: direct gRPC with mTLS certificates. Future: Linkerd or Istio for automa
 
 ## 8. CI/CD Pipeline (Local)
 
-All verification runs locally via `xmake`. No cloud runners.
+Target workflow: local verification via `xmake`; no cloud runners are configured.
+`xmake.lua` and automated hooks are not implemented. Current manual commands are
+listed in README. A working single verification command is an acceptance criterion
+in [the delivery plan](docs/requirements.md).
 
 ```
 Developer Machine:
