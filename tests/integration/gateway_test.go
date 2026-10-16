@@ -256,6 +256,40 @@ func TestGateway_SessionLifecycle(t *testing.T) {
 	})
 }
 
+func TestGateway_UserSearch(t *testing.T) {
+	conn, _ := startAuth(t)
+	api := startGateway(t, conn, 1000).URL + "/api/v1"
+	ids := map[string]any{}
+	for _, name := range []string{"alice", "Alina", "al_x", "bob"} {
+		code, body := call(t, http.MethodPost, api+"/auth/register", "",
+			`{"email":"`+name+`@example.com","username":"`+name+`","password":"`+testPassword+`"}`)
+		require.Equal(t, http.StatusCreated, code, body)
+		ids[name] = body["user_id"]
+	}
+	alice := login(t, api+"/auth", "alice@example.com")
+
+	// The caller is excluded, matching ignores case and '_' is literal.
+	code, body := call(t, http.MethodGet, api+"/users?query=AL", alice.access, "")
+	require.Equal(t, http.StatusOK, code, body)
+	require.Equal(t, []any{
+		map[string]any{"user_id": ids["al_x"], "username": "al_x"},
+		map[string]any{"user_id": ids["Alina"], "username": "Alina"},
+	}, body["users"])
+	code, body = call(t, http.MethodGet, api+"/users?query=al_&limit=1", alice.access, "")
+	require.Equal(t, http.StatusOK, code, body)
+	require.Len(t, body["users"], 1)
+
+	code, _ = call(t, http.MethodGet, api+"/users?query=al", "", "")
+	require.Equal(t, http.StatusUnauthorized, code)
+	code, _ = call(t, http.MethodGet, api+"/users?query=al", alice.refresh, "")
+	require.Equal(t, http.StatusUnauthorized, code)
+	for _, query := range []string{"query=a%25", "query=", "query=a", "query=al&limit=51", "query=al&email=x"} {
+		code, body = call(t, http.MethodGet, api+"/users?"+query, alice.access, "")
+		require.Equal(t, http.StatusBadRequest, code, query)
+		require.Equal(t, "invalid_argument", body["error"].(map[string]any)["code"], query)
+	}
+}
+
 func TestGateway_RateLimit(t *testing.T) {
 	// Requests without a token are rejected before reaching auth, so no
 	// backend is needed.

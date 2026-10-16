@@ -371,6 +371,67 @@ func (_c *MockAuthService_RevokeAllSessions_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// SearchUsers provides a mock function with given fields: ctx, accessToken, query, limit
+func (_m *MockAuthService) SearchUsers(ctx context.Context, accessToken string, query string, limit int32) ([]*domain.User, error) {
+	ret := _m.Called(ctx, accessToken, query, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SearchUsers")
+	}
+
+	var r0 []*domain.User
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int32) ([]*domain.User, error)); ok {
+		return rf(ctx, accessToken, query, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int32) []*domain.User); ok {
+		r0 = rf(ctx, accessToken, query, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*domain.User)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int32) error); ok {
+		r1 = rf(ctx, accessToken, query, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_SearchUsers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchUsers'
+type MockAuthService_SearchUsers_Call struct {
+	*mock.Call
+}
+
+// SearchUsers is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+//   - query string
+//   - limit int32
+func (_e *MockAuthService_Expecter) SearchUsers(ctx interface{}, accessToken interface{}, query interface{}, limit interface{}) *MockAuthService_SearchUsers_Call {
+	return &MockAuthService_SearchUsers_Call{Call: _e.mock.On("SearchUsers", ctx, accessToken, query, limit)}
+}
+
+func (_c *MockAuthService_SearchUsers_Call) Run(run func(ctx context.Context, accessToken string, query string, limit int32)) *MockAuthService_SearchUsers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int32))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_SearchUsers_Call) Return(_a0 []*domain.User, _a1 error) *MockAuthService_SearchUsers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_SearchUsers_Call) RunAndReturn(run func(context.Context, string, string, int32) ([]*domain.User, error)) *MockAuthService_SearchUsers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ValidateToken provides a mock function with given fields: ctx, token
 func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*jwt.Claims, error) {
 	ret := _m.Called(ctx, token)

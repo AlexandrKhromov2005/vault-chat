@@ -226,6 +226,48 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/users:
+    get:
+      summary: Search users by username prefix
+      description: |
+        Case-insensitive prefix match on username for choosing a conversation
+        partner. Returns only user_id and username; the caller is never
+        included. Results are ordered by lowercased username (byte order), so
+        an exact match comes first. Duplicate or unknown query parameters are
+        rejected. Any authenticated user can enumerate the directory by
+        prefix; this is bounded only by the per-user rate limit and the page
+        size.
+      tags: [users]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: {type: string, minLength: 2, maxLength: 32, pattern: "^[A-Za-z][A-Za-z0-9_-]{1,31}$"}
+          description: |
+            Start of a username, 2 to 32 characters, not trimmed; '_' matches
+            literally. Single-character queries are rejected.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        "200":
+          description: Matching public profiles; empty when nothing matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: {$ref: "#/components/schemas/PublicProfile"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
   /api/v1/users/{user_id}:
     get:
       summary: Get an existing user's public profile by UUID

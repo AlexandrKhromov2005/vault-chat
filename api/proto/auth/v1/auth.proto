@@ -11,6 +11,10 @@ import "google/protobuf/timestamp.proto";
 service AuthService {
   // GetUser returns the public profile of an existing identity to an access-token holder.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // SearchUsers returns, to an access-token holder, the public profiles whose
+  // username starts with the query, ignoring case. The caller is excluded.
+  // Results are ordered by lowercased username, so an exact match comes first.
+  rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
   // Register creates a new user account.
   rpc Register(RegisterRequest) returns (RegisterResponse);
   // Login authenticates a user and issues an access/refresh token pair.
@@ -101,6 +105,26 @@ message GetUserRequest {
 
 // GetUserResponse intentionally excludes email and credentials.
 message GetUserResponse {
+  string user_id = 1;
+  string username = 2;
+}
+
+message SearchUsersRequest {
+  string access_token = 1;
+  // Username prefix: an ASCII letter followed by 1 to 31 ASCII letters,
+  // digits, underscores or dashes.
+  string query = 2;
+  // Page size from 1 to 50; 0 selects the default of 20.
+  int32 limit = 3;
+}
+
+// SearchUsersResponse intentionally excludes email and credentials.
+message SearchUsersResponse {
+  repeated UserProfile users = 1;
+}
+
+// UserProfile is the public directory view of an identity.
+message UserProfile {
   string user_id = 1;
   string username = 2;
 }

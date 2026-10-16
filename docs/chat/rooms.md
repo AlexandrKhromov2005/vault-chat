@@ -18,6 +18,11 @@ Auth's authenticated `GetUser` RPC. That API returns only ID and username; UUID
 validation alone never establishes account existence. Auth failure prevents the
 room operation. Request ID propagates through Gateway → Chat → Auth.
 
+Clients find a peer's ID through Auth's `SearchUsers` RPC (Gateway
+`GET /api/v1/users?query=`): a case-insensitive username prefix search that
+returns the same public fields, excludes the caller, and caps a page at 50.
+Chat does not call it; the chosen ID is still resolved with `GetUser`.
+
 Chat owns its own database. User IDs are opaque external references, with no
 foreign keys or queries to Auth's tables. Database credentials must restrict each
 service to its own database. Apply `migrations.ChatFS` with directory `chat` to the
