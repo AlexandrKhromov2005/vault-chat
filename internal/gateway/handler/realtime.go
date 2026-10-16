@@ -234,12 +234,12 @@ func (c *connection) serve(ctx context.Context) *closeError {
 	if current.userID == "" {
 		return end
 	}
-	attachCtx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	attachCtx, cancel := c.authContext(ctx)
 	client, err := c.hub.Attach(attachCtx, current.userID)
 	cancel()
 	switch {
 	case err == nil:
-	case errors.Is(err, realtime.ErrClosed):
+	case c.stopping.Err() != nil, errors.Is(err, realtime.ErrClosed):
 		return goingAway()
 	case errors.Is(err, realtime.ErrTooManyConnections):
 		return &closeError{websocket.StatusTryAgainLater, "too many connections"}
@@ -291,6 +291,18 @@ func (c *connection) nextToken(ctx context.Context) (string, *closeError) {
 	return token, nil
 }
 
+// authContext bounds a token check or subscription by AuthTimeout and ends it
+// when Shutdown starts. Reads keep their own context: canceling a read would
+// drop the connection without the close frame Shutdown sends.
+func (c *connection) authContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	stop := context.AfterFunc(c.stopping, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 // goingAway ends a connection because the Gateway is shutting down.
 func goingAway() *closeError {
 	return &closeError{websocket.StatusGoingAway, "server shutting down"}
@@ -298,9 +310,12 @@ func goingAway() *closeError {
 
 // validate checks a token with Auth, as for every protected REST request.
 func (c *connection) validate(ctx context.Context, token string) (session, *closeError) {
-	ctx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	ctx, cancel := c.authContext(ctx)
 	defer cancel()
 	resp, err := c.validator.ValidateToken(ctx, &authv1.ValidateTokenRequest{Token: token})
+	if c.stopping.Err() != nil {
+		return session{}, goingAway()
+	}
 	if err != nil {
 		c.logger.WarnContext(ctx, "websocket token validation failed", "error", err)
 		return session{}, &closeError{websocket.StatusTryAgainLater, "authentication unavailable"}
