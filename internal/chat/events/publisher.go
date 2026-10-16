@@ -242,7 +242,7 @@ func Encode(event domain.Event) ([]byte, error) {
 			return nil, fmt.Errorf("message event without a message")
 		}
 		wire.Kind = &chatv1.Event_MessageCreated{MessageCreated: &chatv1.Message{Id: m.ID, RoomId: m.RoomID, SenderId: m.SenderID,
-			ClientMessageId: m.ClientID, Text: m.Text, CreatedAt: timestamppb.New(m.CreatedAt), Sequence: m.Sequence}}
+			ClientMessageId: m.ClientID, Text: m.Text, CreatedAt: timestamppb.New(m.CreatedAt), Sequence: m.Sequence, AttachmentIds: m.AttachmentIDs}}
 	case domain.MemberAdded:
 		wire.Kind = &chatv1.Event_MemberAdded{MemberAdded: change}
 	case domain.MemberRemoved:

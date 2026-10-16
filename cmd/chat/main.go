@@ -21,8 +21,10 @@ import (
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/events"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/handler"
+	chatmedia "github.com/AlexandrKhromov2005/vault-chat/internal/chat/media"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
@@ -82,7 +84,16 @@ func run() error {
 	defer closePublisher(publisher, cfg.EventDrainTimeout, logger)
 	rooms := repository.NewRoomRepository(pool, repository.WithNotifier(publisher))
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
-	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(rooms), service.NewMessageService(rooms), authv1.NewAuthServiceClient(authConn), logger))
+	var messageOptions []service.MessageOption
+	if cfg.MediaGRPCAddr != "" {
+		conn, err := grpc.NewClient(cfg.MediaGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+		if err != nil {
+			return fmt.Errorf("create chat media client: %w", err)
+		}
+		defer conn.Close()
+		messageOptions = append(messageOptions, service.WithAttachmentChecker(chatmedia.Checker{Client: mediav1.NewMediaServiceClient(conn)}))
+	}
+	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(rooms), service.NewMessageService(rooms, messageOptions...), authv1.NewAuthServiceClient(authConn), logger))
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	reflection.Register(server)

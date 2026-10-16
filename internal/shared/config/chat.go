@@ -9,6 +9,7 @@ import (
 type ChatConfig struct {
 	GRPCAddr       string
 	AuthGRPCAddr   string
+	MediaGRPCAddr  string
 	DatabaseURL    string
 	RedisAddr      string
 	RedisPassword  string
@@ -46,7 +47,7 @@ func LoadChat() (*ChatConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ChatConfig{GRPCAddr: envOr("CHAT_GRPC_ADDR", ":50052"), AuthGRPCAddr: envOr("CHAT_AUTH_GRPC_ADDR", "localhost:50051"), DatabaseURL: database,
+	return &ChatConfig{MediaGRPCAddr: os.Getenv("CHAT_MEDIA_GRPC_ADDR"), GRPCAddr: envOr("CHAT_GRPC_ADDR", ":50052"), AuthGRPCAddr: envOr("CHAT_AUTH_GRPC_ADDR", "localhost:50051"), DatabaseURL: database,
 		RedisAddr: envOr("CHAT_REDIS_ADDR", "localhost:6379"), RedisPassword: os.Getenv("CHAT_REDIS_PASSWORD"), RequestTimeout: timeout, LogLevel: envOr("CHAT_LOG_LEVEL", "info"),
 		EventQueueSize: int(queueSize), EventPublishTimeout: publishTimeout, EventDrainTimeout: drainTimeout}, nil
 }

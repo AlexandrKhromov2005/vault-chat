@@ -179,6 +179,10 @@ func roomProto(room *domain.Room) *chatv1.Room {
 
 func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 	switch {
+	case errors.Is(err, service.ErrInvalidAttachment):
+		return status.Error(codes.InvalidArgument, "invalid attachment")
+	case errors.Is(err, service.ErrMediaUnavailable):
+		return status.Error(codes.Unavailable, "media unavailable")
 	case errors.Is(err, domain.ErrMessageConflict):
 		return status.Error(codes.AlreadyExists, "message key already used with different text")
 	case errors.Is(err, validator.ErrInvalidText):
