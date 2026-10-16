@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AuthService_GetUser_FullMethodName           = "/auth.v1.AuthService/GetUser"
+	AuthService_SearchUsers_FullMethodName       = "/auth.v1.AuthService/SearchUsers"
 	AuthService_Register_FullMethodName          = "/auth.v1.AuthService/Register"
 	AuthService_Login_FullMethodName             = "/auth.v1.AuthService/Login"
 	AuthService_ValidateToken_FullMethodName     = "/auth.v1.AuthService/ValidateToken"
@@ -37,6 +38,10 @@ const (
 type AuthServiceClient interface {
 	// GetUser returns the public profile of an existing identity to an access-token holder.
 	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
+	// SearchUsers returns, to an access-token holder, the public profiles whose
+	// username starts with the query, ignoring case. The caller is excluded.
+	// Results are ordered by lowercased username, so an exact match comes first.
+	SearchUsers(ctx context.Context, in *SearchUsersRequest, opts ...grpc.CallOption) (*SearchUsersResponse, error)
 	// Register creates a new user account.
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 	// Login authenticates a user and issues an access/refresh token pair.
@@ -69,6 +74,16 @@ func (c *authServiceClient) GetUser(ctx context.Context, in *GetUserRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUserResponse)
 	err := c.cc.Invoke(ctx, AuthService_GetUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) SearchUsers(ctx context.Context, in *SearchUsersRequest, opts ...grpc.CallOption) (*SearchUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchUsersResponse)
+	err := c.cc.Invoke(ctx, AuthService_SearchUsers_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +159,10 @@ func (c *authServiceClient) RevokeAllSessions(ctx context.Context, in *RevokeAll
 type AuthServiceServer interface {
 	// GetUser returns the public profile of an existing identity to an access-token holder.
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
+	// SearchUsers returns, to an access-token holder, the public profiles whose
+	// username starts with the query, ignoring case. The caller is excluded.
+	// Results are ordered by lowercased username, so an exact match comes first.
+	SearchUsers(context.Context, *SearchUsersRequest) (*SearchUsersResponse, error)
 	// Register creates a new user account.
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	// Login authenticates a user and issues an access/refresh token pair.
@@ -174,6 +193,9 @@ type UnimplementedAuthServiceServer struct{}
 
 func (UnimplementedAuthServiceServer) GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetUser not implemented")
+}
+func (UnimplementedAuthServiceServer) SearchUsers(context.Context, *SearchUsersRequest) (*SearchUsersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SearchUsers not implemented")
 }
 func (UnimplementedAuthServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
@@ -228,6 +250,24 @@ func _AuthService_GetUser_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).GetUser(ctx, req.(*GetUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_SearchUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SearchUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SearchUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SearchUsers(ctx, req.(*SearchUsersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -350,6 +390,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUser",
 			Handler:    _AuthService_GetUser_Handler,
+		},
+		{
+			MethodName: "SearchUsers",
+			Handler:    _AuthService_SearchUsers_Handler,
 		},
 		{
 			MethodName: "Register",

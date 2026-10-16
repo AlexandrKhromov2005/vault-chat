@@ -48,6 +48,7 @@ func New(d Deps) http.Handler {
 	api.HandleFunc("POST /api/v1/auth/logout", d.Auth.Logout)
 	api.Handle("GET /api/v1/auth/me", protected(d.Auth.Me))
 	api.Handle("DELETE /api/v1/auth/sessions", protected(d.Auth.RevokeAllSessions))
+	api.Handle("GET /api/v1/users", protected(d.Auth.Users))
 	api.Handle("GET /api/v1/users/{user_id}", protected(d.Auth.User))
 	if d.Chat != nil {
 		api.Handle("POST /api/v1/rooms/{room_id}/messages", protected(d.Chat.SendMessage))
