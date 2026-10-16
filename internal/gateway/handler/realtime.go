@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 )
 
 // Close codes of the WebSocket endpoint in the range RFC 6455 leaves to
@@ -32,6 +35,9 @@ const maxClientFrameBytes = 4096
 
 // RealtimeOptions are the limits of WebSocket connections.
 type RealtimeOptions struct {
+	// AllowedOrigins are the browser origins allowed besides the Gateway's own,
+	// as for CORS; a single "*" allows any origin.
+	AllowedOrigins []string
 	// AuthTimeout bounds waiting for the first auth frame, each token check
 	// and subscribing to the user's events.
 	AuthTimeout time.Duration
@@ -51,12 +57,19 @@ type Realtime struct {
 	hub       *realtime.Hub
 	validator middleware.TokenValidator
 	options   RealtimeOptions
+	allowAll  bool
+	origins   map[string]bool
 	logger    *slog.Logger
 }
 
 // NewRealtime binds the event hub, the Auth token validator and the limits.
 func NewRealtime(hub *realtime.Hub, validator middleware.TokenValidator, options RealtimeOptions, logger *slog.Logger) *Realtime {
-	return &Realtime{hub: hub, validator: validator, options: options, logger: logger}
+	h := &Realtime{hub: hub, validator: validator, options: options, origins: make(map[string]bool), logger: logger}
+	for _, origin := range options.AllowedOrigins {
+		h.allowAll = h.allowAll || origin == "*"
+		h.origins[origin] = true
+	}
+	return h
 }
 
 // closeError ends a connection with a close code and a fixed reason.
@@ -111,8 +124,12 @@ func (c *connection) closeLater(end *closeError) (run func(), cancel func() bool
 // ServeHTTP upgrades the request and serves the connection until it ends.
 // The access token is never accepted from the URL, which is logged.
 func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Accept refuses browser origins other than the Gateway's own with 403.
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if !h.originAllowed(r) {
+		response.Error(w, http.StatusForbidden, "origin_forbidden", "origin not allowed")
+		return
+	}
+	// The origin was checked above against the configured list.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
@@ -130,6 +147,17 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = conn.CloseNow()
 	cancel()
 	c.workers.Wait()
+}
+
+// originAllowed accepts non-browser clients, which send no Origin, the
+// Gateway's own origin and the configured origins.
+func (h *Realtime) originAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" || h.allowAll || h.origins[origin] {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host)
 }
 
 // serve authenticates the connection, attaches it to the hub and relays events.
