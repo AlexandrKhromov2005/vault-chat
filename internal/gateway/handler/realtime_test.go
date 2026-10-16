@@ -405,6 +405,52 @@ func TestRealtime_ShutdownGivesUpWhenTheContextEnds(t *testing.T) {
 	require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
 }
 
+// requireRefused checks that an upgrade is refused before it happens.
+func requireRefused(t *testing.T, url string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, url, nil)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	require.NotEmpty(t, resp.Header.Get("Retry-After"))
+}
+
+func TestRealtime_LimitsConcurrentConnections(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	options.MaxConnections = 2
+	options.MaxUnauthenticated = 1
+	expires := time.Now().Add(time.Hour)
+	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", expires}, "bob-token": {"bob", expires}}, options)
+	alice := dial(t, url)
+	requireRefused(t, url) // alice has not authenticated yet
+	authenticate(t, alice, "alice-token")
+	bob := dial(t, url)
+	authenticate(t, bob, "bob-token")
+	requireRefused(t, url) // two connections are open
+	require.NoError(t, alice.Close(websocket.StatusNormalClosure, ""))
+	// The closed connection frees its slot for anyone.
+	require.Eventually(t, func() bool {
+		_, ok := tryReady(t, url, "bob-token")
+		return ok
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
+func TestRealtime_FailedAuthenticationFreesItsSlot(t *testing.T) {
+	options := testOptions()
+	options.MaxConnections = 1
+	options.MaxUnauthenticated = 1
+	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
+	conn := dial(t, url)
+	send(t, conn, `{"type":"auth","token":"forged"}`)
+	require.Equal(t, websocket.StatusCode(4001), closedWith(t, conn))
+	require.Eventually(t, func() bool {
+		_, ok := tryReady(t, url, "alice-token")
+		return ok
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
 func TestRealtime_ShutdownInterruptsAuthentication(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 	for _, tc := range []struct {
@@ -453,4 +499,33 @@ func TestRealtime_ShutdownInterruptsAuthentication(t *testing.T) {
 			}
 		})
 	}
+}
+
+// dialStatus tries to upgrade and reports the HTTP status, 101 on success,
+// without failing the test, so that it can run inside require.Never.
+func dialStatus(t *testing.T, url string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, url, nil)
+	if err == nil {
+		t.Cleanup(func() { _ = conn.CloseNow() })
+		return http.StatusSwitchingProtocols
+	}
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+func TestRealtime_ConnectionHoldsItsSlotUntilClosed(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = 50 * time.Millisecond
+	options.MaxConnections = 1
+	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
+	conn := dial(t, url)
+	// The authentication times out, but the client does not read the close
+	// frame, so the close handshake and with it the connection go on.
+	require.Never(t, func() bool { return dialStatus(t, url) != http.StatusServiceUnavailable }, 300*time.Millisecond, 20*time.Millisecond)
+	require.Equal(t, websocket.StatusCode(4001), closedWith(t, conn))
+	require.Eventually(t, func() bool { return dialStatus(t, url) == http.StatusSwitchingProtocols }, 3*time.Second, 20*time.Millisecond)
 }
