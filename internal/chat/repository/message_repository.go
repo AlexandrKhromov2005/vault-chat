@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,12 +13,23 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 )
 
-const messageColumns = `id::text, room_id::text, sender_id::text, client_id::text, text, sequence, created_at`
+const messageColumns = `id::text, room_id::text, sender_id::text, client_id::text, text, sequence, created_at, attachment_ids::text[]`
 
 // SendMessage serializes writes within a room so a committed cursor cannot skip
 // an earlier, still-uncommitted send. Retries never advance the room sequence
 // and announce nothing; a new message is announced to the members at its commit.
 func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clientID, text string) (*domain.Message, error) {
+	return r.sendMessage(ctx, roomID, actorID, clientID, text, nil)
+}
+
+// SendMessageWithAttachments stores verified file references atomically with text.
+func (r *RoomRepository) SendMessageWithAttachments(ctx context.Context, roomID, actorID, clientID, text string, ids []string) (*domain.Message, error) {
+	return r.sendMessage(ctx, roomID, actorID, clientID, text, ids)
+}
+func (r *RoomRepository) sendMessage(ctx context.Context, roomID, actorID, clientID, text string, ids []string) (*domain.Message, error) {
+	if ids == nil {
+		ids = []string{}
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin message: %w", err)
@@ -29,7 +41,7 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 	message, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages
  WHERE room_id=$1::uuid AND sender_id=$2::uuid AND client_id=$3::uuid`, roomID, actorID, clientID))
 	if err == nil {
-		if message.Text != text {
+		if message.Text != text || !slices.Equal(message.AttachmentIDs, ids) {
 			return nil, domain.ErrMessageConflict
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -47,9 +59,9 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 	if err != nil {
 		return nil, fmt.Errorf("advance message sequence: %w", err)
 	}
-	message, err = scanMessage(tx.QueryRow(ctx, `INSERT INTO messages (id, room_id, sender_id, client_id, text, sequence)
- VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING `+messageColumns,
-		uuid.NewString(), roomID, actorID, clientID, text, sequence))
+	message, err = scanMessage(tx.QueryRow(ctx, `INSERT INTO messages (id, room_id, sender_id, client_id, text, sequence, attachment_ids)
+ VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7::uuid[]) RETURNING `+messageColumns,
+		uuid.NewString(), roomID, actorID, clientID, text, sequence, ids))
 	if err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
 	}
@@ -66,6 +78,9 @@ func (r *RoomRepository) SendMessage(ctx context.Context, roomID, actorID, clien
 		return nil, fmt.Errorf("commit message: %w", err)
 	}
 	r.notify(ctx, events...)
+	if len(message.AttachmentIDs) == 0 {
+		message.AttachmentIDs = nil
+	}
 	return message, nil
 }
 
@@ -85,7 +100,7 @@ func (r *RoomRepository) ListMessagesAfter(ctx context.Context, roomID, actorID 
 // fragment over $3, only if the actor is a member of the room.
 func (r *RoomRepository) memberMessages(ctx context.Context, page, order, roomID, actorID string, position int64, limit int) ([]*domain.Message, error) {
 	rows, err := r.pool.Query(ctx, `SELECT m.id::text, m.room_id::text, m.sender_id::text,
- m.client_id::text, m.text, m.sequence, m.created_at FROM rooms r
+ m.client_id::text, m.text, m.sequence, m.created_at, m.attachment_ids::text[] FROM rooms r
  LEFT JOIN LATERAL (SELECT * FROM messages WHERE room_id=r.id AND `+page+` LIMIT $4) m ON true
  WHERE r.id=$1::uuid AND EXISTS (SELECT 1 FROM room_members WHERE room_id=r.id AND user_id=$2::uuid)
  ORDER BY m.sequence `+order, roomID, actorID, position, limit)
@@ -102,11 +117,15 @@ func (r *RoomRepository) memberMessages(ctx context.Context, page, order, roomID
 		// The left join has one null row for an authorized empty page.
 		message := &domain.Message{}
 		var timestamp *time.Time
-		if err := rows.Scan(&id, &room, &sender, &client, &text, &sequence, &timestamp); err != nil {
+		var attachments []string
+		if err := rows.Scan(&id, &room, &sender, &client, &text, &sequence, &timestamp, &attachments); err != nil {
 			return nil, fmt.Errorf("scan history: %w", err)
 		}
+		if len(attachments) == 0 {
+			attachments = nil
+		}
 		if id != nil {
-			*message = domain.Message{ID: *id, RoomID: *room, SenderID: *sender, ClientID: *client, Text: *text, Sequence: *sequence, CreatedAt: *timestamp}
+			*message = domain.Message{ID: *id, RoomID: *room, SenderID: *sender, ClientID: *client, Text: *text, Sequence: *sequence, CreatedAt: *timestamp, AttachmentIDs: attachments}
 			messages = append(messages, message)
 		}
 	}
@@ -121,8 +140,11 @@ func (r *RoomRepository) memberMessages(ctx context.Context, page, order, roomID
 
 func scanMessage(row pgx.Row) (*domain.Message, error) {
 	message := &domain.Message{}
-	if err := row.Scan(&message.ID, &message.RoomID, &message.SenderID, &message.ClientID, &message.Text, &message.Sequence, &message.CreatedAt); err != nil {
+	if err := row.Scan(&message.ID, &message.RoomID, &message.SenderID, &message.ClientID, &message.Text, &message.Sequence, &message.CreatedAt, &message.AttachmentIDs); err != nil {
 		return nil, err
+	}
+	if len(message.AttachmentIDs) == 0 {
+		message.AttachmentIDs = nil
 	}
 	return message, nil
 }
