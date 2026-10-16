@@ -24,3 +24,28 @@ func (h *GRPCHandler) ListMembers(ctx context.Context, req *chatv1.ListMembersRe
 	}
 	return response, nil
 }
+
+// RemoveMember delegates the owner check to the atomic storage write. Unlike
+// AddMember it does not resolve the target, which may no longer exist.
+func (h *GRPCHandler) RemoveMember(ctx context.Context, req *chatv1.RemoveMemberRequest) (*chatv1.RemoveMemberResponse, error) {
+	actor, _, err := h.identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.rooms.RemoveMember(ctx, actor, req.GetRoomId(), req.GetUserId()); err != nil {
+		return nil, h.roomStatus(ctx, err)
+	}
+	return &chatv1.RemoveMemberResponse{}, nil
+}
+
+// LeaveRoom removes the verified caller's own channel membership.
+func (h *GRPCHandler) LeaveRoom(ctx context.Context, req *chatv1.LeaveRoomRequest) (*chatv1.LeaveRoomResponse, error) {
+	actor, _, err := h.identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.rooms.LeaveRoom(ctx, actor, req.GetRoomId()); err != nil {
+		return nil, h.roomStatus(ctx, err)
+	}
+	return &chatv1.LeaveRoomResponse{}, nil
+}

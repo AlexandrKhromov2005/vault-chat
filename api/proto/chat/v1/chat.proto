@@ -26,6 +26,13 @@ service ChatService {
   // ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
   // and nonmembers. Direct dialogs list both participants.
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  // RemoveMember is owner-only and channel-only; removing a nonmember succeeds.
+  // The owner cannot be removed: FAILED_PRECONDITION.
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+  // LeaveRoom removes the caller from a channel. The owner gets
+  // FAILED_PRECONDITION until ownership can be transferred; direct dialogs
+  // cannot be left (PERMISSION_DENIED). A former member gets NOT_FOUND.
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
   // SendMessage retries are idempotent per room, caller and client_message_id.
   // Reusing that key with different text returns ALREADY_EXISTS.
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
@@ -125,6 +132,19 @@ message ListMembersResponse {
   // Empty means the end of the roster at the time this page was read.
   string next_cursor = 2;
 }
+
+message RemoveMemberRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message RemoveMemberResponse {}
+
+message LeaveRoomRequest {
+  string room_id = 1;
+}
+
+message LeaveRoomResponse {}
 
 // Message is immutable; text has 1–4096 Unicode code points and visible content.
 message Message {

@@ -25,6 +25,8 @@ const (
 	ChatService_ListRooms_FullMethodName         = "/chat.v1.ChatService/ListRooms"
 	ChatService_AddMember_FullMethodName         = "/chat.v1.ChatService/AddMember"
 	ChatService_ListMembers_FullMethodName       = "/chat.v1.ChatService/ListMembers"
+	ChatService_RemoveMember_FullMethodName      = "/chat.v1.ChatService/RemoveMember"
+	ChatService_LeaveRoom_FullMethodName         = "/chat.v1.ChatService/LeaveRoom"
 	ChatService_SendMessage_FullMethodName       = "/chat.v1.ChatService/SendMessage"
 	ChatService_ListMessages_FullMethodName      = "/chat.v1.ChatService/ListMessages"
 )
@@ -53,6 +55,13 @@ type ChatServiceClient interface {
 	// ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
 	// and nonmembers. Direct dialogs list both participants.
 	ListMembers(ctx context.Context, in *ListMembersRequest, opts ...grpc.CallOption) (*ListMembersResponse, error)
+	// RemoveMember is owner-only and channel-only; removing a nonmember succeeds.
+	// The owner cannot be removed: FAILED_PRECONDITION.
+	RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error)
+	// LeaveRoom removes the caller from a channel. The owner gets
+	// FAILED_PRECONDITION until ownership can be transferred; direct dialogs
+	// cannot be left (PERMISSION_DENIED). A former member gets NOT_FOUND.
+	LeaveRoom(ctx context.Context, in *LeaveRoomRequest, opts ...grpc.CallOption) (*LeaveRoomResponse, error)
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
@@ -128,6 +137,26 @@ func (c *chatServiceClient) ListMembers(ctx context.Context, in *ListMembersRequ
 	return out, nil
 }
 
+func (c *chatServiceClient) RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveMemberResponse)
+	err := c.cc.Invoke(ctx, ChatService_RemoveMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) LeaveRoom(ctx context.Context, in *LeaveRoomRequest, opts ...grpc.CallOption) (*LeaveRoomResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaveRoomResponse)
+	err := c.cc.Invoke(ctx, ChatService_LeaveRoom_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendMessageResponse)
@@ -172,6 +201,13 @@ type ChatServiceServer interface {
 	// ListMembers returns members ordered by user_id; NOT_FOUND for absent rooms
 	// and nonmembers. Direct dialogs list both participants.
 	ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error)
+	// RemoveMember is owner-only and channel-only; removing a nonmember succeeds.
+	// The owner cannot be removed: FAILED_PRECONDITION.
+	RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error)
+	// LeaveRoom removes the caller from a channel. The owner gets
+	// FAILED_PRECONDITION until ownership can be transferred; direct dialogs
+	// cannot be left (PERMISSION_DENIED). A former member gets NOT_FOUND.
+	LeaveRoom(context.Context, *LeaveRoomRequest) (*LeaveRoomResponse, error)
 	// SendMessage retries are idempotent per room, caller and client_message_id.
 	// Reusing that key with different text returns ALREADY_EXISTS.
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
@@ -204,6 +240,12 @@ func (UnimplementedChatServiceServer) AddMember(context.Context, *AddMemberReque
 }
 func (UnimplementedChatServiceServer) ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMembers not implemented")
+}
+func (UnimplementedChatServiceServer) RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveMember not implemented")
+}
+func (UnimplementedChatServiceServer) LeaveRoom(context.Context, *LeaveRoomRequest) (*LeaveRoomResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LeaveRoom not implemented")
 }
 func (UnimplementedChatServiceServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
@@ -340,6 +382,42 @@ func _ChatService_ListMembers_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_RemoveMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).RemoveMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_RemoveMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).RemoveMember(ctx, req.(*RemoveMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_LeaveRoom_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeaveRoomRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).LeaveRoom(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_LeaveRoom_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).LeaveRoom(ctx, req.(*LeaveRoomRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendMessageRequest)
 	if err := dec(in); err != nil {
@@ -406,6 +484,14 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMembers",
 			Handler:    _ChatService_ListMembers_Handler,
+		},
+		{
+			MethodName: "RemoveMember",
+			Handler:    _ChatService_RemoveMember_Handler,
+		},
+		{
+			MethodName: "LeaveRoom",
+			Handler:    _ChatService_LeaveRoom_Handler,
 		},
 		{
 			MethodName: "SendMessage",

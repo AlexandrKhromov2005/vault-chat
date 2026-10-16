@@ -28,6 +28,8 @@ type RoomService interface {
 	ListRooms(context.Context, string, string, int) (*service.RoomPage, error)
 	AddMember(context.Context, string, string, string) error
 	ListMembers(context.Context, string, string, string, int) (*service.MemberPage, error)
+	RemoveMember(context.Context, string, string, string) error
+	LeaveRoom(context.Context, string, string) error
 }
 
 // MessageService is the message business logic consumed by the gRPC handler.
@@ -193,6 +195,8 @@ func (h *GRPCHandler) roomStatus(ctx context.Context, err error) error {
 		return status.Error(codes.InvalidArgument, "invalid member list cursor")
 	case errors.Is(err, service.ErrInvalidMemberLimit):
 		return status.Error(codes.InvalidArgument, "member list limit must be 1–100")
+	case errors.Is(err, domain.ErrOwnerMembership):
+		return status.Error(codes.FailedPrecondition, "channel owner cannot leave or be removed")
 	case errors.Is(err, domain.ErrNotFound):
 		return status.Error(codes.NotFound, "room not found")
 	case errors.Is(err, domain.ErrForbidden):
