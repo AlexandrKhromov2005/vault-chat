@@ -17,11 +17,12 @@ var (
 	ErrInvalidSearchLimit = errors.New("invalid search limit")
 )
 
-var usernameQueryPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+var usernameQueryPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{1,31}$`)
 
 // ValidateUsernameQuery checks that query could start a valid username: an
-// ASCII letter followed by at most 31 ASCII letters, digits, underscores, or
-// dashes. Whitespace is rejected rather than trimmed.
+// ASCII letter followed by 1 to 31 ASCII letters, digits, underscores, or
+// dashes. Single-character queries are rejected because they match too much
+// of the directory. Whitespace is rejected rather than trimmed.
 func ValidateUsernameQuery(query string) error {
 	if !usernameQueryPattern.MatchString(query) {
 		return ErrInvalidUsernameQuery
