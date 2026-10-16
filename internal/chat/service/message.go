@@ -70,11 +70,9 @@ func (s *MessageService) ListMessages(ctx context.Context, actorID, roomID, curs
 	if err != nil {
 		return nil, err
 	}
-	if limit == 0 {
-		limit = 50
-	}
-	if limit < 1 || limit > 100 {
-		return nil, ErrInvalidLimit
+	limit, err = pageSize(limit, ErrInvalidLimit)
+	if err != nil {
+		return nil, err
 	}
 	messages, err := s.messages.ListMessages(ctx, room, actor, before, limit+1)
 	if err != nil {
