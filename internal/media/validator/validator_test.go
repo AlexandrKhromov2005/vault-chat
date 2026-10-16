@@ -1,6 +1,10 @@
 package validator
 
 import (
+	"bytes"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,4 +58,25 @@ func FuzzContent(f *testing.F) {
 			require.LessOrEqual(t, len(b), MaxBytes)
 		}
 	})
+}
+
+func TestImageContent(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for _, format := range []string{"png", "jpeg"} {
+		var b bytes.Buffer
+		var err error
+		if format == "png" {
+			err = png.Encode(&b, img)
+		} else {
+			err = jpeg.Encode(&b, img, nil)
+		}
+		require.NoError(t, err)
+		typ, err := Content(b.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "image/"+format, typ)
+	}
+	_, err := Content([]byte("\x89PNG\r\n\x1a\ncorrupt"))
+	require.ErrorIs(t, err, ErrInvalidFile)
+	_, err = Content([]byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"))
+	require.Error(t, err)
 }
