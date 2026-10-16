@@ -61,17 +61,17 @@ Absent rooms and rooms without the caller's membership return `404`
   member, ordered by user ID. A direct dialog lists both participants. Paging
   follows the room list rules: default 50, explicit limits 1–100, and the
   cursor is the canonical UUID of the last returned member.
-- `RemoveMember` (gRPC) is channel-only and owner-only; other members get
-  `PERMISSION_DENIED`, as do direct dialogs. Removing a user who is not a
-  member succeeds, so retries are idempotent. The target is not resolved
-  through Auth, so deleted accounts can be removed.
-- `LeaveRoom` (gRPC) removes the caller from a channel. Direct dialogs cannot
-  be left (`PERMISSION_DENIED`). After leaving, the caller is a nonmember, so
-  repeating the request returns `NOT_FOUND`.
+- `DELETE /api/v1/rooms/{room_id}/members/{user_id}` (`RemoveMember`) is
+  channel-only and owner-only; other members get `403`, as do direct dialogs.
+  Removing a user who is not a member returns `204`, so retries are idempotent.
+  The target is not resolved through Auth, so deleted accounts can be removed.
+- `DELETE /api/v1/rooms/{room_id}/members/me` (`LeaveRoom`) removes the
+  caller from a channel. Direct dialogs cannot be left (`403`). After leaving,
+  the caller is a nonmember, so repeating the request returns `404`.
 
-The channel owner can neither leave nor be removed: `FAILED_PRECONDITION`. A
-channel without an owner could never be managed again; leaving will become
-possible together with ownership transfer.
+The channel owner can neither leave nor be removed: `409 failed_precondition`
+(`FAILED_PRECONDITION` in gRPC). A channel without an owner could never be
+managed again; leaving will become possible together with ownership transfer.
 `FAILED_PRECONDITION` rather than `PERMISSION_DENIED` reflects that the request
 depends on the room's state, not on the caller's rights.
 
