@@ -20,6 +20,7 @@ import (
 // Defined at the consumer per CONTRIBUTING.md.
 type AuthService interface {
 	GetUser(ctx context.Context, accessToken, userID string) (*domain.User, error)
+	SearchUsers(ctx context.Context, accessToken, query string, limit int32) ([]*domain.User, error)
 	Register(ctx context.Context, email, username, password string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
@@ -133,6 +134,8 @@ var publicErrors = []struct {
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
 	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},
+	{validator.ErrInvalidUsernameQuery, codes.InvalidArgument, "invalid username query"},
+	{validator.ErrInvalidSearchLimit, codes.InvalidArgument, "invalid search limit"},
 	{service.ErrUserNotFound, codes.NotFound, "user not found"},
 	{validator.ErrInvalidEmail, codes.InvalidArgument, "invalid email address"},
 	{validator.ErrInvalidUsername, codes.InvalidArgument, "invalid username"},
@@ -161,4 +164,18 @@ func (h *AuthGRPCHandler) GetUser(ctx context.Context, req *authv1.GetUserReques
 		return nil, toStatus(err)
 	}
 	return &authv1.GetUserResponse{UserId: user.ID, Username: user.Username}, nil
+}
+
+// SearchUsers finds users by username prefix and projects only the public
+// directory fields.
+func (h *AuthGRPCHandler) SearchUsers(ctx context.Context, req *authv1.SearchUsersRequest) (*authv1.SearchUsersResponse, error) {
+	users, err := h.svc.SearchUsers(ctx, req.GetAccessToken(), req.GetQuery(), req.GetLimit())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	resp := &authv1.SearchUsersResponse{Users: make([]*authv1.UserProfile, 0, len(users))}
+	for _, user := range users {
+		resp.Users = append(resp.Users, &authv1.UserProfile{UserId: user.ID, Username: user.Username})
+	}
+	return resp, nil
 }

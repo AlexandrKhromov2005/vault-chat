@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -122,6 +124,89 @@ func TestUserRepository_GetByID(t *testing.T) {
 
 	_, err = repo.GetByEmail(ctx, "nobody-"+uuid.NewString()+"@example.com")
 	require.True(t, errors.Is(err, repository.ErrNotFound), "expected ErrNotFound, got %v", err)
+}
+
+func TestUserRepository_SearchByUsernamePrefix(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	ids := map[string]string{}
+	for _, name := range []string{"bobby", "Bob", "bob", "bo_b", "boxb", "bob-x", "alice", "BOBCAT"} {
+		user := newTestUser()
+		user.Username = name
+		require.NoError(t, repo.Create(ctx, user))
+		ids[name] = user.ID
+	}
+	search := func(prefix, excludeID string, limit int) []string {
+		t.Helper()
+		users, err := repo.SearchByUsernamePrefix(ctx, prefix, excludeID, limit)
+		require.NoError(t, err)
+		names := []string{}
+		for _, user := range users {
+			require.Equal(t, ids[user.Username], user.ID)
+			require.Empty(t, user.Email)
+			require.Empty(t, user.PasswordHash)
+			names = append(names, user.Username)
+		}
+		return names
+	}
+
+	// Case-insensitive, exact matches first, the excluded caller is skipped.
+	require.Equal(t, []string{"Bob", "bob", "bob-x", "bobby"}, search("BOB", ids["BOBCAT"], 10))
+	require.Equal(t, []string{"bo_b", "Bob"}, search("b", uuid.NewString(), 2))
+	// LIKE metacharacters are literal.
+	require.Equal(t, []string{"bo_b"}, search("bo_", uuid.NewString(), 10))
+	for _, prefix := range []string{"%", `\`, "zz"} {
+		require.Empty(t, search(prefix, uuid.NewString(), 10), prefix)
+	}
+}
+
+// searchQueryRecorder captures the SQL and arguments of the user search so
+// the test can EXPLAIN exactly what the repository sends.
+type searchQueryRecorder struct {
+	sql  string
+	args []any
+}
+
+func (r *searchQueryRecorder) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "FROM users") && strings.Contains(data.SQL, "ORDER BY") {
+		r.sql, r.args = data.SQL, data.Args
+	}
+	return ctx
+}
+
+func (*searchQueryRecorder) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestUserRepository_SearchByUsernamePrefix_UsesPrefixIndex(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+
+	recorder := &searchQueryRecorder{}
+	config := pool.Config()
+	config.ConnConfig.Tracer = recorder
+	traced, err := pgxpool.NewWithConfig(ctx, config)
+	require.NoError(t, err)
+	t.Cleanup(traced.Close)
+
+	_, err = repository.NewUserRepository(traced).SearchByUsernamePrefix(ctx, "Bo_", uuid.NewString(), 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, recorder.sql)
+
+	// On a small table the planner prefers a sequential scan, so rule it out
+	// to see whether the index can serve the search at all.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	_, err = tx.Exec(ctx, "SET LOCAL enable_seqscan = off")
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, "EXPLAIN "+recorder.sql, recorder.args...)
+	require.NoError(t, err)
+	lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	require.NoError(t, err)
+	plan := strings.Join(lines, "\n")
+
+	require.Contains(t, plan, "users_username_lower_idx", plan)
+	// The prefix is matched by the index range alone, without a LIKE recheck.
+	require.NotContains(t, plan, "~~", plan)
 }
 
 func TestMigrate_Idempotent(t *testing.T) {
