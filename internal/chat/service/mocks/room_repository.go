@@ -252,6 +252,67 @@ func (_c *MockRoomRepository_GetOrCreateDirect_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// ListForMember provides a mock function with given fields: ctx, userID, after, limit
+func (_m *MockRoomRepository) ListForMember(ctx context.Context, userID string, after domain.RoomPosition, limit int) ([]*domain.RoomSummary, error) {
+	ret := _m.Called(ctx, userID, after, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListForMember")
+	}
+
+	var r0 []*domain.RoomSummary
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, domain.RoomPosition, int) ([]*domain.RoomSummary, error)); ok {
+		return rf(ctx, userID, after, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, domain.RoomPosition, int) []*domain.RoomSummary); ok {
+		r0 = rf(ctx, userID, after, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*domain.RoomSummary)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, domain.RoomPosition, int) error); ok {
+		r1 = rf(ctx, userID, after, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRoomRepository_ListForMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListForMember'
+type MockRoomRepository_ListForMember_Call struct {
+	*mock.Call
+}
+
+// ListForMember is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userID string
+//   - after domain.RoomPosition
+//   - limit int
+func (_e *MockRoomRepository_Expecter) ListForMember(ctx interface{}, userID interface{}, after interface{}, limit interface{}) *MockRoomRepository_ListForMember_Call {
+	return &MockRoomRepository_ListForMember_Call{Call: _e.mock.On("ListForMember", ctx, userID, after, limit)}
+}
+
+func (_c *MockRoomRepository_ListForMember_Call) Run(run func(ctx context.Context, userID string, after domain.RoomPosition, limit int)) *MockRoomRepository_ListForMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(domain.RoomPosition), args[3].(int))
+	})
+	return _c
+}
+
+func (_c *MockRoomRepository_ListForMember_Call) Return(_a0 []*domain.RoomSummary, _a1 error) *MockRoomRepository_ListForMember_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRoomRepository_ListForMember_Call) RunAndReturn(run func(context.Context, string, domain.RoomPosition, int) ([]*domain.RoomSummary, error)) *MockRoomRepository_ListForMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockRoomRepository creates a new instance of MockRoomRepository. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockRoomRepository(t interface {

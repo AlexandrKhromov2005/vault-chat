@@ -20,6 +20,7 @@ type RoomRepository interface {
 	GetOrCreateDirect(ctx context.Context, first, second string) (*domain.Room, error)
 	CreateChannel(ctx context.Context, ownerID, name string, private bool) (*domain.Room, error)
 	GetForMember(ctx context.Context, roomID, userID string) (*domain.Room, error)
+	ListForMember(ctx context.Context, userID string, after domain.RoomPosition, limit int) ([]*domain.RoomSummary, error)
 	AddChannelMember(ctx context.Context, roomID, actorID, userID string) error
 }
 
