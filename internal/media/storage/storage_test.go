@@ -100,3 +100,24 @@ func TestPrivateS3(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestS3RejectsPublicPolicy(t *testing.T) {
+	endpoint := os.Getenv("VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("S3 endpoint required")
+	}
+	ctx := context.Background()
+	bucket := "media-test-" + uuid.NewString()
+	s, err := NewS3(ctx, endpoint, "minioadmin", "minioadmin", bucket, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.client.SetBucketPolicy(ctx, bucket, ""); _ = s.client.RemoveBucket(ctx, bucket) })
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + bucket + `/*"]}]}`
+	if err := s.client.SetBucketPolicy(ctx, bucket, policy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewS3(ctx, endpoint, "minioadmin", "minioadmin", bucket, false); err == nil {
+		t.Fatal("public policy accepted")
+	}
+}
