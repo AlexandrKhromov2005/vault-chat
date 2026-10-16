@@ -118,6 +118,7 @@ Used for request/response operations requiring immediate consistency.
 |------|------|-----|---------|
 | `ValidateToken` | Gateway | Auth | JWT verification on every request |
 | `GetUser` | Chat | Auth | Resolve sender info for messages |
+| `SearchUsers` | Gateway | Auth | Find conversation partners by username prefix |
 | `CheckPermission` | Chat | Auth | Verify room membership / admin rights |
 | `GetFileACL` | Gateway | Media | Verify download permissions |
 
