@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 )
 
 // Close codes of the WebSocket endpoint in the range RFC 6455 leaves to
@@ -30,8 +34,14 @@ const (
 // maxClientFrameBytes bounds client frames; an auth frame needs about 1 KiB.
 const maxClientFrameBytes = 4096
 
+// retryAfterSeconds is the Retry-After of refused upgrades.
+const retryAfterSeconds = "5"
+
 // RealtimeOptions are the limits of WebSocket connections.
 type RealtimeOptions struct {
+	// AllowedOrigins are the browser origins allowed besides the Gateway's own,
+	// as for CORS; a single "*" allows any origin.
+	AllowedOrigins []string
 	// AuthTimeout bounds waiting for the first auth frame, each token check
 	// and subscribing to the user's events.
 	AuthTimeout time.Duration
@@ -43,6 +53,14 @@ type RealtimeOptions struct {
 	PingInterval time.Duration
 	// WriteTimeout bounds every write to a client.
 	WriteTimeout time.Duration
+	// MaxConnections bounds the WebSocket connections of this instance,
+	// authenticated or not, since the rate limiter lets requests through
+	// while Redis is down. Zero means no limit.
+	MaxConnections int
+	// MaxUnauthenticated bounds the connections that have yet to authenticate,
+	// so that clients without a token cannot take every slot. Zero means no
+	// limit besides MaxConnections.
+	MaxUnauthenticated int
 }
 
 // Realtime serves GET /api/v1/ws: authenticated connections that receive the
@@ -51,12 +69,92 @@ type Realtime struct {
 	hub       *realtime.Hub
 	validator middleware.TokenValidator
 	options   RealtimeOptions
+	allowAll  bool
+	origins   map[string]bool
 	logger    *slog.Logger
+
+	// stopping ends when Shutdown starts; every connection then closes.
+	stopping context.Context
+	stop     context.CancelFunc
+	mu       sync.Mutex
+	closed   bool // guarded by mu
+	// open and unauthenticated count the admitted connections, guarded by mu.
+	open            int
+	unauthenticated int
+	// conns counts upgraded connections until they are fully closed.
+	conns sync.WaitGroup
 }
 
 // NewRealtime binds the event hub, the Auth token validator and the limits.
 func NewRealtime(hub *realtime.Hub, validator middleware.TokenValidator, options RealtimeOptions, logger *slog.Logger) *Realtime {
-	return &Realtime{hub: hub, validator: validator, options: options, logger: logger}
+	stopping, stop := context.WithCancel(context.Background())
+	h := &Realtime{hub: hub, validator: validator, options: options, origins: make(map[string]bool), logger: logger,
+		stopping: stopping, stop: stop}
+	for _, origin := range options.AllowedOrigins {
+		h.allowAll = h.allowAll || origin == "*"
+		h.origins[origin] = true
+	}
+	return h
+}
+
+// Shutdown refuses new connections, closes every connection with 1001, whether
+// it has authenticated or not, and waits until all of them are closed or ctx
+// ends. http.Server.Shutdown does not wait for hijacked connections, so the
+// process must call this before it exits.
+func (h *Realtime) Shutdown(ctx context.Context) error {
+	h.mu.Lock()
+	h.closed = true
+	h.mu.Unlock()
+	h.stop()
+	closed := make(chan struct{})
+	go func() {
+		h.conns.Wait()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for WebSocket connections: %w", ctx.Err())
+	}
+}
+
+// admit registers a connection about to be upgraded as unauthenticated. It
+// refuses when the endpoint is shutting down or a limit is reached and then
+// returns the error code. Registering under mu keeps Shutdown from missing it.
+func (h *Realtime) admit() (refused string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	switch {
+	case h.closed:
+		return "shutting_down"
+	case h.options.MaxConnections > 0 && h.open >= h.options.MaxConnections,
+		h.options.MaxUnauthenticated > 0 && h.unauthenticated >= h.options.MaxUnauthenticated:
+		return "too_many_connections"
+	}
+	h.open++
+	h.unauthenticated++
+	h.conns.Add(1)
+	return ""
+}
+
+// release frees the slots of an admitted connection once it is closed.
+func (h *Realtime) release(c *connection) {
+	c.authenticated()
+	h.mu.Lock()
+	h.open--
+	h.mu.Unlock()
+	h.conns.Done()
+}
+
+// refuse answers an upgrade with 503 and a hint when to retry.
+func refuse(w http.ResponseWriter, code string) {
+	message := "too many WebSocket connections"
+	if code == "shutting_down" {
+		message = "server shutting down"
+	}
+	w.Header().Set("Retry-After", retryAfterSeconds)
+	response.Error(w, http.StatusServiceUnavailable, code, message)
 }
 
 // closeError ends a connection with a close code and a fixed reason.
@@ -80,8 +178,10 @@ type connection struct {
 	// ended asks the writer to close; nil means the connection is already gone.
 	ended   chan *closeError
 	workers sync.WaitGroup
-	// closers counts closes scheduled from timers, each until it has run to
-	// completion or been canceled.
+	// pending holds the connection's unauthenticated slot until authenticated.
+	pending sync.Once
+	// closers counts closes scheduled from timers and Shutdown, each until
+	// it has run to completion or been canceled.
 	closers sync.WaitGroup
 }
 
@@ -108,43 +208,84 @@ func (c *connection) closeLater(end *closeError) (run func(), cancel func() bool
 	return run, cancel
 }
 
+// authenticated frees the connection's unauthenticated slot, whether or not
+// the authentication succeeded.
+func (c *connection) authenticated() { c.pending.Do(c.leaveUnauthenticated) }
+
+// leaveUnauthenticated frees one unauthenticated slot.
+func (h *Realtime) leaveUnauthenticated() {
+	h.mu.Lock()
+	h.unauthenticated--
+	h.mu.Unlock()
+}
+
 // ServeHTTP upgrades the request and serves the connection until it ends.
 // The access token is never accepted from the URL, which is logged.
 func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Accept refuses browser origins other than the Gateway's own with 403.
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if !h.originAllowed(r) {
+		response.Error(w, http.StatusForbidden, "origin_forbidden", "origin not allowed")
+		return
+	}
+	// Refusing before the upgrade spares the connection and lets clients
+	// read the status and Retry-After.
+	if refused := h.admit(); refused != "" {
+		refuse(w, refused)
+		return
+	}
+	c := &connection{Realtime: h, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	defer h.release(c)
+	// The origin was checked above against the configured list.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
 	conn.SetReadLimit(maxClientFrameBytes)
-	c := &connection{Realtime: h, conn: conn, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	c.conn = conn
+	// Shutdown closes the connection at any stage; reads and writes in
+	// progress then fail and serve returns.
+	closeOnShutdown, keepOpen := c.closeLater(goingAway())
+	stopWatching := context.AfterFunc(h.stopping, closeOnShutdown)
 	// Reads must not be given a context that ends before the close handshake:
 	// coder/websocket drops the connection without a close frame when it does.
 	ctx, cancel := context.WithCancel(r.Context())
 	if end := c.serve(ctx); end != nil {
 		_ = conn.Close(end.code, end.reason)
 	}
-	// A close started by a timer must finish its handshake before the handler
-	// returns.
+	stopWatching()
+	keepOpen()
+	// A close started by a timer or Shutdown must finish its handshake before
+	// the connection gives up its slot and Shutdown stops waiting for it.
 	c.closers.Wait()
 	_ = conn.CloseNow()
 	cancel()
 	c.workers.Wait()
 }
 
+// originAllowed accepts non-browser clients, which send no Origin, the
+// Gateway's own origin and the configured origins.
+func (h *Realtime) originAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" || h.allowAll || h.origins[origin] {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host)
+}
+
 // serve authenticates the connection, attaches it to the hub and relays events.
 // It returns how to close the connection, or nil when it is already gone.
 func (c *connection) serve(ctx context.Context) *closeError {
 	current, end := c.authenticate(ctx)
+	c.authenticated()
 	if current.userID == "" {
 		return end
 	}
-	attachCtx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	attachCtx, cancel := c.authContext(ctx)
 	client, err := c.hub.Attach(attachCtx, current.userID)
 	cancel()
 	switch {
 	case err == nil:
-	case errors.Is(err, realtime.ErrClosed):
+	case c.stopping.Err() != nil, errors.Is(err, realtime.ErrClosed):
 		return goingAway()
 	case errors.Is(err, realtime.ErrTooManyConnections):
 		return &closeError{websocket.StatusTryAgainLater, "too many connections"}
@@ -196,6 +337,18 @@ func (c *connection) nextToken(ctx context.Context) (string, *closeError) {
 	return token, nil
 }
 
+// authContext bounds a token check or subscription by AuthTimeout and ends it
+// when Shutdown starts. Reads keep their own context: canceling a read would
+// drop the connection without the close frame Shutdown sends.
+func (c *connection) authContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	stop := context.AfterFunc(c.stopping, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 // goingAway ends a connection because the Gateway is shutting down.
 func goingAway() *closeError {
 	return &closeError{websocket.StatusGoingAway, "server shutting down"}
@@ -203,9 +356,12 @@ func goingAway() *closeError {
 
 // validate checks a token with Auth, as for every protected REST request.
 func (c *connection) validate(ctx context.Context, token string) (session, *closeError) {
-	ctx, cancel := context.WithTimeout(ctx, c.options.AuthTimeout)
+	ctx, cancel := c.authContext(ctx)
 	defer cancel()
 	resp, err := c.validator.ValidateToken(ctx, &authv1.ValidateTokenRequest{Token: token})
+	if c.stopping.Err() != nil {
+		return session{}, goingAway()
+	}
 	if err != nil {
 		c.logger.WarnContext(ctx, "websocket token validation failed", "error", err)
 		return session{}, &closeError{websocket.StatusTryAgainLater, "authentication unavailable"}

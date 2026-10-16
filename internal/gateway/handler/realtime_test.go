@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +25,7 @@ import (
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 )
 
@@ -48,8 +53,30 @@ type nopStream struct{}
 func (nopStream) Subscribe(context.Context, string) error   { return nil }
 func (nopStream) Unsubscribe(context.Context, string) error { return nil }
 
+// blockingValidator holds every call until its context ends, reporting on
+// entered that a call is waiting.
+type blockingValidator struct{ entered chan struct{} }
+
+func (v blockingValidator) ValidateToken(ctx context.Context, _ *authv1.ValidateTokenRequest, _ ...grpc.CallOption) (*authv1.ValidateTokenResponse, error) {
+	v.entered <- struct{}{}
+	<-ctx.Done()
+	return nil, status.FromContextError(ctx.Err()).Err()
+}
+
+// blockingStream holds every subscription until its context ends.
+type blockingStream struct{ entered chan struct{} }
+
+func (s blockingStream) Subscribe(ctx context.Context, _ string) error {
+	s.entered <- struct{}{}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (blockingStream) Unsubscribe(context.Context, string) error { return nil }
+
 func testOptions() handler.RealtimeOptions {
 	return handler.RealtimeOptions{
+		AllowedOrigins: []string{"https://app.example"},
 		AuthTimeout:    200 * time.Millisecond,
 		ReauthInterval: 20 * time.Millisecond,
 		PingInterval:   time.Hour,
@@ -59,9 +86,17 @@ func testOptions() handler.RealtimeOptions {
 
 func startRealtime(t *testing.T, hub *realtime.Hub, validator tokens, options handler.RealtimeOptions) string {
 	t.Helper()
-	server := httptest.NewServer(handler.NewRealtime(hub, validator, options, slog.New(slog.NewJSONHandler(io.Discard, nil))))
+	_, url := startRealtimeHandler(t, hub, validator, options)
+	return url
+}
+
+// startRealtimeHandler serves the endpoint and also returns its handler.
+func startRealtimeHandler(t *testing.T, hub *realtime.Hub, validator middleware.TokenValidator, options handler.RealtimeOptions) (*handler.Realtime, string) {
+	t.Helper()
+	h := handler.NewRealtime(hub, validator, options, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-	return "ws" + strings.TrimPrefix(server.URL, "http")
+	return h, "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
 func dial(t *testing.T, url string) *websocket.Conn {
@@ -236,6 +271,47 @@ func TestRealtime_ReauthenticationKeepsTheIdentityAndPace(t *testing.T) {
 	require.Equal(t, websocket.StatusPolicyViolation, closedWith(t, conn))
 }
 
+func TestRealtime_ChecksTheOriginBeforeUpgrading(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed []string
+		origin  string
+		ok      bool
+	}{
+		{"listed origin", []string{"https://app.example"}, "https://app.example", true},
+		{"no origin from a non-browser client", []string{"https://app.example"}, "", true},
+		{"same origin", nil, "same", true},
+		{"unlisted origin", []string{"https://app.example"}, "https://evil.example", false},
+		{"listed host with another scheme", []string{"https://app.example"}, "http://app.example", false},
+		{"no origins configured", nil, "https://app.example", false},
+		{"any origin", []string{"*"}, "https://evil.example", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := testOptions()
+			options.AllowedOrigins = tc.allowed
+			url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{}, options)
+			header := http.Header{}
+			switch tc.origin {
+			case "":
+			case "same":
+				header.Set("Origin", "http"+strings.TrimPrefix(url, "ws"))
+			default:
+				header.Set("Origin", tc.origin)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
+			if tc.ok {
+				require.NoError(t, err)
+				_ = conn.CloseNow()
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode)
+		})
+	}
+}
+
 func TestRealtime_HubEndsConnections(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 	valid := tokens{"alice-token": {"alice", expires}}
@@ -290,4 +366,239 @@ func requireReady(t *testing.T, url string) {
 		_, ok := tryReady(t, url, "alice-token")
 		return ok
 	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRealtime_ShutdownClosesEveryConnectionWithGoingAway(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	h, url := startRealtimeHandler(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
+	authenticated, pending := dial(t, url), dial(t, url)
+	authenticate(t, authenticated, "alice-token")
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- h.Shutdown(context.Background()) }()
+	// The clients are not reading yet, so their close handshakes cannot
+	// complete and Shutdown must keep waiting for them.
+	require.Never(t, func() bool { return len(shutdown) > 0 }, 300*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, authenticated))
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, pending), "a connection that has not authenticated yet")
+	select {
+	case err := <-shutdown:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Shutdown did not return after the connections closed")
+	}
+	// New connections are refused before upgrading.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, url, nil)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	require.NotEmpty(t, resp.Header.Get("Retry-After"))
+}
+
+func TestRealtime_ShutdownGivesUpWhenTheContextEnds(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	h, url := startRealtimeHandler(t, realtime.NewHub(nopStream{}, 5, 8), tokens{}, options)
+	conn := dial(t, url)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	// The client never answers the close frame.
+	require.ErrorIs(t, h.Shutdown(ctx), context.DeadlineExceeded)
+	require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
+}
+
+// requireRefused checks that an upgrade is refused before it happens.
+func requireRefused(t *testing.T, url string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, url, nil)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	require.NotEmpty(t, resp.Header.Get("Retry-After"))
+}
+
+func TestRealtime_LimitsConcurrentConnections(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = time.Hour
+	options.MaxConnections = 2
+	options.MaxUnauthenticated = 1
+	expires := time.Now().Add(time.Hour)
+	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", expires}, "bob-token": {"bob", expires}}, options)
+	alice := dial(t, url)
+	requireRefused(t, url) // alice has not authenticated yet
+	authenticate(t, alice, "alice-token")
+	bob := dial(t, url)
+	authenticate(t, bob, "bob-token")
+	requireRefused(t, url) // two connections are open
+	require.NoError(t, alice.Close(websocket.StatusNormalClosure, ""))
+	// The closed connection frees its slot for anyone.
+	require.Eventually(t, func() bool {
+		_, ok := tryReady(t, url, "bob-token")
+		return ok
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
+func TestRealtime_FailedAuthenticationFreesItsSlot(t *testing.T) {
+	options := testOptions()
+	options.MaxConnections = 1
+	options.MaxUnauthenticated = 1
+	url := startRealtime(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"alice-token": {"alice", time.Now().Add(time.Hour)}}, options)
+	conn := dial(t, url)
+	send(t, conn, `{"type":"auth","token":"forged"}`)
+	require.Equal(t, websocket.StatusCode(4001), closedWith(t, conn))
+	require.Eventually(t, func() bool {
+		_, ok := tryReady(t, url, "alice-token")
+		return ok
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
+func TestRealtime_ShutdownInterruptsAuthentication(t *testing.T) {
+	expires := time.Now().Add(time.Hour)
+	for _, tc := range []struct {
+		name      string
+		hub       func(entered chan struct{}) *realtime.Hub
+		validator func(entered chan struct{}) middleware.TokenValidator
+	}{
+		{
+			name: "token check in progress",
+			hub:  func(chan struct{}) *realtime.Hub { return realtime.NewHub(nopStream{}, 5, 8) },
+			validator: func(entered chan struct{}) middleware.TokenValidator {
+				return blockingValidator{entered: entered}
+			},
+		},
+		{
+			name: "subscription in progress",
+			hub: func(entered chan struct{}) *realtime.Hub {
+				return realtime.NewHub(blockingStream{entered: entered}, 5, 8)
+			},
+			validator: func(chan struct{}) middleware.TokenValidator {
+				return tokens{"alice-token": {"alice", expires}}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The limits would only end these calls after an hour.
+			options := testOptions()
+			options.AuthTimeout = time.Hour
+			entered := make(chan struct{}, 1)
+			h, url := startRealtimeHandler(t, tc.hub(entered), tc.validator(entered), options)
+			conn := dial(t, url)
+			send(t, conn, `{"type":"auth","token":"alice-token"}`)
+			select {
+			case <-entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("authentication did not start")
+			}
+			shutdown := make(chan error, 1)
+			go func() { shutdown <- h.Shutdown(context.Background()) }()
+			require.Equal(t, websocket.StatusGoingAway, closedWith(t, conn))
+			select {
+			case err := <-shutdown:
+				require.NoError(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("Shutdown waited for the authentication to finish")
+			}
+		})
+	}
+}
+
+// heldWrites is a client connection whose writes wait from hold until resume,
+// reporting on held that one is waiting.
+type heldWrites struct {
+	net.Conn
+	holding atomic.Bool
+	held    chan struct{}
+	resumed chan struct{}
+	once    sync.Once
+}
+
+func (c *heldWrites) hold() { c.holding.Store(true) }
+
+func (c *heldWrites) resume() { c.once.Do(func() { close(c.resumed) }) }
+
+func (c *heldWrites) Write(p []byte) (int, error) {
+	if c.holding.Load() {
+		select {
+		case c.held <- struct{}{}:
+		default:
+		}
+		<-c.resumed
+	}
+	return c.Conn.Write(p)
+}
+
+// dialHeld connects through a heldWrites, so that the test decides when the
+// server receives what the client writes.
+func dialHeld(t *testing.T, url string) (*websocket.Conn, *heldWrites) {
+	t.Helper()
+	writes := &heldWrites{held: make(chan struct{}, 1), resumed: make(chan struct{})}
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		writes.Conn = conn
+		return writes, nil
+	}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: client})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	// Cleanups run last to first: a held write must end before CloseNow,
+	// which waits for it.
+	t.Cleanup(writes.resume)
+	return conn, writes
+}
+
+// await fails the test unless ch is ready within a few seconds.
+func await(t *testing.T, ch <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal(failure)
+	}
+}
+
+func TestRealtime_ConnectionHoldsItsSlotUntilClosed(t *testing.T) {
+	options := testOptions()
+	options.AuthTimeout = 50 * time.Millisecond
+	options.MaxConnections = 1
+	h := handler.NewRealtime(realtime.NewHub(nopStream{}, 5, 8), tokens{}, options, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	// served is closed when the handler of the first connection returns, by
+	// which time the connection has given up its slot.
+	served := make(chan struct{})
+	var first sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isFirst := false
+		first.Do(func() { isFirst = true })
+		h.ServeHTTP(w, r)
+		if isFirst {
+			close(served)
+		}
+	}))
+	t.Cleanup(server.Close)
+	url := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, writes := dialHeld(t, url)
+	writes.hold()
+	// The authentication times out and the server sends its close frame; the
+	// client reads it, but its answer is held, so the close handshake goes on.
+	code := make(chan websocket.StatusCode, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _, err := conn.Read(ctx)
+		code <- websocket.CloseStatus(err)
+	}()
+	await(t, writes.held, "the client did not answer a close frame")
+	requireRefused(t, url)
+	writes.resume()
+	require.Equal(t, websocket.StatusCode(4001), <-code)
+	// Once the handshake ends and the handler returns, the slot admits a new
+	// connection at once.
+	await(t, served, "the handler did not return after the close handshake")
+	dial(t, url)
 }
