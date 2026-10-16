@@ -20,6 +20,7 @@ import (
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
+	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
@@ -96,10 +97,21 @@ func run() error {
 
 	// Redis is deliberately not a readiness dependency: the rate limiter
 	// fails open, so the gateway keeps serving without it.
-	health := handler.NewHealth(map[string]handler.Check{
+	checks := map[string]handler.Check{
 		"auth": checkGRPCHealth(authHealth, "auth"),
 		"chat": checkGRPCHealth(chatHealth, "chat"),
-	}, logger)
+	}
+	var mediaHandler *handler.MediaHandler
+	if cfg.MediaGRPCAddr != "" {
+		conn, err := grpc.NewClient(cfg.MediaGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+		if err != nil {
+			return fmt.Errorf("create media client: %w", err)
+		}
+		defer conn.Close()
+		mediaHandler = handler.NewMediaHandler(mediav1.NewMediaServiceClient(conn), logger)
+		checks["media"] = checkGRPCHealth(healthpb.NewHealthClient(conn), "media")
+	}
+	health := handler.NewHealth(checks, logger)
 
 	websockets := handler.NewRealtime(hub, authClient, handler.RealtimeOptions{
 		AllowedOrigins: cfg.CORSAllowedOrigins,
@@ -118,6 +130,7 @@ func run() error {
 			Auth:               handler.NewAuthHandler(authClient, logger),
 			Chat:               handler.NewChatHandler(chatClient, logger),
 			Health:             health,
+			Media:              mediaHandler,
 			TokenValidator:     authClient,
 			Limiter:            limiter,
 			Logger:             logger,

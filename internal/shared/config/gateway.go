@@ -15,6 +15,7 @@ type GatewayConfig struct {
 	HTTPAddr           string
 	AuthGRPCAddr       string
 	ChatGRPCAddr       string
+	MediaGRPCAddr      string
 	RedisAddr          string
 	RedisPassword      string
 	TLSCertPath        string
@@ -52,6 +53,7 @@ type WebSocketConfig struct {
 // certificate and the key path are set.
 func LoadGateway() (*GatewayConfig, error) {
 	cfg := &GatewayConfig{
+		MediaGRPCAddr: os.Getenv("GATEWAY_MEDIA_GRPC_ADDR"),
 		HTTPAddr:      envOr("GATEWAY_HTTP_ADDR", ":8080"),
 		AuthGRPCAddr:  envOr("GATEWAY_AUTH_GRPC_ADDR", "localhost:50051"),
 		ChatGRPCAddr:  envOr("GATEWAY_CHAT_GRPC_ADDR", "localhost:50052"),

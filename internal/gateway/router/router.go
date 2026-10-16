@@ -16,6 +16,7 @@ import (
 type Deps struct {
 	Auth               *handler.AuthHandler
 	Chat               *handler.ChatHandler
+	Media              *handler.MediaHandler
 	Health             *handler.Health
 	TokenValidator     middleware.TokenValidator
 	Limiter            middleware.Limiter
@@ -67,6 +68,10 @@ func New(d Deps) http.Handler {
 		// The literal segment takes precedence over {user_id}, which must be a UUID.
 		api.Handle("DELETE /api/v1/rooms/{room_id}/members/me", protected(d.Chat.LeaveRoom))
 	}
+	if d.Media != nil {
+		api.Handle("GET /api/v1/files/{file_id}", protected(d.Media.File))
+		api.Handle("GET /api/v1/files/{file_id}/content", protected(d.Media.Download))
+	}
 	api.HandleFunc("/", notFound)
 
 	root := http.NewServeMux()
@@ -78,6 +83,11 @@ func New(d Deps) http.Handler {
 	}
 	// Timeout comes first so that the whole request, rate limiting
 	// included, runs within one budget.
+	if d.Media != nil {
+		root.Handle("POST /api/v1/rooms/{room_id}/files", middleware.Chain(protected(d.Media.Upload),
+			middleware.Timeout(d.RequestTimeout), middleware.CORS(d.CORSAllowedOrigins),
+			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger)))
+	}
 	root.Handle("/api/", middleware.Chain(api,
 		middleware.Timeout(d.RequestTimeout),
 		middleware.CORS(d.CORSAllowedOrigins),
