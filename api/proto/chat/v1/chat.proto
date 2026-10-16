@@ -17,6 +17,9 @@ service ChatService {
   rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
   // GetRoom returns NOT_FOUND for both absent rooms and nonmembers.
   rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+  // ListRooms returns the caller's rooms, most recently active first. Activity is
+  // the later of the latest message and the caller's enrollment in the room.
+  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
   // AddMember is owner-only, channel-only and idempotent for an existing member.
   // Public and private channels both require invitation in this first version.
   rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
@@ -71,6 +74,26 @@ message GetRoomRequest {
 
 message GetRoomResponse {
   Room room = 1;
+}
+
+message ListRoomsRequest {
+  // Empty starts at the most recently active room; otherwise a next_cursor.
+  string cursor = 1;
+  // Zero defaults to 50; explicit limits must be 1–100.
+  int32 limit = 2;
+}
+
+// RoomSummary is a room in the caller's list.
+message RoomSummary {
+  Room room = 1;
+  // Unset when the room has no messages.
+  google.protobuf.Timestamp last_message_at = 2;
+}
+
+message ListRoomsResponse {
+  repeated RoomSummary rooms = 1;
+  // Empty means the end of the list at the time this page was read.
+  string next_cursor = 2;
 }
 
 message AddMemberRequest {
