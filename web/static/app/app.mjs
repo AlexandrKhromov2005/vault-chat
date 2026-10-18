@@ -1,30 +1,18 @@
-// Entry point of the web client: wires the page to the session.
+// Entry point of the web client: wires the page to the session and the
+// signed-in workspace.
 
+import { Api } from './api.mjs';
+import { describeError } from './errors.mjs';
+import { Profiles } from './profiles.mjs';
 import { Session } from './session.mjs';
+import { Workspace } from './workspace.mjs';
 
 const fetchFn = window.fetch.bind(window);
 const session = new Session({ fetchFn, storage: window.sessionStorage });
+const api = new Api({ fetchFn, session });
+const workspace = new Workspace({ api, session, profiles: new Profiles(api) });
 
 const $ = (id) => document.getElementById(id);
-
-// errorText turns an ApiError into a message for the user. Server messages
-// are shown as text, never as markup.
-function errorText(err) {
-  switch (err.code) {
-    case 'network':
-      return 'Нет связи с сервером. Проверьте, что Gateway запущен.';
-    case 'rate_limited':
-      return 'Слишком много запросов. Подождите немного и повторите.';
-    case 'already_exists':
-      return err.message === 'username already taken'
-        ? 'Это имя пользователя уже занято.'
-        : 'Этот email уже зарегистрирован.';
-    case 'invalid_argument':
-      return `Проверьте введённые данные: ${err.message}.`;
-    default:
-      return err.message || 'Что-то пошло не так.';
-  }
-}
 
 function render() {
   const user = session.user;
@@ -57,7 +45,7 @@ function submitWith(form, action) {
       form.reset();
     } catch (err) {
       $('auth-error').textContent =
-        err.code === 'unauthenticated' ? 'Неверный email или пароль.' : errorText(err);
+        err.code === 'unauthenticated' ? 'Неверный email или пароль.' : describeError(err);
     } finally {
       button.disabled = false;
     }
@@ -70,8 +58,12 @@ $('show-login').addEventListener('click', () => showAuthTab('login'));
 $('show-register').addEventListener('click', () => showAuthTab('register'));
 $('logout').addEventListener('click', () => session.logout());
 
-session.addEventListener('signedin', render);
+session.addEventListener('signedin', () => {
+  render();
+  workspace.refresh();
+});
 session.addEventListener('signedout', (event) => {
+  workspace.reset();
   render();
   if (event.detail.reason === 'expired') {
     $('auth-error').textContent = 'Сессия истекла. Войдите снова.';
@@ -79,3 +71,4 @@ session.addEventListener('signedout', (event) => {
 });
 
 render();
+if (session.user) workspace.refresh();
