@@ -22,6 +22,7 @@ import {
   roomTitle,
   sendMessage,
 } from '../static/app/chat.mjs';
+import { FileInfos, downloadFile, fileProblem, uploadFile } from '../static/app/files.mjs';
 import { requestJSON } from '../static/app/http.mjs';
 import { Profiles } from '../static/app/profiles.mjs';
 import { Session } from '../static/app/session.mjs';
@@ -170,4 +171,57 @@ test('a channel owner manages members', { skip }, async () => {
   await removeMember(owner.api, channel.room_id, member.session.user.id);
   await assert.rejects(listAllMembers(member.api, channel.room_id), { status: 404 });
   assert.deepEqual((await listAllMembers(owner.api, channel.room_id)).map((m) => m.user_id), [owner.session.user.id]);
+});
+
+test('two users exchange a file and a third gets no access', { skip }, async () => {
+  const alice = await client();
+  const bob = await client();
+  const eve = await client();
+  const room = await openDirect(alice.api, bob.session.user.id);
+
+  const content = 'Отчёт за неделю\nстрока 2\n';
+  const file = new File([content], 'report.txt', { type: 'text/plain' });
+  assert.equal(fileProblem(file), null);
+  const uploaded = await uploadFile(alice.api, room.room_id, file);
+  assert.equal(uploaded.filename, 'report.txt');
+
+  // An attachment-only message: the text may be empty.
+  const sent = await sendMessage(alice.api, room.room_id, new Outbox().prepare('', [uploaded.file_id]));
+  assert.deepEqual(sent.attachment_ids, [uploaded.file_id]);
+
+  const timeline = new Timeline();
+  await loadLatest(bob.api, room.room_id, timeline);
+  const [received] = timeline.messages;
+  assert.deepEqual(received.attachment_ids, [uploaded.file_id]);
+  const info = await new FileInfos(bob.api).get(uploaded.file_id);
+  assert.equal(info.size, Buffer.byteLength(content));
+  assert.equal(await (await downloadFile(bob.api, uploaded.file_id)).text(), content);
+
+  const eveFiles = new FileInfos(eve.api);
+  assert.deepEqual(await eveFiles.get(uploaded.file_id), { file_id: uploaded.file_id, unavailable: true });
+  await assert.rejects(downloadFile(eve.api, uploaded.file_id), { status: 404 });
+  await assert.rejects(uploadFile(eve.api, room.room_id, file), { status: 404 });
+});
+
+test('a removed member loses access to the channel files', { skip }, async () => {
+  const owner = await client();
+  const member = await client();
+  const channel = await createChannel(owner.api, 'Документы', true);
+  await addMember(owner.api, channel.room_id, member.session.user.id);
+  const plan = new File(['План встречи\n'], 'plan.txt', { type: 'text/plain' });
+  const uploaded = await uploadFile(owner.api, channel.room_id, plan);
+  assert.equal(await (await downloadFile(member.api, uploaded.file_id)).text(), 'План встречи\n');
+
+  await removeMember(owner.api, channel.room_id, member.session.user.id);
+
+  await assert.rejects(downloadFile(member.api, uploaded.file_id), { status: 404 });
+});
+
+test('the server rejects content outside the allowlist', { skip }, async () => {
+  const alice = await client();
+  const bob = await client();
+  const room = await openDirect(alice.api, bob.session.user.id);
+  const html = new File(['<html><script>alert(1)</script></html>'], 'page.html', { type: 'text/html' });
+
+  await assert.rejects(uploadFile(alice.api, room.room_id, html), { status: 400 });
 });
