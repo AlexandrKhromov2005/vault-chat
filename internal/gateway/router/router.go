@@ -26,13 +26,15 @@ type Deps struct {
 	RequestTimeout     time.Duration
 	// Realtime serves WebSocket connections; nil disables the route.
 	Realtime http.Handler
+	// Web serves the browser client at "/" and "/app/"; nil disables it.
+	Web http.Handler
 }
 
 // New returns the gateway's root handler.
 //
 // Every request gets a request id, an access log line, panic recovery, and
-// security headers. Probes (/health, /ready) stop there, so orchestrators
-// are never rate limited. API routes (/api/) additionally run within the
+// security headers. Probes (/health, /ready) and the web client's static
+// files stop there, so orchestrators and page loads are never rate limited. API routes (/api/) additionally run within the
 // request timeout and go through CORS, per-IP rate limiting, and the body
 // size limit; protected routes also require a valid access token and are
 // rate limited per user. The WebSocket route is long-lived, so it bypasses
@@ -77,6 +79,12 @@ func New(d Deps) http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("GET /health", d.Health.Live)
 	root.HandleFunc("GET /ready", d.Health.Ready)
+	if d.Web != nil {
+		// Static files of the client: no rate limit or request budget, like
+		// the probes; the API it calls has its own.
+		root.Handle("GET /{$}", d.Web)
+		root.Handle("GET /app/", d.Web)
+	}
 	if d.Realtime != nil {
 		// More specific than "/api/", so the API chain does not apply.
 		root.Handle("GET /api/v1/ws", middleware.Chain(d.Realtime, middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger)))
