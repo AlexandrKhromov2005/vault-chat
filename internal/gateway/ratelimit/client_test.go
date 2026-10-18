@@ -56,3 +56,32 @@ func TestNewRedisClient_HonorsRequestDeadline(t *testing.T) {
 	// proves the request deadline, not the client default, stopped the call.
 	require.Less(t, elapsed, 200*time.Millisecond, "Redis I/O must stop at the request deadline")
 }
+
+// refusedAddr returns an address where nothing listens, so connections are
+// refused at once, like a Redis that is down.
+func refusedAddr(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	return addr
+}
+
+func TestNewRedisClient_FailsFastWhenRedisIsDown(t *testing.T) {
+	client := ratelimit.NewRedisClient(refusedAddr(t), "")
+	t.Cleanup(func() { _ = client.Close() })
+	limiter, err := ratelimit.NewRedisLimiter(client, 60, 1)
+	require.NoError(t, err)
+
+	start := time.Now()
+	_, err = limiter.Allow(context.Background(), "ip:203.0.113.7")
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	// The limiter fails open, so retrying only delays every request while
+	// Redis is down. By default go-redis dials up to five times per attempt
+	// and retries a command three times.
+	require.Less(t, elapsed, 300*time.Millisecond, "a down Redis must fail the limiter at once")
+}
