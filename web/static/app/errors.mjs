@@ -13,6 +13,8 @@ export function describeError(err) {
       return 'Недостаточно прав для этого действия.';
     case 'failed_precondition':
       return 'Владелец не может покинуть канал или быть из него удалён.';
+    case 'body_too_large':
+      return 'Файл больше 10 МиБ.';
     case 'unavailable':
     case 'timeout':
       return 'Сервис временно недоступен. Повторите позже.';

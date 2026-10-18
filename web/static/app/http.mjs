@@ -11,30 +11,41 @@ export class ApiError extends Error {
   }
 }
 
-// requestJSON sends a request with an optional JSON body and bearer token and
-// returns the parsed JSON response, or null for 204 No Content. Errors in the
-// Gateway's envelope {"error":{"code","message"}} become ApiError.
+// requestJSON sends a request with an optional body and bearer token and
+// returns the parsed JSON response, or null for 204 No Content. A FormData
+// body is sent as multipart; anything else as JSON. Errors in the Gateway's
+// envelope {"error":{"code","message"}} become ApiError.
 export async function requestJSON(fetchFn, method, path, { body, token } = {}) {
+  return readResponse(await send(fetchFn, method, path, { body, token }));
+}
+
+// requestBlob downloads a response body as a Blob, for file contents.
+export async function requestBlob(fetchFn, path, { token } = {}) {
+  const response = await send(fetchFn, 'GET', path, { token });
+  if (!response.ok) await readResponse(response); // throws ApiError
+  return response.blob();
+}
+
+async function send(fetchFn, method, path, { body, token }) {
   const headers = {};
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let payload;
+  if (body instanceof FormData) {
+    // fetch sets multipart/form-data with the boundary itself.
+    payload = body;
+  } else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    payload = JSON.stringify(body);
+  }
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  let response;
   try {
-    response = await fetchFn(path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    return await fetchFn(path, { method, headers, body: payload });
   } catch {
     throw new ApiError(0, 'network', 'Нет связи с сервером');
   }
-  return readResponse(response);
 }
 
-// readResponse parses a fetch response the way requestJSON does; it is shared
-// with requests that are not JSON, such as file uploads.
-export async function readResponse(response) {
+async function readResponse(response) {
   if (response.status === 204) return null;
 
   const text = await response.text();

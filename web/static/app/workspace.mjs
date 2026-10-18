@@ -18,6 +18,7 @@ import {
 } from './chat.mjs';
 import { debounce, el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
+import { Attachments, FileInfos, downloadFile, fileProblem, formatSize, uploadFile } from './files.mjs';
 import { ApiError } from './http.mjs';
 import { Timeline } from './timeline.mjs';
 
@@ -36,11 +37,15 @@ export class Workspace {
   #current = null; // room_id of the open room
   #outbox = new Outbox();
   #membersOpen = false;
+  #files;
+  #attachments = new Attachments(); // uploaded files of the message being written
+  #uploads = 0; // uploads in progress
 
   constructor({ api, session, profiles }) {
     this.#api = api;
     this.#session = session;
     this.#profiles = profiles;
+    this.#files = new FileInfos(api);
     this.#bind();
   }
 
@@ -66,7 +71,9 @@ export class Workspace {
     this.#current = null;
     this.#membersOpen = false;
     this.#outbox = new Outbox();
-    for (const id of ['room-list', 'user-results', 'message-list', 'member-list', 'add-member-results']) {
+    this.#files = new FileInfos(this.#api);
+    this.#attachments.clear();
+    for (const id of ['room-list', 'user-results', 'message-list', 'member-list', 'add-member-results', 'pending-files']) {
       $(id).replaceChildren();
     }
     for (const id of ['sidebar-error', 'room-error', 'members-error']) $(id).textContent = '';
@@ -149,6 +156,10 @@ export class Workspace {
     if (!room) return;
     this.#current = roomId;
     this.#outbox = new Outbox();
+    // Files belong to the room they were uploaded to; unsent ones stay on
+    // the server unreferenced (docs/media/files.md).
+    this.#attachments.clear();
+    this.#renderPending();
     $('message-text').value = '';
     $('room-title').textContent = roomTitle(room, this.#me, this.#profiles);
     $('room-kind').textContent = room.kind === 'direct' ? 'личный диалог' : room.private ? 'закрытый канал' : 'канал';
@@ -192,6 +203,11 @@ export class Workspace {
     const timeline = this.#timeline(roomId);
     const messages = timeline.messages;
     await this.#profiles.getAll(messages.map((m) => m.sender_id));
+    try {
+      await this.#files.getAll(messages.flatMap((m) => m.attachment_ids ?? []));
+    } catch {
+      // Attachments without metadata are still shown and downloadable.
+    }
     if (roomId !== this.#current) return;
 
     const box = $('messages');
@@ -214,28 +230,117 @@ export class Workspace {
         el('time', { datetime: message.created_at }, formatTime(message.created_at)),
       ),
       message.text ? el('p', { class: 'message-text' }, message.text) : null,
+      message.attachment_ids?.length
+        ? el('ul', { class: 'attachments' }, message.attachment_ids.map((id) => el('li', {}, this.#attachmentItem(id))))
+        : null,
     );
+  }
+
+  #attachmentItem(fileId) {
+    const info = this.#files.info(fileId);
+    if (info?.unavailable) return el('span', { class: 'attachment unavailable' }, 'файл недоступен');
+    const label = info ? `${info.filename} · ${formatSize(info.size)}` : 'вложение';
+    return el('button', {
+      type: 'button',
+      class: 'attachment',
+      title: 'Скачать',
+      onclick: () => this.#download(fileId, info?.filename ?? 'attachment'),
+    }, `📎 ${label}`);
+  }
+
+  // #download saves a file. The content is fetched with the access token and
+  // offered as a download; untrusted files are never rendered in the page.
+  async #download(fileId, filename) {
+    $('room-error').textContent = '';
+    try {
+      const url = URL.createObjectURL(await downloadFile(this.#api, fileId));
+      const link = el('a', { href: url, download: filename, hidden: true });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      $('room-error').textContent = describeError(err);
+    }
+  }
+
+  // #upload stores the chosen files in the open room one after another and
+  // attaches them to the message being written. A failed upload is reported,
+  // not retried: uploads have no idempotency key.
+  async #upload(files) {
+    const roomId = this.#current;
+    $('room-error').textContent = '';
+    for (const file of files) {
+      const problem = fileProblem(file);
+      if (problem || this.#attachments.full) {
+        $('room-error').textContent = problem ?? 'К сообщению можно прикрепить не больше 5 файлов.';
+        continue;
+      }
+      this.#uploads++;
+      this.#renderPending();
+      try {
+        const info = await uploadFile(this.#api, roomId, file);
+        this.#files.remember(info);
+        if (roomId === this.#current) this.#attachments.add(info);
+      } catch (err) {
+        if (roomId === this.#current) $('room-error').textContent = `«${file.name}»: ${describeError(err)}`;
+      } finally {
+        this.#uploads--;
+        this.#renderPending();
+      }
+    }
+  }
+
+  #renderPending() {
+    const items = this.#attachments.items.map((info) =>
+      el('li', {},
+        `📎 ${info.filename} · ${formatSize(info.size)}`,
+        el('button', {
+          type: 'button',
+          class: 'small',
+          title: 'Убрать',
+          onclick: () => {
+            this.#attachments.remove(info.file_id);
+            this.#renderPending();
+          },
+        }, '×'),
+      ),
+    );
+    if (this.#uploads) items.push(el('li', { class: 'hint' }, 'Загрузка…'));
+    $('pending-files').replaceChildren(...items);
+    $('composer').querySelector('button[type="submit"]').disabled = this.#uploads > 0;
+    $('attach').disabled = this.#attachments.full;
   }
 
   async #send() {
     const roomId = this.#current;
-    const text = $('message-text').value;
-    // The server rejects whitespace-only text without attachments.
-    if (!roomId || !text.trim()) return;
+    const attachmentIds = this.#attachments.ids;
+    let text = $('message-text').value;
+    // The server rejects whitespace-only text; with attachments the text may
+    // be empty instead.
+    if (!text.trim()) {
+      if (!attachmentIds.length) return;
+      text = '';
+    }
+    if (!roomId || this.#uploads) return;
 
-    const prepared = this.#outbox.prepare(text, []);
+    const prepared = this.#outbox.prepare(text, attachmentIds);
     const button = $('composer').querySelector('button[type="submit"]');
     button.disabled = true;
     await this.#guard(roomId, 'room-error', async () => {
       const message = await sendMessage(this.#api, roomId, prepared);
       this.#outbox.sent();
-      if (roomId === this.#current) $('message-text').value = '';
+      if (roomId === this.#current) {
+        $('message-text').value = '';
+        this.#attachments.clear();
+        this.#renderPending();
+      }
       const timeline = this.#timeline(roomId);
       if (timeline.apply(message) === 'gap') await catchUp(this.#api, roomId, timeline);
       this.#touch(roomId, message.created_at);
       if (roomId === this.#current) await this.#renderMessages({ stick: true });
     });
-    button.disabled = false;
+    button.disabled = this.#uploads > 0;
   }
 
   // #touch moves a room with a new message to the top of the list.
@@ -368,6 +473,12 @@ export class Workspace {
     $('composer').addEventListener('submit', (event) => {
       event.preventDefault();
       this.#send();
+    });
+    $('attach').addEventListener('click', () => $('file-input').click());
+    $('file-input').addEventListener('change', (event) => {
+      const files = [...event.currentTarget.files];
+      event.currentTarget.value = '';
+      this.#upload(files);
     });
     $('message-text').addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {

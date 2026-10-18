@@ -94,8 +94,13 @@
         </div>
         <p id="room-error" class="error" role="alert"></p>
         <form id="composer" class="composer">
-          <textarea id="message-text" rows="2" placeholder="Сообщение (Enter — отправить, Shift+Enter — новая строка)"></textarea>
-          <button type="submit">Отправить</button>
+          <ul id="pending-files" class="pending-files"></ul>
+          <div class="composer-row">
+            <button id="attach" type="button" title="Прикрепить файлы: до 5 штук по 10 МиБ — PNG, JPEG, PDF или текст">Файл</button>
+            <input id="file-input" type="file" multiple accept="image/png,image/jpeg,application/pdf,text/plain" hidden>
+            <textarea id="message-text" rows="2" placeholder="Сообщение (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+            <button type="submit">Отправить</button>
+          </div>
         </form>
       </section>
 

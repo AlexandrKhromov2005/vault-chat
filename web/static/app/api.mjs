@@ -1,6 +1,6 @@
 // Authenticated calls to the Gateway API.
 
-import { ApiError, requestJSON } from './http.mjs';
+import { ApiError, requestBlob, requestJSON } from './http.mjs';
 
 export class Api {
   #fetchFn;
@@ -11,18 +11,27 @@ export class Api {
     this.#session = session;
   }
 
-  // call sends an authenticated request. A 401 means the access token was
-  // rejected before its known expiry; it is refreshed once and the request
-  // repeated. Requests that change data are safe to repeat: message sends are
-  // idempotent by client_message_id and member changes by their target.
-  async call(method, path, { body } = {}) {
+  // call sends an authenticated request and returns the JSON response.
+  call(method, path, { body } = {}) {
+    return this.#authorized((token) => requestJSON(this.#fetchFn, method, path, { body, token }));
+  }
+
+  // blob downloads an authenticated response body, such as file content.
+  blob(path) {
+    return this.#authorized((token) => requestBlob(this.#fetchFn, path, { token }));
+  }
+
+  // #authorized runs send with a valid access token. A 401 means the token
+  // was rejected before its known expiry; it is refreshed once and the
+  // request repeated. Repeating is safe: the Gateway rejects a bad token
+  // before the request reaches a backend, so nothing was done yet.
+  async #authorized(send) {
     const token = await this.#session.validAccessToken();
     try {
-      return await requestJSON(this.#fetchFn, method, path, { body, token });
+      return await send(token);
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 401) throw err;
     }
-    const fresh = await this.#session.refresh();
-    return requestJSON(this.#fetchFn, method, path, { body, token: fresh });
+    return send(await this.#session.refresh());
   }
 }
