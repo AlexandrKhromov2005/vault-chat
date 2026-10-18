@@ -28,3 +28,7 @@ test('anything else falls back to the server message', () => {
   assert.equal(describeError(err(500, 'internal', 'internal error')), 'internal error');
   assert.equal(describeError(new Error('')), 'Что-то пошло не так.');
 });
+
+test('a file over the size limit is explained', () => {
+  assert.equal(describeError(err(413, 'body_too_large', 'request body is too large')), 'Файл больше 10 МиБ.');
+});

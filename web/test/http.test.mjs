@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ApiError, requestJSON } from '../static/app/http.mjs';
+import { ApiError, requestBlob, requestJSON } from '../static/app/http.mjs';
 import { apiError, fakeFetch } from './fakes.mjs';
 
 test('sends JSON with a bearer token and returns the parsed body', async () => {
@@ -65,5 +65,41 @@ test('reports a network failure as status 0', async () => {
     name: 'ApiError',
     status: 0,
     code: 'network',
+  });
+});
+
+test('sends FormData as it is, leaving the content type to fetch', async () => {
+  const fetchFn = fakeFetch([{ status: 201, body: { file_id: 'f-1' } }]);
+  const form = new FormData();
+  form.append('file', new Blob(['hello']), 'notes.txt');
+
+  const body = await requestJSON(fetchFn, 'POST', '/api/v1/rooms/r-1/files', { body: form, token: 'tok' });
+
+  assert.deepEqual(body, { file_id: 'f-1' });
+  // fetch sets multipart/form-data with the boundary itself.
+  assert.deepEqual(fetchFn.calls[0].headers, { Authorization: 'Bearer tok' });
+  assert.equal(fetchFn.calls[0].body, form);
+});
+
+test('requestBlob returns the response bytes', async () => {
+  const fetchFn = fakeFetch([{ status: 200, bytes: 'file content' }]);
+
+  const blob = await requestBlob(fetchFn, '/api/v1/files/f-1/content', { token: 'tok' });
+
+  assert.equal(await blob.text(), 'file content');
+  assert.deepEqual(fetchFn.calls[0], {
+    url: '/api/v1/files/f-1/content',
+    method: 'GET',
+    headers: { Authorization: 'Bearer tok' },
+    body: undefined,
+  });
+});
+
+test('requestBlob reports errors like requestJSON', async () => {
+  const fetchFn = fakeFetch([apiError(404, 'not_found', 'file not found')]);
+
+  await assert.rejects(requestBlob(fetchFn, '/api/v1/files/f-1/content', { token: 'tok' }), {
+    name: 'ApiError',
+    status: 404,
   });
 });

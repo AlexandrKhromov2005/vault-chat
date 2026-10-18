@@ -1,8 +1,9 @@
 // Test doubles for the browser APIs the client modules depend on.
 
-// fakeFetch answers requests from a queue of {status, body} responses and
-// records every request. A response may be an Error to simulate a network
-// failure, or a function of the request.
+// fakeFetch answers requests from a queue of {status, body, bytes} responses
+// and records every request. A response may be an Error to simulate a
+// network failure, or a function of the request. JSON request bodies are
+// recorded parsed; other bodies (FormData) as they are.
 export function fakeFetch(responses = []) {
   const queue = [...responses];
   const calls = [];
@@ -11,7 +12,7 @@ export function fakeFetch(responses = []) {
       url,
       method: init.method ?? 'GET',
       headers: init.headers ?? {},
-      body: init.body === undefined ? undefined : JSON.parse(init.body),
+      body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body,
     };
     calls.push(request);
     let next = queue.shift();
@@ -23,6 +24,7 @@ export function fakeFetch(responses = []) {
       status: next.status,
       ok: next.status >= 200 && next.status < 300,
       text: async () => text,
+      blob: async () => new Blob([next.bytes ?? text]),
     };
   };
   fetchFn.calls = calls;

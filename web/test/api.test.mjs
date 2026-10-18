@@ -71,3 +71,18 @@ test('other errors are not retried', async () => {
   await assert.rejects(api.call('GET', '/api/v1/rooms/x'), { status: 404 });
   assert.equal(session.refreshes, 0);
 });
+
+test('blob downloads with the access token and refreshes once after 401', async () => {
+  const session = fakeSession();
+  const fetchFn = fakeFetch([
+    apiError(401, 'unauthenticated', 'invalid or expired token'),
+    { status: 200, bytes: 'content' },
+  ]);
+  const api = new Api({ fetchFn, session });
+
+  const blob = await api.blob('/api/v1/files/f-1/content');
+
+  assert.equal(await blob.text(), 'content');
+  assert.equal(session.refreshes, 1);
+  assert.equal(fetchFn.calls[1].headers.Authorization, 'Bearer access-2');
+});
