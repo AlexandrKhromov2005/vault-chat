@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -50,8 +51,32 @@ func newFixture(t *testing.T) *fixture {
 		CORSAllowedOrigins: []string{"https://chat.example.com"},
 		MaxBodyBytes:       64,
 		RequestTimeout:     time.Second,
+		Web: handler.NewWebApp(fstest.MapFS{
+			"index.html":  {Data: []byte("<!doctype html>")},
+			"app/app.mjs": {Data: []byte("export {};")},
+		}),
 	})
 	return f
+}
+
+func TestRouter_WebClient(t *testing.T) {
+	f := newFixture(t) // static files must not consume rate limit quota
+
+	rec := f.serve(httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "<!doctype html>", rec.Body.String())
+	require.NotEmpty(t, rec.Header().Get("Content-Security-Policy"))
+	require.True(t, requestid.Valid(rec.Header().Get(requestid.Header)), "cross-cutting middleware applies")
+
+	rec = f.serve(httptest.NewRequest(http.MethodGet, "/app/app.mjs", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Writes to the client paths are not routes.
+	rec = f.serve(httptest.NewRequest(http.MethodPost, "/", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	rec = f.serve(httptest.NewRequest(http.MethodGet, "/nope", nil))
+	require.JSONEq(t, `{"error":{"code":"not_found","message":"route not found"}}`, rec.Body.String())
 }
 
 func (f *fixture) allow(key string) {
