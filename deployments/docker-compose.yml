@@ -132,6 +132,8 @@ services:
       AUTH_DATABASE_URL: postgres://auth:auth@postgres:5432/auth_db?sslmode=disable
       AUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/auth_jwt_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/auth_jwt_public.pem
+      # Shorten for a demo of token renewal, e.g. AUTH_JWT_ACCESS_TTL=2m.
+      AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
       AUTH_LOG_LEVEL: ${AUTH_LOG_LEVEL:-info}
     # Development keys from scripts/gen-jwt-keys.sh, mounted read-only and
     # never copied into the image. Long-syntax binds rather than Compose
