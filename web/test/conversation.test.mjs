@@ -156,6 +156,23 @@ test('history answered after sign-out is not shown', async () => {
   assert.deepEqual(shown($), []);
 });
 
+test('a late 404 for the previous user does not close the next user\'s room', async () => {
+  const late = deferred();
+  const api = scripted().on(HISTORY, () => late.promise.then(notFound));
+  const { $, workspace } = await openTeam(api);
+
+  workspace.reset();
+  api.on(HISTORY, page([]));
+  await workspace.refresh();
+  await click($('room-list').querySelector('button'));
+  late.resolve();
+  await settle();
+
+  assert.equal($('room-title').textContent, 'Проект');
+  assert.equal($('room').hidden, false);
+  assert.equal($('sidebar-error').textContent, '');
+});
+
 test('history of a room the user has left for another is not shown', async () => {
   const late = deferred();
   const api = scripted()
