@@ -54,6 +54,24 @@
 
     <section id="workspace" class="workspace" hidden>
       <aside class="sidebar">
+        <label class="search">Найти пользователя
+          <input id="user-search" type="search" autocomplete="off" placeholder="Начало имени, от 2 символов">
+        </label>
+        <ul id="user-results" class="list"></ul>
+
+        <details class="new-channel">
+          <summary>Новый канал</summary>
+          <form id="channel-form" class="stack">
+            <label>Название
+              <input name="name" maxlength="80" required>
+            </label>
+            <label class="checkbox">
+              <input name="private" type="checkbox" checked> Закрытый
+            </label>
+            <button type="submit">Создать</button>
+          </form>
+        </details>
+
         <div class="section-header">
           <h2>Комнаты</h2>
           <button id="refresh" type="button" title="Обновить комнаты">Обновить</button>
@@ -62,7 +80,7 @@
         <p id="sidebar-error" class="error" role="alert"></p>
       </aside>
 
-      <p id="no-room" class="placeholder">Выберите комнату.</p>
+      <p id="no-room" class="placeholder">Выберите комнату или найдите пользователя, чтобы начать диалог.</p>
 
       <section id="room" class="room" hidden>
         <header class="room-header">

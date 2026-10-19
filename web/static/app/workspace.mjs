@@ -1,9 +1,11 @@
-// The signed-in part of the client: the room list and the open room.
+// The signed-in part of the client: the room list with user search and
+// channel creation, and the open room.
 
-import { listAllRooms, roomTitle } from './chat.mjs';
+import { createChannel, listAllRooms, openDirect, roomTitle } from './chat.mjs';
 import { el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
 import { Scope } from './scope.mjs';
+import { bindUserSearch } from './search.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,10 +18,23 @@ export class Workspace {
   #rooms = []; // the room list, most recently active first
   #current = null; // room_id of the open room
 
-  constructor({ api, session }) {
+  constructor({ api, session, searchDelayMs = 300 }) {
     this.#api = api;
     this.#session = session;
     this.#scope = new Scope(api);
+
+    bindUserSearch({
+      input: $('user-search'),
+      list: $('user-results'),
+      errorLine: $('sidebar-error'),
+      scope: () => this.#scope,
+      pick: (user) => this.#openDirectWith(user),
+      delayMs: searchDelayMs,
+    });
+    $('channel-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.#createChannel(event.currentTarget);
+    });
     $('refresh').addEventListener('click', () => this.refresh());
   }
 
@@ -46,7 +61,9 @@ export class Workspace {
     this.#rooms = [];
     this.#current = null;
     $('room-list').replaceChildren();
+    $('user-results').replaceChildren();
     $('sidebar-error').textContent = '';
+    $('user-search').value = '';
     this.#showRoom(false);
   }
 
@@ -73,6 +90,15 @@ export class Workspace {
     return this.#rooms.find((room) => room.room_id === roomId);
   }
 
+  // #addRoom puts a room returned by a create or open call at the top and
+  // reports whether its scope is still alive.
+  async #addRoom(scope, room) {
+    await this.#loadPeers(scope, [room]);
+    if (!scope.alive) return false;
+    this.#rooms = [room, ...this.#rooms.filter((r) => r.room_id !== room.room_id)];
+    this.#renderRooms();
+    return true;
+  }
 
   #renderRooms() {
     const profiles = this.#scope.profiles;
@@ -115,5 +141,33 @@ export class Workspace {
   #showRoom(visible) {
     $('room').hidden = !visible;
     $('no-room').hidden = visible;
+  }
+
+  async #openDirectWith(user) {
+    const scope = this.#scope;
+    $('user-search').value = '';
+    $('user-results').replaceChildren();
+    try {
+      const room = await openDirect(this.#api, user.user_id);
+      if (await this.#addRoom(scope, room)) this.#openRoom(room.room_id);
+    } catch (err) {
+      if (scope.alive) $('sidebar-error').textContent = describeError(err);
+    }
+  }
+
+  async #createChannel(form) {
+    const scope = this.#scope;
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    $('sidebar-error').textContent = '';
+    try {
+      const room = await createChannel(this.#api, name, form.elements.private.checked);
+      if (!scope.alive) return;
+      form.reset();
+      form.closest('details').open = false;
+      if (await this.#addRoom(scope, room)) this.#openRoom(room.room_id);
+    } catch (err) {
+      if (scope.alive) $('sidebar-error').textContent = describeError(err);
+    }
   }
 }
