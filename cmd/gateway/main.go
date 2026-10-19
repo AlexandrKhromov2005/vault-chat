@@ -28,6 +28,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/web"
 )
 
 // shutdownTimeout bounds how long in-flight requests may take to finish
@@ -138,6 +139,7 @@ func run() error {
 			MaxBodyBytes:       cfg.MaxBodyBytes,
 			RequestTimeout:     cfg.RequestTimeout,
 			Realtime:           websockets,
+			Web:                handler.NewWebApp(web.Files()),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Backstop only: API request bodies are cut off at the request
