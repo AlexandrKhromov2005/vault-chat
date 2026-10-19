@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { ApiError } from '../static/app/http.mjs';
 import { Workspace } from '../static/app/workspace.mjs';
 import { deferred } from './fakes.mjs';
-import { loadPage } from './minidom.mjs';
-import { click, scriptedApi, signedIn } from './ui.mjs';
+import { loadPage, settle } from './minidom.mjs';
+import { click, scriptedApi, signedIn, submit, texts, type } from './ui.mjs';
 
 const ROOMS = 'GET /api/v1/rooms?limit=100';
 const dialog = {
@@ -51,6 +51,54 @@ test('a room list answered after sign-out does not reach the next user', async (
   await aliceRefresh;
 
   assert.deepEqual(roomNames($), ['Команда Боба']);
+});
+
+test('search results answered after sign-out are dropped', async () => {
+  const late = deferred();
+  const api = scriptedApi().on('GET /api/v1/users?query=bo&limit=20', () => late.promise);
+  const { $, workspace } = setup(api);
+  await type($('user-search'), 'bo');
+
+  workspace.reset();
+  late.resolve({ users: [{ user_id: 'u-2', username: 'bob' }] });
+  await settle();
+
+  assert.deepEqual(texts($('user-results')), []);
+});
+
+test('picking a found user opens a direct dialog', async () => {
+  const api = scriptedApi()
+    .on('GET /api/v1/users?query=bo&limit=20', { users: [{ user_id: 'u-2', username: 'bob' }] })
+    .on('POST /api/v1/rooms/direct', dialog);
+  const { $ } = setup(api);
+
+  await type($('user-search'), 'bo');
+  assert.deepEqual(texts($('user-results')), ['bob']);
+  await click($('user-results').querySelector('button'));
+
+  assert.deepEqual(api.calls.at(-1), { key: 'POST /api/v1/rooms/direct', body: { peer_user_id: 'u-2' } });
+  assert.deepEqual(roomNames($), ['bob']);
+  assert.equal($('room').hidden, false);
+  assert.equal($('room-title').textContent, 'bob');
+  assert.equal($('room-kind').textContent, 'личный диалог');
+  assert.equal($('user-search').value, '');
+  assert.deepEqual(texts($('user-results')), []);
+});
+
+test('creates a channel and opens it', async () => {
+  const api = scriptedApi().on('POST /api/v1/rooms/channels', { ...channel, name: 'Новости', room_id: 'r-news' });
+  const { $ } = setup(api);
+  const form = $('channel-form');
+  form.closest('details').open = true;
+  form.elements.name.value = '  Новости  ';
+
+  await submit(form);
+
+  assert.deepEqual(api.calls[0].body, { name: 'Новости', private: true });
+  assert.equal($('room-title').textContent, 'Новости');
+  assert.equal($('room-kind').textContent, 'закрытый канал');
+  assert.equal(form.closest('details').open, false);
+  assert.equal(form.elements.name.value, '');
 });
 
 test('a room that vanished from the list is closed', async () => {
