@@ -21,6 +21,7 @@ fuzzcache
 
 # Not needed to compile the services
 tests
+web/test
 **/*_test.go
 **/testdata
 docs
