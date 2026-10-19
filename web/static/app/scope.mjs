@@ -6,6 +6,7 @@
 // answer that arrives after sign-out, possibly while another user is signed
 // in, is thereby dropped instead of showing the previous user's data.
 
+import { FileInfos } from './files.mjs';
 import { Profiles } from './profiles.mjs';
 
 export class Scope {
@@ -14,6 +15,7 @@ export class Scope {
   constructor(api) {
     this.profiles = new Profiles(api);
     this.timelines = new Map(); // room_id → Timeline of the rooms opened so far
+    this.files = new FileInfos(api);
   }
 
   get alive() {
