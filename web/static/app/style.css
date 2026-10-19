@@ -160,14 +160,23 @@ label {
   grid-template-columns: 280px minmax(0, 1fr) auto;
 }
 
-.sidebar {
+.sidebar,
+.members {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px;
   overflow-y: auto;
   background: var(--panel);
+}
+
+.sidebar {
   border-right: 1px solid var(--border);
+}
+
+.members {
+  width: 260px;
+  border-left: 1px solid var(--border);
 }
 
 .section-header {
@@ -177,6 +186,7 @@ label {
   margin-top: 6px;
 }
 
+.members h3,
 .section-header h2 {
   margin: 0;
   font-size: 15px;
@@ -259,6 +269,10 @@ label {
   overflow-wrap: anywhere;
 }
 
+.room-header button {
+  margin-left: auto;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -336,3 +350,24 @@ label {
   min-height: 42px;
 }
 
+.member {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+button.small {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 13px;
+}
