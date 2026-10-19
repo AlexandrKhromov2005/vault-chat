@@ -93,6 +93,18 @@ export class Conversation {
     return appended ?? 0;
   }
 
+  // live applies a message from the event stream to a room whose messages
+  // are loaded.
+  async live(scope, roomId, message) {
+    const timeline = scope.timelines.get(roomId);
+    if (!timeline?.loaded) return;
+    const result = timeline.apply(message);
+    if (result === 'duplicate' || result === 'stale') return;
+    // A lost event left a hole before this message: fill it from history.
+    if (result === 'gap') await this.#guard(scope, roomId, () => catchUp(this.#api, roomId, timeline));
+    await this.#render(scope, roomId);
+  }
+
   #isOpen(scope, roomId) {
     return scope.alive && this.#roomId === roomId;
   }
