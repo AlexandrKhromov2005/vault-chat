@@ -74,7 +74,7 @@
 
         <div class="section-header">
           <h2>Комнаты</h2>
-          <button id="refresh" type="button" title="Обновить комнаты">Обновить</button>
+          <button id="refresh" type="button" title="Обновить комнаты и сообщения">Обновить</button>
         </div>
         <ul id="room-list" class="list rooms"></ul>
         <p id="sidebar-error" class="error" role="alert"></p>
@@ -87,6 +87,17 @@
           <h2 id="room-title"></h2>
           <span id="room-kind" class="hint"></span>
         </header>
+        <div id="messages" class="messages">
+          <button id="load-older" type="button" hidden>Показать более ранние</button>
+          <ol id="message-list" class="message-list"></ol>
+        </div>
+        <p id="room-error" class="error" role="alert"></p>
+        <form id="composer" class="composer">
+          <div class="composer-row">
+            <textarea id="message-text" rows="2" placeholder="Сообщение (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+            <button type="submit">Отправить</button>
+          </div>
+        </form>
       </section>
     </section>
   </main>

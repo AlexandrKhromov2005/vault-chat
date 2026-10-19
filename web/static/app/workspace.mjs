@@ -2,6 +2,7 @@
 // channel creation, and the open room.
 
 import { createChannel, listAllRooms, openDirect, roomTitle } from './chat.mjs';
+import { Conversation } from './conversation.mjs';
 import { el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
 import { Scope } from './scope.mjs';
@@ -17,11 +18,21 @@ export class Workspace {
   #scope;
   #rooms = []; // the room list, most recently active first
   #current = null; // room_id of the open room
+  #conversation;
 
   constructor({ api, session, searchDelayMs = 300 }) {
     this.#api = api;
     this.#session = session;
     this.#scope = new Scope(api);
+    this.#conversation = new Conversation({
+      api,
+      workspace: {
+        scope: () => this.#scope,
+        me: () => this.#me,
+        lostRoom: (roomId) => this.#lostRoom(roomId),
+        touch: (roomId, at) => this.#touch(roomId, at),
+      },
+    });
 
     bindUserSearch({
       input: $('user-search'),
@@ -42,7 +53,8 @@ export class Workspace {
     return this.#session.user?.id;
   }
 
-  // refresh re-reads the room list.
+  // refresh re-reads the room list and catches up every room whose messages
+  // are loaded.
   async refresh() {
     const scope = this.#scope;
     $('sidebar-error').textContent = '';
@@ -50,7 +62,9 @@ export class Workspace {
       await this.#loadRooms(scope);
     } catch (err) {
       if (scope.alive) $('sidebar-error').textContent = describeError(err);
+      return;
     }
+    await Promise.all([...scope.timelines.keys()].map((roomId) => this.#conversation.sync(scope, roomId)));
   }
 
   // reset forgets the signed-in user's data after sign-out. Work still under
@@ -60,6 +74,7 @@ export class Workspace {
     this.#scope = new Scope(this.#api);
     this.#rooms = [];
     this.#current = null;
+    this.#conversation.close();
     $('room-list').replaceChildren();
     $('user-results').replaceChildren();
     $('sidebar-error').textContent = '';
@@ -120,15 +135,26 @@ export class Workspace {
   // user was removed, or it never was theirs.
   #lostRoom(roomId) {
     this.#rooms = this.#rooms.filter((room) => room.room_id !== roomId);
+    this.#scope.timelines.delete(roomId);
     if (this.#current === roomId) {
       this.#current = null;
+      this.#conversation.close();
       this.#showRoom(false);
       $('sidebar-error').textContent = 'Комната больше недоступна: вы не её участник.';
     }
     this.#renderRooms();
   }
 
-  #openRoom(roomId) {
+  // #touch moves a room with a new message to the top of the list.
+  #touch(roomId, at) {
+    const room = this.#room(roomId);
+    if (!room) return;
+    room.last_message_at = at;
+    this.#rooms = [room, ...this.#rooms.filter((r) => r !== room)];
+    this.#renderRooms();
+  }
+
+  async #openRoom(roomId) {
     const room = this.#room(roomId);
     if (!room) return;
     this.#current = roomId;
@@ -136,6 +162,7 @@ export class Workspace {
     $('room-kind').textContent = kindName(room);
     this.#showRoom(true);
     this.#renderRooms();
+    await this.#conversation.open(room);
   }
 
   #showRoom(visible) {
@@ -149,7 +176,7 @@ export class Workspace {
     $('user-results').replaceChildren();
     try {
       const room = await openDirect(this.#api, user.user_id);
-      if (await this.#addRoom(scope, room)) this.#openRoom(room.room_id);
+      if (await this.#addRoom(scope, room)) await this.#openRoom(room.room_id);
     } catch (err) {
       if (scope.alive) $('sidebar-error').textContent = describeError(err);
     }
@@ -165,7 +192,7 @@ export class Workspace {
       if (!scope.alive) return;
       form.reset();
       form.closest('details').open = false;
-      if (await this.#addRoom(scope, room)) this.#openRoom(room.room_id);
+      if (await this.#addRoom(scope, room)) await this.#openRoom(room.room_id);
     } catch (err) {
       if (scope.alive) $('sidebar-error').textContent = describeError(err);
     }
