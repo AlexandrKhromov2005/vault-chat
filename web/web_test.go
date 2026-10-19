@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"io/fs"
+	"path"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,8 +12,12 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/web"
 )
 
-// assetRef matches src/href attributes pointing at the client's own files.
-var assetRef = regexp.MustCompile(`(?:src|href)="(/app/[^"]+)"`)
+var (
+	// assetRef matches src/href attributes pointing at the client's own files.
+	assetRef = regexp.MustCompile(`(?:src|href)="(/app/[^"]+)"`)
+	// moduleImport matches relative static imports and re-exports.
+	moduleImport = regexp.MustCompile(`(?m)(?:^|\s)(?:import|export)\s[^'"]*?['"](\.{1,2}/[^'"]+)['"]`)
+)
 
 func readFile(t *testing.T, name string) string {
 	t.Helper()
@@ -44,5 +49,24 @@ func TestFiles_IndexIsCompatibleWithTheContentSecurityPolicy(t *testing.T) {
 		"event handler":   regexp.MustCompile(`\son[a-z]+=`),
 	} {
 		require.Falsef(t, pattern.MatchString(index), "index.html contains a %s", name)
+	}
+}
+
+func TestFiles_ModuleImportsResolve(t *testing.T) {
+	var modules []string
+	require.NoError(t, fs.WalkDir(web.Files(), "app", func(name string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(name, ".mjs") {
+			modules = append(modules, name)
+		}
+		return err
+	}))
+	require.NotEmpty(t, modules)
+
+	for _, module := range modules {
+		for _, imp := range moduleImport.FindAllStringSubmatch(readFile(t, module), -1) {
+			target := path.Join(path.Dir(module), imp[1])
+			_, err := fs.Stat(web.Files(), target)
+			require.NoError(t, err, "%s imports %s", module, imp[1])
+		}
 	}
 }
