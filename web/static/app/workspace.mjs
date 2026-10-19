@@ -1,0 +1,119 @@
+// The signed-in part of the client: the room list and the open room.
+
+import { listAllRooms, roomTitle } from './chat.mjs';
+import { el, formatTime } from './dom.mjs';
+import { describeError } from './errors.mjs';
+import { Scope } from './scope.mjs';
+
+const $ = (id) => document.getElementById(id);
+
+const kindName = (room) => (room.kind === 'direct' ? 'личный диалог' : room.private ? 'закрытый канал' : 'канал');
+
+export class Workspace {
+  #api;
+  #session;
+  #scope;
+  #rooms = []; // the room list, most recently active first
+  #current = null; // room_id of the open room
+
+  constructor({ api, session }) {
+    this.#api = api;
+    this.#session = session;
+    this.#scope = new Scope(api);
+    $('refresh').addEventListener('click', () => this.refresh());
+  }
+
+  get #me() {
+    return this.#session.user?.id;
+  }
+
+  // refresh re-reads the room list.
+  async refresh() {
+    const scope = this.#scope;
+    $('sidebar-error').textContent = '';
+    try {
+      await this.#loadRooms(scope);
+    } catch (err) {
+      if (scope.alive) $('sidebar-error').textContent = describeError(err);
+    }
+  }
+
+  // reset forgets the signed-in user's data after sign-out. Work still under
+  // way for that user finds its scope ended and drops its results.
+  reset() {
+    this.#scope.end();
+    this.#scope = new Scope(this.#api);
+    this.#rooms = [];
+    this.#current = null;
+    $('room-list').replaceChildren();
+    $('sidebar-error').textContent = '';
+    this.#showRoom(false);
+  }
+
+  // #loadPeers loads the profiles of the other participants of dialogs; the
+  // user's own name is known.
+  #loadPeers(scope, rooms) {
+    const peers = rooms.flatMap((room) => room.participant_ids ?? []).filter((id) => id !== this.#me);
+    return scope.profiles.getAll(peers);
+  }
+
+  async #loadRooms(scope) {
+    const rooms = await listAllRooms(this.#api);
+    await this.#loadPeers(scope, rooms);
+    if (!scope.alive) return;
+    this.#rooms = rooms;
+    if (this.#current && !this.#room(this.#current)) {
+      this.#lostRoom(this.#current);
+      return;
+    }
+    this.#renderRooms();
+  }
+
+  #room(roomId) {
+    return this.#rooms.find((room) => room.room_id === roomId);
+  }
+
+
+  #renderRooms() {
+    const profiles = this.#scope.profiles;
+    $('room-list').replaceChildren(...this.#rooms.map((room) =>
+      el('li', {},
+        el('button', {
+          type: 'button',
+          class: room.room_id === this.#current ? 'room-item active' : 'room-item',
+          onclick: () => this.#openRoom(room.room_id),
+        },
+        el('span', { class: 'room-name' }, roomTitle(room, this.#me, profiles)),
+        el('span', { class: 'hint' }, kindName(room), room.last_message_at ? ` · ${formatTime(room.last_message_at)}` : ''),
+        ),
+      ),
+    ));
+  }
+
+  // #lostRoom drops a room the user can no longer access: it was left, the
+  // user was removed, or it never was theirs.
+  #lostRoom(roomId) {
+    this.#rooms = this.#rooms.filter((room) => room.room_id !== roomId);
+    if (this.#current === roomId) {
+      this.#current = null;
+      this.#showRoom(false);
+      $('sidebar-error').textContent = 'Комната больше недоступна: вы не её участник.';
+    }
+    this.#renderRooms();
+  }
+
+  #openRoom(roomId) {
+    const room = this.#room(roomId);
+    if (!room) return;
+    this.#current = roomId;
+    $('room-title').textContent = roomTitle(room, this.#me, this.#scope.profiles);
+    $('room-kind').textContent = kindName(room);
+    this.#showRoom(true);
+    this.#renderRooms();
+  }
+
+  #showRoom(visible) {
+    $('room').hidden = !visible;
+    $('no-room').hidden = visible;
+  }
+}

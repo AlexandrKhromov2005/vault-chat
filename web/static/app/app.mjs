@@ -1,10 +1,14 @@
-// Entry point of the web client: wires the page to the session.
+// Entry point of the web client: wires the page to the session and the
+// signed-in workspace.
 
+import { Api } from './api.mjs';
 import { describeError } from './errors.mjs';
 import { Session } from './session.mjs';
+import { Workspace } from './workspace.mjs';
 
 const fetchFn = window.fetch.bind(window);
 const session = new Session({ fetchFn, storage: window.sessionStorage });
+const workspace = new Workspace({ api: new Api({ fetchFn, session }), session });
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,8 +56,12 @@ $('show-login').addEventListener('click', () => showAuthTab('login'));
 $('show-register').addEventListener('click', () => showAuthTab('register'));
 $('logout').addEventListener('click', () => session.logout());
 
-session.addEventListener('signedin', render);
+session.addEventListener('signedin', () => {
+  render();
+  workspace.refresh();
+});
 session.addEventListener('signedout', (event) => {
+  workspace.reset();
   render();
   if (event.detail.reason === 'expired') {
     $('auth-error').textContent = 'Сессия истекла. Войдите снова.';
@@ -61,3 +69,4 @@ session.addEventListener('signedout', (event) => {
 });
 
 render();
+if (session.user) workspace.refresh();
