@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- Gateway отдаёт веб-клиент на `http://localhost:8080/` со строгим CSP без
+  `unsafe-inline`; клиент встроен в бинарник Gateway.
+
 ### Исправлено
 
 - Rate limiter Gateway сразу пропускает запрос, если Redis недоступен: без
