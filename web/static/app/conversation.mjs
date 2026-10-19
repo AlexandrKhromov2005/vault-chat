@@ -1,8 +1,9 @@
-// The open room: its messages and the composer.
+// The open room: its messages with their attachments, and the composer.
 
 import { Outbox, catchUp, loadLatest, loadOlder, sendMessage } from './chat.mjs';
 import { el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
+import { Attachments, downloadFile, fileProblem, formatSize, uploadFile } from './files.mjs';
 import { ApiError } from './http.mjs';
 import { Timeline } from './timeline.mjs';
 
@@ -12,12 +13,19 @@ const $ = (id) => document.getElementById(id);
 // messages; otherwise the reader's position is kept.
 const STICK_TO_BOTTOM_PX = 48;
 
+// A draft is the message being written in the open room: its outbox, the
+// files attached to it and the number of uploads under way. Files belong to
+// the room they were uploaded to, so every opened room starts a new draft;
+// files never sent stay on the server unreferenced (docs/media/files.md).
+const newDraft = () => ({ outbox: new Outbox(), attachments: new Attachments(), uploads: 0 });
+
 export class Conversation {
   #api;
   #workspace;
   #roomId = null; // the open room
-  #outbox = new Outbox();
+  #draft = newDraft();
   #sending = false;
+  #downloadUrl = null; // object URL of the latest download
 
   // workspace provides scope(), me(), lostRoom(roomId) and
   // touch(roomId, at), which moves a room with a new message to the top.
@@ -36,6 +44,12 @@ export class Conversation {
       }
     });
     $('load-older').addEventListener('click', () => this.#loadOlder());
+    $('attach').addEventListener('click', () => $('file-input').click());
+    $('file-input').addEventListener('change', (event) => {
+      const files = [...event.currentTarget.files];
+      event.currentTarget.value = '';
+      this.#upload(files);
+    });
   }
 
   // open shows a room: its loaded messages are caught up, or its latest
@@ -44,10 +58,7 @@ export class Conversation {
     const scope = this.#workspace.scope();
     const roomId = room.room_id;
     this.#roomId = roomId;
-    this.#outbox = new Outbox();
-    $('message-text').value = '';
-    $('message-list').replaceChildren();
-    $('room-error').textContent = '';
+    this.#clear();
 
     await this.#guard(scope, roomId, async () => {
       const timeline = this.#timeline(scope, roomId);
@@ -60,6 +71,13 @@ export class Conversation {
 
   close() {
     this.#roomId = null;
+    this.#clear();
+  }
+
+  #clear() {
+    this.#draft = newDraft();
+    this.#renderDraft();
+    this.#revokeDownload();
     $('message-list').replaceChildren();
     $('message-text').value = '';
     $('room-error').textContent = '';
@@ -103,6 +121,11 @@ export class Conversation {
     const messages = timeline.messages;
     const me = this.#workspace.me();
     await scope.profiles.getAll(messages.map((m) => m.sender_id).filter((id) => id !== me));
+    try {
+      await scope.files.getAll(messages.flatMap((m) => m.attachment_ids ?? []));
+    } catch {
+      // Attachments without metadata are still shown and downloadable.
+    }
     if (!this.#isOpen(scope, roomId)) return;
 
     const box = $('messages');
@@ -125,7 +148,104 @@ export class Conversation {
         el('time', { datetime: message.created_at }, formatTime(message.created_at)),
       ),
       message.text ? el('p', { class: 'message-text' }, message.text) : null,
+      message.attachment_ids?.length
+        ? el('ul', { class: 'attachments' }, message.attachment_ids.map((id) => el('li', {}, this.#attachmentItem(scope, id))))
+        : null,
     );
+  }
+
+  #attachmentItem(scope, fileId) {
+    const info = scope.files.info(fileId);
+    if (info?.unavailable) return el('span', { class: 'attachment unavailable' }, 'файл недоступен');
+    const label = info ? `${info.filename} · ${formatSize(info.size)}` : 'вложение';
+    return el('button', {
+      type: 'button',
+      class: 'attachment',
+      title: 'Скачать',
+      onclick: () => this.#download(fileId, info?.filename ?? 'attachment'),
+    }, `📎 ${label}`);
+  }
+
+  // #download saves a file. The content is fetched with the access token and
+  // offered as a download; untrusted files are never rendered in the page.
+  async #download(fileId, filename) {
+    const scope = this.#workspace.scope();
+    const roomId = this.#roomId;
+    $('room-error').textContent = '';
+    await this.#guard(scope, roomId, async () => {
+      const blob = await downloadFile(this.#api, fileId);
+      if (!this.#isOpen(scope, roomId)) return;
+      this.#revokeDownload();
+      this.#downloadUrl = URL.createObjectURL(blob);
+      const link = el('a', { href: this.#downloadUrl, download: filename, hidden: true });
+      document.body.append(link);
+      link.click();
+      link.remove();
+    });
+  }
+
+  // #revokeDownload frees the content of the previous download, which the
+  // browser has saved by then.
+  #revokeDownload() {
+    if (this.#downloadUrl) URL.revokeObjectURL(this.#downloadUrl);
+    this.#downloadUrl = null;
+  }
+
+  // #upload stores the chosen files in the open room one after another and
+  // attaches them to its draft. A failed upload is reported, not retried:
+  // uploads have no idempotency key.
+  async #upload(files) {
+    const scope = this.#workspace.scope();
+    const roomId = this.#roomId;
+    const draft = this.#draft;
+    if (!roomId) return;
+    $('room-error').textContent = '';
+    for (const file of files) {
+      // The rest is dropped with the draft: the room was closed or the user
+      // signed out, and the next user's token must not upload these files.
+      if (this.#draft !== draft) return;
+      const problem = fileProblem(file);
+      if (problem || draft.attachments.full) {
+        $('room-error').textContent = problem ?? 'К сообщению можно прикрепить не больше 5 файлов.';
+        continue;
+      }
+      draft.uploads++;
+      this.#renderDraft();
+      try {
+        const info = await uploadFile(this.#api, roomId, file);
+        scope.files.remember(info);
+        draft.attachments.add(info);
+      } catch (err) {
+        if (this.#draft === draft) $('room-error').textContent = `«${file.name}»: ${describeError(err)}`;
+      } finally {
+        draft.uploads--;
+        this.#renderDraft();
+      }
+    }
+  }
+
+  // #renderDraft shows the open room's draft. Sending waits for uploads to
+  // finish and for the previous send to be answered.
+  #renderDraft() {
+    const draft = this.#draft;
+    const items = draft.attachments.items.map((info) =>
+      el('li', {},
+        `📎 ${info.filename} · ${formatSize(info.size)}`,
+        el('button', {
+          type: 'button',
+          class: 'small',
+          title: 'Убрать',
+          onclick: () => {
+            draft.attachments.remove(info.file_id);
+            this.#renderDraft();
+          },
+        }, '×'),
+      ),
+    );
+    if (draft.uploads) items.push(el('li', { class: 'hint' }, 'Загрузка…'));
+    $('pending-files').replaceChildren(...items);
+    $('composer').querySelector('button[type="submit"]').disabled = this.#sending || draft.uploads > 0;
+    $('attach').disabled = draft.attachments.full;
   }
 
   async #loadOlder() {
@@ -139,23 +259,31 @@ export class Conversation {
   }
 
   // #send stores the composer's message. While a send is under way further
-  // sends are ignored. A failed send keeps the text and its
+  // sends are ignored, but the draft can still change: the answer removes
+  // only what was sent. A failed send keeps the draft and its
   // client_message_id, so retrying cannot store the message twice.
   async #send() {
     const scope = this.#workspace.scope();
     const roomId = this.#roomId;
-    const text = $('message-text').value;
-    // The server rejects whitespace-only text.
-    if (!roomId || this.#sending || !text.trim()) return;
+    const draft = this.#draft;
+    const attachmentIds = draft.attachments.ids;
+    const typed = $('message-text').value;
+    // The server rejects whitespace-only text; with attachments the text may
+    // be empty instead.
+    const text = typed.trim() ? typed : '';
+    if (!roomId || this.#sending || draft.uploads || (!text && !attachmentIds.length)) return;
 
-    const outbox = this.#outbox;
-    const prepared = outbox.prepare(text, []);
+    const prepared = draft.outbox.prepare(text, attachmentIds);
     this.#setSending(true);
     await this.#guard(scope, roomId, async () => {
       const message = await sendMessage(this.#api, roomId, prepared);
       if (!scope.alive) return;
-      outbox.sent();
-      if (this.#isOpen(scope, roomId) && $('message-text').value === text) $('message-text').value = '';
+      draft.outbox.sent();
+      draft.attachments.remove(...attachmentIds);
+      if (this.#draft === draft) {
+        if ($('message-text').value === typed) $('message-text').value = '';
+        this.#renderDraft();
+      }
       const timeline = this.#timeline(scope, roomId);
       // Someone else wrote meanwhile: fetch what is missing first.
       if (timeline.apply(message) === 'gap') await catchUp(this.#api, roomId, timeline);
@@ -167,6 +295,6 @@ export class Conversation {
 
   #setSending(sending) {
     this.#sending = sending;
-    $('composer').querySelector('button[type="submit"]').disabled = sending;
+    this.#renderDraft();
   }
 }

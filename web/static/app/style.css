@@ -345,6 +345,47 @@ label {
   align-items: flex-start;
 }
 
+.pending-files,
+.attachments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pending-files:empty {
+  display: none;
+}
+
+.pending-files li,
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.attachments {
+  margin-top: 6px;
+}
+
+.attachment {
+  cursor: pointer;
+  text-align: left;
+}
+
+.attachment.unavailable {
+  cursor: default;
+  color: var(--muted);
+}
+
 .composer textarea {
   resize: vertical;
   min-height: 42px;
