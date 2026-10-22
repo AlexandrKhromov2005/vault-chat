@@ -26,7 +26,7 @@ REST; комнаты, отправка сообщений и история до
 | Контракт Chat | Protobuf-контракт операций с комнатами и событий, сгенерированный gRPC-код | Реализованы все десять RPC; актор проверяется через Auth |
 | Данные | Миграции пользователей и сессий Auth, отдельные миграции комнат, участников и сообщений Chat | Auth и Chat применяют миграции своих отдельных БД при запуске |
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
-| Проверки | Unit-, PostgreSQL integration- и race-тесты, 31 цель фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
+| Проверки | Unit-, PostgreSQL integration- и race-тесты, 33 цели фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
 | Media | Загрузка и скачивание закрытых файлов, метаданные в отдельной БД, текущие права участника комнаты, вложения в сообщениях, истории и WebSocket; лимит 10 МиБ и проверка содержимого | gRPC и REST; [правила и ограничения](docs/media/files.md) |
 | Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth, Chat и Media, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Media и Gateway с тремя PostgreSQL, Redis и S3 запускаются одной командой; NATS остаётся опциональным |
 
@@ -111,8 +111,6 @@ presence и уведомления. Также не реализованы mTLS 
   дольше 15 секунд.
 - Передачи владения каналом нет, поэтому владелец не может покинуть канал или
   быть удалён из него.
-- `xmake.lua` и команды `xmake`, описанные в регламенте, пока не реализованы.
-  Ниже приведены доступные команды Go и вспомогательных инструментов.
 
 `govulncheck` v1.9.0 с Go 1.27.3 и базой уязвимостей от 21 октября 2026 года
 не находит достижимых уязвимостей ни в стандартной библиотеке, ни в зависимостях.
@@ -379,6 +377,23 @@ VAULT_CHAT_WEB_GATEWAY_URL=http://127.0.0.1:8080 node --test "web/test/*.test.mj
 
 ## Проверки
 
+Все проверки запускаются одной командой; она останавливается на первой
+ошибке и возвращает ненулевой код:
+
+```sh
+xmake ci
+```
+
+`xmake ci` проверяет форматирование, `go vet`, golangci-lint и сборку, затем
+запускает все тесты с race detector вместе с integration-тестами PostgreSQL и
+S3, проверяет покрытие пакетов `service` и `handler` (не ниже 70%), фаззит
+каждую цель по 10 секунд и запускает `govulncheck`. Для integration-тестов
+команда поднимает `postgres` и `minio` из Compose и создаёт отдельные тестовые
+БД. Нужны xmake 2.8+, Docker и инструменты ниже; список отдельных команд — в
+[CONTRIBUTING](CONTRIBUTING.md#individual-commands).
+
+Те же проверки без xmake:
+
 ```sh
 go test -race -count=1 ./...
 go vet ./...
@@ -429,7 +444,8 @@ docker compose -f deployments/docker-compose.yml up -d --build --wait && \
   go test -tags compose -count=1 ./tests/compose/...
 ```
 
-Фаззинг всех целей по 30 секунд:
+Фаззинг всех целей по 30 секунд — `xmake fuzz` (другая длительность:
+`xmake fuzz -t 2m`), без xmake:
 
 ```sh
 for package in $(go list ./...); do

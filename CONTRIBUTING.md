@@ -40,7 +40,8 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 
 **Requirements:**
 - Go `1.26+` (the `toolchain go1.27.3` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
-- `xmake` ([installation](https://xmake.io/#/guide/installation))
+- `xmake` 2.8+ ([installation](https://xmake.io/#/guide/installation); on Ubuntu `apt install xmake`)
+- Docker with Compose v2, for the integration tests in `xmake ci`
 - `golangci-lint` v2.14.0+ built with Go 1.27+ ([installation](https://golangci-lint.run/usage/install/)); older releases or binaries built with an earlier Go fail to load this module
 - `govulncheck` built with Go 1.27+ (`go install` picks the toolchain from the tool's own `go.mod`, so set it explicitly: `GOTOOLCHAIN=go1.27.3 go install golang.org/x/vuln/cmd/govulncheck@latest`)
 - `git` with `user.name` and `user.email` configured
@@ -52,7 +53,7 @@ xmake setup
 ```
 
 This will install:
-- `pre-commit` hooks (`gofmt`, `go vet`, `golangci-lint`)
+- a `pre-commit` hook (`.githooks/pre-commit`) that runs `xmake fmt-check`, `xmake vet` and `xmake lint`
 - project dependencies (`go mod download`)
 
 ### 3. Verify Everything Works
@@ -443,7 +444,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*User, error) {
 
 ### Coverage Requirements
 
-- **Minimum:** 70% coverage in business logic packages (`internal/service/`, `internal/handler/`).
+- **Minimum:** 70% coverage in every business logic package (`internal/*/service`, `internal/*/handler`); `xmake test-coverage` checks each one.
 - **Target:** 80%+.
 - **Fuzzing:** all parsers, validators, and branching functions must have fuzz tests (see [Fuzzing](#fuzzing)).
 
@@ -452,6 +453,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*User, error) {
 ```bash
 xmake test              # all unit tests
 xmake test-race         # tests with race detector
+xmake test-integration  # tests with race detector against PostgreSQL and S3 from Compose
 xmake test-coverage     # coverage report
 xmake fuzz              # fuzz tests (30s per test)
 xmake fuzz-extended     # fuzz tests (10 min) — for nightly runs
@@ -546,8 +548,9 @@ go test ./internal/validator -fuzz=FuzzValidateEmail -fuzztime=5m
 # Run for a specific iteration count
 go test ./internal/validator -fuzz=FuzzValidateEmail -fuzztime=100000x
 
-# CI — short fuzzing for regression
-xmake fuzz          # alias: go test ./... -fuzz=. -fuzztime=30s
+# Every fuzz target in the project, one after another
+xmake fuzz              # 30s per target
+xmake fuzz -t 2m        # another duration per target
 ```
 
 ### Fuzz Test Rules
@@ -609,9 +612,8 @@ func FuzzSerializeParse(f *testing.F) {
 Before every push, run the full local verification suite:
 
 ```bash
-xmake ci              # run the complete local CI pipeline:
-                      #   gofmt, go vet, golangci-lint,
-                      #   unit tests (with race), fuzz tests, build
+xmake ci              # run the complete local CI pipeline (see below);
+                      # it stops at the first failure with a non-zero exit code
 ```
 
 ### What `xmake ci` Runs
@@ -621,10 +623,17 @@ xmake ci              # run the complete local CI pipeline:
 | Format check | `xmake fmt-check` | Verify `gofmt` / `goimports` compliance |
 | Vet | `xmake vet` | `go vet` static analysis |
 | Lint | `xmake lint` | `golangci-lint` full suite |
-| Unit tests | `xmake test-race` | All tests with race detector |
-| Fuzz regression | `xmake fuzz` | Fuzz tests (30s each) |
-| Coverage | `xmake test-coverage` | Ensure >= 70% |
-| Build | `xmake build` | Binary compiles cleanly |
+| Build | `xmake build` | Every package compiles |
+| Tests | `xmake test-integration` | All tests with race detector, including PostgreSQL and S3 integration tests and the web client's tests |
+| Coverage | `xmake test-coverage` | Each `service` and `handler` package >= 70% |
+| Fuzz regression | `xmake fuzz -t 10s` | Every fuzz target for 10s |
+| Vulnerabilities | `xmake vuln` | `govulncheck`: no reachable known vulnerabilities |
+
+`xmake test-integration` uses `VAULT_CHAT_TEST_DATABASE_URL`, `VAULT_CHAT_TEST_CHAT_DATABASE_URL`,
+`VAULT_CHAT_TEST_MEDIA_DATABASE_URL` and `VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT` when they are all set.
+Otherwise it starts `postgres` and `minio` from `deployments/docker-compose.yml` and creates the test
+databases `vault_chat_auth_test`, `vault_chat_chat_test` and `vault_chat_media_test` there; the tests
+clean their tables, so they never use the service databases.
 
 **PRs with failing local CI are not reviewed and not merged.**
 
@@ -637,19 +646,23 @@ xmake vet             # go vet
 xmake lint            # golangci-lint
 xmake test            # unit tests
 xmake test-race       # unit tests + race detector
+xmake test-integration # tests + race detector + PostgreSQL and S3 integration tests
 xmake test-coverage   # coverage report
 xmake fuzz            # fuzz tests (30s)
 xmake fuzz-extended   # fuzz tests (10 min)
-xmake build           # build binary
-xmake ci              # full local pipeline (all of the above)
+xmake vuln            # govulncheck
+xmake build           # build every package
+xmake ci              # full local pipeline (see the table above)
 ```
 
-### Git Pre-Push Hook
+### Git Pre-Commit Hook
 
-The `xmake setup` command installs a pre-push hook that runs `xmake ci`. You can skip it in emergencies (not recommended):
+The `xmake setup` command installs a pre-commit hook with the fast checks: `xmake fmt-check`, `xmake vet` and
+`xmake lint`. The full `xmake ci` takes several minutes, so it is not a hook: run it yourself before pushing.
+You can skip the hook in emergencies (not recommended):
 
 ```bash
-git push --no-verify   # skip hooks — use only in real emergencies
+git commit --no-verify   # skip hooks — use only in real emergencies
 ```
 
 ---
