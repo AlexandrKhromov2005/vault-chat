@@ -294,6 +294,14 @@ Gateway отдаёт веб-клиент на `http://localhost:8080/`: `index.h
 известных типов, каталоги не перечисляются. Страница идёт с CSP без
 `unsafe-inline`: выполняются только скрипты и стили клиента с того же origin.
 
+Клиент написан на HTML, CSS и JavaScript-модулях без сборки и сторонних
+библиотек. Его логика проверяется тестами на встроенном `node:test`; нужен
+Node.js 22+ (шаблоны файлов в `--test`), пакеты не устанавливаются:
+
+```sh
+node --test "web/test/*.test.mjs"
+```
+
 ## Доступные REST-маршруты
 
 | Метод | Путь | Назначение |
@@ -333,6 +341,7 @@ golangci-lint run
 golangci-lint fmt --diff
 go build ./...
 govulncheck ./...
+node --test "web/test/*.test.mjs"
 ```
 
 golangci-lint v2 и `govulncheck` должны быть собраны Go 1.27 или новее, иначе
