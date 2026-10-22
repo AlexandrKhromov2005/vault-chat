@@ -37,6 +37,6 @@ for name in ["auth","chat","media","gateway"]:
     assert s["environment"]["RPC_TLS_SERVICE"]==name
     v=[v for v in s["volumes"] if v["target"]=="/run/secrets/rpc"]
     assert len(v)==1 and v[0]["source"].endswith("/secrets/rpc/"+name)
-    assert v[0]["read_only"] and not v[0]["bind"]["create_host_path"]
+    assert v[0]["read_only"] and not v[0]["bind"].get("create_host_path",False)
     assert all("rpc-ca" not in v["source"] for v in s["volumes"])
 print("mTLS overlay: isolated service keys, no CA signing key mounts")'
