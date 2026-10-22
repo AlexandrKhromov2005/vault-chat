@@ -159,3 +159,7 @@ monitoring install. Внешнее копирование данных прил�
 Consoles и JS/CSS поставляются из этого репозитория без сторонних библиотек.
 В Prometheus 3 они подключаются явно через `web.console.templates` и
 `web.user-assets`; доступ остаётся только через loopback/SSH.
+
+Внутренние сертификаты: `vault_rpc_mtls_enabled`,
+`vault_rpc_certificate_not_after_timestamp_seconds`, алерт за 14 дней.
+Ротация описана в [mTLS](mtls.md).

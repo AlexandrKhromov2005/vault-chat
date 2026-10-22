@@ -5,8 +5,9 @@
 This document describes the target architecture, not an inventory of deployed
 features. The implementation currently contains Auth, Chat, Gateway and
 private Media uploads/downloads with message attachments. Image resizing, malware
-scanning, retention, NATS application flows, application-data caching, mTLS,
-metrics and audit storage are planned. See [Media](docs/media/files.md) for the
+scanning, retention, NATS application flows, application-data caching and audit storage are planned. Internal mTLS and
+private metrics/dashboards are implemented; see [mTLS](docs/mtls.md) and
+[monitoring](docs/monitoring.md). See [Media](docs/media/files.md) for the
 implemented storage lifecycle and development S3 limitations. See [README](README.md) for implemented features and
 [requirements and acceptance criteria](docs/requirements.md) for delivery stages,
 open PRs and course coverage. Target features below are not evidence of completion.
@@ -144,8 +145,10 @@ Used for events, notifications, decoupled side effects.
 
 ### 3.3 Service Mesh (Future)
 
-Current implementation: direct plaintext gRPC. Planned: direct gRPC with mTLS
-certificates and verified service identities. Linkerd or Istio remain future options
+Current implementation: direct gRPC with optional mTLS, verified service identities
+and unary/stream RPC ACLs; enabled on the VPS via a persistent Compose overlay.
+Local plaintext remains for development. See [ADR 0001](docs/adr/0001-internal-mtls.md).
+Linkerd or Istio remain future options
 for managing mTLS, retries and circuit breakers.
 
 ---
