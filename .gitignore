@@ -20,3 +20,9 @@ build/
 
 # OS artifacts
 .DS_Store
+
+# VPS runtime configuration and private backup archives
+.env.vps
+backups/
+.vps.lock
+__pycache__/
