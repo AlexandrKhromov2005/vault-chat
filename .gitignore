@@ -14,5 +14,9 @@ cover_*.out
 # Fuzz corpus written by go test (local cache)
 fuzzcache/
 
+# xmake cache and build directory
+.xmake/
+build/
+
 # OS artifacts
 .DS_Store
