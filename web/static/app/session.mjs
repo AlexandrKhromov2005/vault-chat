@@ -37,6 +37,12 @@ export class Session extends EventTarget {
     this.#state = load(storage);
   }
 
+  // generation identifies the current session; Api uses it to abandon the
+  // requests of a session that has ended.
+  get generation() {
+    return this.#generation;
+  }
+
   // user is {id, username} of the signed-in user, or null.
   get user() {
     return this.#state ? { id: this.#state.userId, username: this.#state.username } : null;
