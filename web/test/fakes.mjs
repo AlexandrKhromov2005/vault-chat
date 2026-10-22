@@ -2,8 +2,9 @@
 
 // fakeFetch answers requests from a queue of {status, body, bytes} responses
 // and records every request. A response may be an Error to simulate a
-// network failure, or a function of the request. JSON request bodies are
-// recorded parsed; other bodies (FormData) as they are.
+// network failure, or a function of the request, which may return a promise
+// to delay the response. JSON request bodies are recorded parsed; other
+// bodies (FormData) as they are.
 export function fakeFetch(responses = []) {
   const queue = [...responses];
   const calls = [];
@@ -16,7 +17,7 @@ export function fakeFetch(responses = []) {
     };
     calls.push(request);
     let next = queue.shift();
-    if (typeof next === 'function') next = next(request);
+    if (typeof next === 'function') next = await next(request);
     if (next === undefined) throw new Error(`unexpected request ${request.method} ${url}`);
     if (next instanceof Error) throw next;
     const text = next.body === undefined ? '' : JSON.stringify(next.body);
@@ -47,4 +48,14 @@ export function memoryStorage(initial = {}) {
 
 export function apiError(status, code, message) {
   return { status, body: { error: { code, message } } };
+}
+
+// deferred returns a promise with its resolve function, to hold a response
+// until the test releases it.
+export function deferred() {
+  let resolve;
+  const promise = new Promise((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }
