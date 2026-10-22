@@ -83,6 +83,25 @@ test('a file that is no longer accessible is marked unavailable', async () => {
   assert.deepEqual(await infos.get('f-1'), { file_id: 'f-1', unavailable: true });
 });
 
+test('a file that becomes accessible again is asked for again', async () => {
+  // Review of #76: a 404 was cached for good, so a member invited back to
+  // the room could not download the file until the page was reloaded.
+  let member = false;
+  const api = fakeApi((_, path) => {
+    if (!member) throw new ApiError(404, 'not_found', 'file not found');
+    return info(path.split('/').at(-1));
+  });
+  const infos = new FileInfos(api);
+  await infos.get('f-1');
+  assert.equal(infos.info('f-1').unavailable, true);
+
+  member = true;
+
+  assert.equal((await infos.get('f-1')).filename, 'f-1.txt');
+  assert.equal(infos.info('f-1').filename, 'f-1.txt');
+  assert.equal(api.calls.length, 2);
+});
+
 test('downloadFile fetches the content with the access token', async () => {
   const api = fakeApi(() => new Blob(['hello']));
 
