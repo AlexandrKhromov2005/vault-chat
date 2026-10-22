@@ -37,11 +37,14 @@ export function downloadFile(api, fileId) {
 }
 
 // FileInfos caches file metadata, which never changes. Every request checks
-// current membership, so a file of a room the user was removed from
-// resolves as {file_id, unavailable: true}.
+// current membership, so a file of a room the user is not a member of
+// resolves as {file_id, unavailable: true}. Membership can come back with a
+// new invitation, so that answer is shown until the next get, which asks
+// again.
 export class FileInfos {
   #api;
   #known = new Map();
+  #unavailable = new Map();
   #loading = new Map();
 
   constructor(api) {
@@ -49,7 +52,7 @@ export class FileInfos {
   }
 
   info(fileId) {
-    return this.#known.get(fileId) ?? null;
+    return this.#known.get(fileId) ?? this.#unavailable.get(fileId) ?? null;
   }
 
   get(fileId) {
@@ -77,7 +80,10 @@ export class FileInfos {
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 404) throw err;
       info = { file_id: fileId, unavailable: true };
+      this.#unavailable.set(fileId, info);
+      return info;
     }
+    this.#unavailable.delete(fileId);
     this.#known.set(fileId, info);
     return info;
   }
