@@ -82,7 +82,7 @@ func identity(cert *x509.Certificate) string {
 
 // Dial verifies both the CA/DNS name and the exact service URI in the server leaf.
 func (c *Config) Dial(addr, target string) (*grpc.ClientConn, error) {
-	var creds credentials.TransportCredentials = insecure.NewCredentials()
+	creds := insecure.NewCredentials()
 	if c.Enabled() {
 		if !known(target) {
 			return nil, errors.New("unknown RPC target identity")

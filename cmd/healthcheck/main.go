@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/probe"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 )
 
 const (
@@ -31,11 +32,22 @@ func main() {
 func run(args []string, stderr io.Writer) int {
 	flags := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	checkTLS := flags.Bool("check-rpc-tls", false, "validate local RPC TLS configuration without connecting")
 	httpURL := flags.String("http", "", "URL whose GET must answer 2xx")
 	grpcAddr := flags.String("grpc", "", "host:port of a gRPC server with the standard health service")
 	timeout := flags.Duration("timeout", 3*time.Second, "overall probe deadline")
 	if err := flags.Parse(args); err != nil {
 		return exitUsage
+	}
+	if *checkTLS {
+		if flags.NArg() > 0 || *httpURL != "" || *grpcAddr != "" || os.Getenv("RPC_TLS_MODE") != "mtls" {
+			return exitUsage
+		}
+		if _, err := rpctls.Load(os.Getenv("RPC_TLS_SERVICE")); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return exitUnhealthy
+		}
+		return exitHealthy
 	}
 	if flags.NArg() > 0 || (*httpURL == "") == (*grpcAddr == "") || *timeout <= 0 {
 		_, _ = fmt.Fprintln(stderr, "usage: healthcheck (-http URL | -grpc HOST:PORT) [-timeout DURATION]")
