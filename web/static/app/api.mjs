@@ -2,6 +2,8 @@
 
 import { ApiError, requestBlob, requestJSON } from './http.mjs';
 
+const sessionEnded = () => new ApiError(401, 'unauthenticated', 'Сессия уже завершена');
+
 export class Api {
   #fetchFn;
   #session;
@@ -25,13 +27,24 @@ export class Api {
   // was rejected before its known expiry; it is refreshed once and the
   // request repeated. Repeating is safe: the Gateway rejects a bad token
   // before the request reaches a backend, so nothing was done yet.
+  //
+  // A request belongs to the session that started it, identified by
+  // session.generation, which changes on every sign-in and sign-out. Once
+  // that session has ended the request is abandoned: it is neither sent nor
+  // refreshed and repeated, which would act as the next user.
   async #authorized(send) {
-    const token = await this.#session.validAccessToken();
+    const generation = this.#session.generation;
+    const current = (value) => {
+      if (this.#session.generation !== generation) throw sessionEnded();
+      return value;
+    };
+    const token = current(await this.#session.validAccessToken());
     try {
       return await send(token);
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 401) throw err;
     }
-    return send(await this.#session.refresh());
+    current();
+    return send(current(await this.#session.refresh()));
   }
 }
