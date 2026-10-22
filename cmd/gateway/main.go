@@ -28,6 +28,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/web"
 )
 
@@ -57,6 +58,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	metrics := telemetry.New("gateway")
+	stopMetrics, err := metrics.Listen(ctx, os.Getenv("GATEWAY_METRICS_ADDR"))
+	if err != nil {
+		return fmt.Errorf("listen metrics: %w", err)
+	}
+	defer stopMetrics()
 
 	// Service-to-service traffic is plaintext until mTLS lands
 	// (ARCHITECTURE.md section 3.3); the auth service does not serve TLS yet.
@@ -125,9 +132,11 @@ func run() error {
 		MaxUnauthenticated: int(cfg.WebSocket.MaxUnauthenticatedConnections),
 	}, logger)
 
+	metrics.Gauge("vault_websocket_connections", "Admitted WebSocket connections including pending authentication.", func() float64 { n, _ := websockets.ConnectionCounts(); return float64(n) })
+	metrics.Gauge("vault_websocket_unauthenticated_connections", "Admitted WebSocket connections awaiting authentication.", func() float64 { _, n := websockets.ConnectionCounts(); return float64(n) })
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
-		Handler: router.New(router.Deps{
+		Handler: metrics.HTTP(router.New(router.Deps{
 			Auth:               handler.NewAuthHandler(authClient, logger),
 			Chat:               handler.NewChatHandler(chatClient, logger),
 			Health:             health,
@@ -140,7 +149,7 @@ func run() error {
 			RequestTimeout:     cfg.RequestTimeout,
 			Realtime:           websockets,
 			Web:                handler.NewWebApp(web.Files()),
-		}),
+		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Backstop only: API request bodies are cut off at the request
 		// deadline by middleware.Timeout. Hijacking clears both deadlines,

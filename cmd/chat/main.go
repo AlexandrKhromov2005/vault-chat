@@ -31,6 +31,7 @@ import (
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
@@ -50,6 +51,12 @@ func run() error {
 	slog.SetDefault(logger)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	metrics := telemetry.New("chat")
+	stopMetrics, err := metrics.Listen(ctx, os.Getenv("CHAT_METRICS_ADDR"))
+	if err != nil {
+		return fmt.Errorf("listen metrics: %w", err)
+	}
+	defer stopMetrics()
 	startup, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
 	pool, err := pgxpool.New(startup, cfg.DatabaseURL)
@@ -80,10 +87,16 @@ func run() error {
 	defer func() { _ = redisClient.Close() }()
 	publisher := events.NewPublisher(redisClient, logger,
 		events.WithQueueSize(cfg.EventQueueSize), events.WithPublishTimeout(cfg.EventPublishTimeout))
+	metrics.Gauge("vault_event_queue_pending", "Committed changes waiting for publication.", func() float64 { return float64(publisher.Stats().Pending) })
+	metrics.Gauge("vault_event_queue_capacity", "Maximum queued committed changes.", func() float64 { return float64(publisher.Stats().Capacity) })
+	metrics.Counter("vault_events_dropped_total", "Events discarded by queue overflow or shutdown.", func() float64 { return float64(publisher.Stats().Dropped) })
+	metrics.Counter("vault_events_publish_failures_total", "Events whose Redis pipeline failed; delivery may be partial.", func() float64 { return float64(publisher.Stats().Failed) })
+	metrics.Counter("vault_events_published_total", "Events successfully published to their recipients.", func() float64 { return float64(publisher.Stats().Published) })
+	metrics.Counter("vault_events_encoding_failures_total", "Invalid events that could not be encoded.", func() float64 { return float64(publisher.Stats().EncodingFailures) })
 	// Runs after the gRPC server stopped, so no request enqueues events any more.
 	defer closePublisher(publisher, cfg.EventDrainTimeout, logger)
 	rooms := repository.NewRoomRepository(pool, repository.WithNotifier(publisher))
-	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
+	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(metrics.Unary(), requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
 	var messageOptions []service.MessageOption
 	if cfg.MediaGRPCAddr != "" {
 		conn, err := grpc.NewClient(cfg.MediaGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
