@@ -14,7 +14,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -28,6 +27,7 @@ import (
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
@@ -53,6 +53,10 @@ func run() error {
 		return fmt.Errorf("listen metrics: %w", err)
 	}
 	defer stopMetrics()
+	rpcTLS, err := rpctls.Load("media")
+	if err != nil {
+		return fmt.Errorf("configure RPC TLS: %w", err)
+	}
 	startup, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(startup, cfg.DatabaseURL)
@@ -67,15 +71,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	dial := func(addr string) (*grpc.ClientConn, error) {
-		return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
-	}
-	auth, err := dial(cfg.AuthGRPCAddr)
+	auth, err := rpcTLS.Dial(cfg.AuthGRPCAddr, "auth")
 	if err != nil {
 		return err
 	}
 	defer auth.Close()
-	chat, err := dial(cfg.ChatGRPCAddr)
+	chat, err := rpcTLS.Dial(cfg.ChatGRPCAddr, "chat")
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func run() error {
 		return err
 	}
 	defer listener.Close()
-	server := grpc.NewServer(grpc.MaxRecvMsgSize(128<<10), grpc.ChainUnaryInterceptor(metrics.Unary(), requestid.UnaryServerInterceptor()))
+	server := grpc.NewServer(rpcTLS.ServerOption(), grpc.ChainStreamInterceptor(rpcTLS.Stream()), grpc.MaxRecvMsgSize(128<<10), grpc.ChainUnaryInterceptor(metrics.Unary(), rpcTLS.Unary(), requestid.UnaryServerInterceptor()))
 	mediav1.RegisterMediaServiceServer(server, handler.New(svc, authv1.NewAuthServiceClient(auth)))
 	hs := health.NewServer()
 	healthpb.RegisterHealthServer(server, hs)

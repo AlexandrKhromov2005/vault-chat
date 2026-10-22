@@ -25,6 +25,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
@@ -53,6 +54,10 @@ func run() error {
 		return fmt.Errorf("listen metrics: %w", err)
 	}
 	defer stopMetrics()
+	rpcTLS, err := rpctls.Load("auth")
+	if err != nil {
+		return fmt.Errorf("configure RPC TLS: %w", err)
+	}
 
 	privatePEM, err := os.ReadFile(cfg.JWTPrivateKeyPath)
 	if err != nil {
@@ -104,12 +109,14 @@ func run() error {
 
 	// The interceptor puts the caller's request id into the context, and the
 	// shared logger adds it to every record logged with that context.
-	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(metrics.Unary(), requestid.UnaryServerInterceptor()))
+	grpcServer := grpc.NewServer(rpcTLS.ServerOption(), grpc.ChainStreamInterceptor(rpcTLS.Stream()), grpc.ChainUnaryInterceptor(metrics.Unary(), rpcTLS.Unary(), requestid.UnaryServerInterceptor()))
 	authv1.RegisterAuthServiceServer(grpcServer, handler.NewAuthGRPCHandler(svc))
 	// Standard gRPC health service: the gateway's readiness probe uses it.
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(grpcServer, healthServer)
-	reflection.Register(grpcServer)
+	if !rpcTLS.Enabled() {
+		reflection.Register(grpcServer)
+	}
 
 	go func() {
 		<-ctx.Done()

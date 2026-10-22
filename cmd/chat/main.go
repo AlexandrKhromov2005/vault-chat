@@ -14,7 +14,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -31,6 +30,7 @@ import (
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
@@ -57,6 +57,10 @@ func run() error {
 		return fmt.Errorf("listen metrics: %w", err)
 	}
 	defer stopMetrics()
+	rpcTLS, err := rpctls.Load("chat")
+	if err != nil {
+		return fmt.Errorf("configure RPC TLS: %w", err)
+	}
 	startup, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
 	pool, err := pgxpool.New(startup, cfg.DatabaseURL)
@@ -70,8 +74,8 @@ func run() error {
 	if err := migration.Apply(startup, pool, migrations.ChatFS, "chat"); err != nil {
 		return fmt.Errorf("migrate chat database: %w", err)
 	}
-	// Internal RPC is plaintext in development, as in Auth. mTLS is future work.
-	authConn, err := grpc.NewClient(cfg.AuthGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+	// Each client pins the expected service identity when mTLS is enabled.
+	authConn, err := rpcTLS.Dial(cfg.AuthGRPCAddr, "auth")
 	if err != nil {
 		return fmt.Errorf("create chat auth client: %w", err)
 	}
@@ -96,10 +100,10 @@ func run() error {
 	// Runs after the gRPC server stopped, so no request enqueues events any more.
 	defer closePublisher(publisher, cfg.EventDrainTimeout, logger)
 	rooms := repository.NewRoomRepository(pool, repository.WithNotifier(publisher))
-	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(metrics.Unary(), requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
+	server := grpc.NewServer(rpcTLS.ServerOption(), grpc.ChainStreamInterceptor(rpcTLS.Stream()), grpc.MaxRecvMsgSize(1<<20), grpc.ChainUnaryInterceptor(metrics.Unary(), rpcTLS.Unary(), requestid.UnaryServerInterceptor(), handler.UnaryTimeout(cfg.RequestTimeout)))
 	var messageOptions []service.MessageOption
 	if cfg.MediaGRPCAddr != "" {
-		conn, err := grpc.NewClient(cfg.MediaGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+		conn, err := rpcTLS.Dial(cfg.MediaGRPCAddr, "media")
 		if err != nil {
 			return fmt.Errorf("create chat media client: %w", err)
 		}
@@ -109,7 +113,9 @@ func run() error {
 	chatv1.RegisterChatServiceServer(server, handler.NewGRPCHandler(service.NewService(rooms), service.NewMessageService(rooms, messageOptions...), authv1.NewAuthServiceClient(authConn), logger))
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
-	reflection.Register(server)
+	if !rpcTLS.Enabled() {
+		reflection.Register(server)
+	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	logger.Info("chat service listening", "addr", cfg.GRPCAddr, "redis_addr", cfg.RedisAddr)

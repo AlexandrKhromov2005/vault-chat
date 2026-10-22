@@ -174,3 +174,43 @@ func FuzzIdentity(f *testing.F) {
 		}
 	})
 }
+
+type testStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s testStream) Context() context.Context { return s.ctx }
+func TestServiceMethodMatrixAndStreams(t *testing.T) {
+	for _, tt := range []struct {
+		server, caller, method string
+		ok                     bool
+	}{
+		{"media", "gateway", "/media.v1.MediaService/Upload", true},
+		{"media", "gateway", "/media.v1.MediaService/Download", true},
+		{"media", "chat", "/media.v1.MediaService/GetFile", true},
+		{"media", "chat", "/media.v1.MediaService/Download", false},
+		{"chat", "media", "/chat.v1.ChatService/GetRoom", true},
+		{"chat", "media", "/chat.v1.ChatService/SendMessage", false},
+		{"auth", "media", "/auth.v1.AuthService/ValidateToken", true},
+		{"auth", "media", "/auth.v1.AuthService/GetUser", false},
+		{"auth", "gateway", "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", false},
+		{"chat", "chat", "/grpc.health.v1.Health/Check", true},
+	} {
+		t.Run(tt.server+tt.caller+tt.method, func(t *testing.T) {
+			u, err := url.Parse("spiffe://vault-chat/service/" + tt.caller)
+			require.NoError(t, err)
+			cert := &x509.Certificate{URIs: []*url.URL{u}}
+			ctx := peer.NewContext(context.Background(), &peer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{cert}}, PeerCertificates: []*x509.Certificate{cert}}}})
+			c := &Config{service: tt.server, tls: &tls.Config{MinVersion: tls.VersionTLS13}}
+			called := false
+			err = c.Stream()(nil, testStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: tt.method}, func(any, grpc.ServerStream) error { called = true; return nil })
+			require.Equal(t, tt.ok, called)
+			if tt.ok {
+				require.NoError(t, err)
+			} else {
+				require.Equal(t, codes.PermissionDenied, status.Code(err))
+			}
+		})
+	}
+}

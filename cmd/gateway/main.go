@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
@@ -27,7 +25,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/web"
 )
@@ -64,13 +62,12 @@ func run() error {
 		return fmt.Errorf("listen metrics: %w", err)
 	}
 	defer stopMetrics()
+	rpcTLS, err := rpctls.Load("gateway")
+	if err != nil {
+		return fmt.Errorf("configure RPC TLS: %w", err)
+	}
 
-	// Service-to-service traffic is plaintext until mTLS lands
-	// (ARCHITECTURE.md section 3.3); the auth service does not serve TLS yet.
-	authConn, err := grpc.NewClient(cfg.AuthGRPCAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()),
-	)
+	authConn, err := rpcTLS.Dial(cfg.AuthGRPCAddr, "auth")
 	if err != nil {
 		return fmt.Errorf("failed to create auth client: %w", err)
 	}
@@ -78,7 +75,7 @@ func run() error {
 	authClient := authv1.NewAuthServiceClient(authConn)
 	authHealth := healthpb.NewHealthClient(authConn)
 
-	chatConn, err := grpc.NewClient(cfg.ChatGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+	chatConn, err := rpcTLS.Dial(cfg.ChatGRPCAddr, "chat")
 	if err != nil {
 		return fmt.Errorf("failed to create chat client: %w", err)
 	}
@@ -111,7 +108,7 @@ func run() error {
 	}
 	var mediaHandler *handler.MediaHandler
 	if cfg.MediaGRPCAddr != "" {
-		conn, err := grpc.NewClient(cfg.MediaGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
+		conn, err := rpcTLS.Dial(cfg.MediaGRPCAddr, "media")
 		if err != nil {
 			return fmt.Errorf("create media client: %w", err)
 		}
