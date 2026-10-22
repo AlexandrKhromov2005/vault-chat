@@ -14,7 +14,9 @@ const dialog = {
 };
 const channel = { room_id: 'r-team', kind: 'channel', name: 'Проект', owner_id: 'u-1', private: true, created_at: '2026-10-18T09:00:00Z' };
 
+// setup answers the history of every room these tests open with no messages.
 function setup(api, session = signedIn('u-1', 'alice')) {
+  for (const id of ['r-dialog', 'r-team', 'r-news']) api.on(`GET /api/v1/rooms/${id}/messages?limit=50`, { messages: [], next_cursor: '' });
   const document = loadPage();
   const workspace = new Workspace({ api, session, searchDelayMs: 0 });
   return { $: (id) => document.getElementById(id), workspace, session };
@@ -76,7 +78,7 @@ test('picking a found user opens a direct dialog', async () => {
   assert.deepEqual(texts($('user-results')), ['bob']);
   await click($('user-results').querySelector('button'));
 
-  assert.deepEqual(api.calls.at(-1), { key: 'POST /api/v1/rooms/direct', body: { peer_user_id: 'u-2' } });
+  assert.deepEqual(api.calls.find((call) => call.key === 'POST /api/v1/rooms/direct').body, { peer_user_id: 'u-2' });
   assert.deepEqual(roomNames($), ['bob']);
   assert.equal($('room').hidden, false);
   assert.equal($('room-title').textContent, 'bob');

@@ -13,6 +13,7 @@ export class Scope {
 
   constructor(api) {
     this.profiles = new Profiles(api);
+    this.timelines = new Map(); // room_id → Timeline of the rooms opened so far
   }
 
   get alive() {
