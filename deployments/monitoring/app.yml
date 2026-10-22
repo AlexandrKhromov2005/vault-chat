@@ -1,0 +1,14 @@
+# Optional overlay for the application project. Every published metrics port is loopback-only.
+services:
+  auth:
+    environment: {AUTH_METRICS_ADDR: ':9100'}
+    ports: ['127.0.0.1:${AUTH_METRICS_HOST_PORT:-9101}:9100']
+  chat:
+    environment: {CHAT_METRICS_ADDR: ':9100'}
+    ports: ['127.0.0.1:${CHAT_METRICS_HOST_PORT:-9102}:9100']
+  media:
+    environment: {MEDIA_METRICS_ADDR: ':9100'}
+    ports: ['127.0.0.1:${MEDIA_METRICS_HOST_PORT:-9103}:9100']
+  gateway:
+    environment: {GATEWAY_METRICS_ADDR: ':9100'}
+    ports: ['127.0.0.1:${GATEWAY_METRICS_HOST_PORT:-9104}:9100']

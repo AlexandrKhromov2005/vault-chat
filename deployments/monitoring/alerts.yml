@@ -1,0 +1,72 @@
+groups:
+  - name: vault-chat
+    rules:
+      - alert: ServiceMetricsUnavailable
+        expr: up{job=~"auth|chat|media|gateway|node|alertmanager|grafana|blackbox"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'Metrics unavailable for {{ $labels.job }}'}
+      - alert: DependencyUnavailable
+        expr: probe_success == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'Probe failed: {{ $labels.instance }}'}
+      - alert: GatewayHighErrorRate
+        expr: sum(rate(vault_http_requests_total{kind="api",status=~"5.."}[5m])) / clamp_min(sum(rate(vault_http_requests_total{kind="api"}[5m])), 0.001) > 0.1 and sum(increase(vault_http_requests_total{kind="api"}[5m])) >= 5
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'More than 10% API requests fail (at least 5 requests/5m)'}
+      - alert: GRPCHighErrorRate
+        expr: sum by (service) (rate(vault_grpc_requests_total{code=~"Internal|Unavailable|DeadlineExceeded|DataLoss"}[5m])) / clamp_min(sum by (service) (rate(vault_grpc_requests_total[5m])), 0.001) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'RPC errors exceed 10% in {{ $labels.service }}'}
+      - alert: RealtimeEventsLost
+        expr: increase(vault_events_dropped_total[5m]) + increase(vault_events_publish_failures_total[5m]) + increase(vault_events_encoding_failures_total[5m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: 'Realtime events were dropped or could not be published; clients must catch up'}
+      - alert: RealtimeQueueNearlyFull
+        expr: vault_event_queue_pending / vault_event_queue_capacity > 0.8
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Event queue remains above 80%'}
+      - alert: HostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Less than 10% host RAM available'}
+      - alert: HostDiskLow
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.15
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'Less than 15% free space on root disk'}
+      - alert: HostCPUHigh
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.9
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: 'Host CPU remains above 90%'}
+      - alert: BackupOverdue
+        expr: time() - vault_backup_last_success_timestamp_seconds > 93600
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'No successful local backup for 26 hours'}
+      - alert: BackupFailed
+        expr: vault_backup_last_attempt_success == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'Latest scheduled backup failed'}
+      - alert: OperationsMetricsStale
+        expr: time() - vault_operations_collected_timestamp_seconds > 300 or absent(vault_operations_collected_timestamp_seconds)
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Backup/certificate metrics have stopped updating'}
+      - alert: CertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'Served TLS certificate expires in less than 24 hours'}
+      - alert: CertificateRenewalFailed
+        expr: vault_certbot_last_attempt_success == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Latest automatic certificate renewal check failed'}
