@@ -13,6 +13,11 @@ backup_dir=$(realpath "$1")
 [ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$VAULT_PROJECT")" ] || {
     echo 'Project volumes already exist; restore into a fresh project' >&2; exit 1;
 }
+for volume in pgdata chat_pgdata media_pgdata redisdata miniodata; do
+    if docker volume inspect "${VAULT_PROJECT}_$volume" >/dev/null 2>&1; then
+        echo "Volume ${VAULT_PROJECT}_$volume already exists; refusing restore" >&2; exit 1
+    fi
+done
 python3 "$VAULT_ROOT/scripts/vps/archive.py" "$backup_dir"
 # No image pulls or builds while restoring: load the recorded images first.
 while IFS= read -r image; do docker image inspect "$image" >/dev/null; done < "$backup_dir/images.txt"
