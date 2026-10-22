@@ -55,6 +55,11 @@ export class Members {
     this.#show();
   }
 
+  // changed reloads the shown list after someone joined or left its room.
+  async changed(roomId) {
+    if (this.#visible && this.#room?.room_id === roomId) await this.#load();
+  }
+
   #clear() {
     $('member-list').replaceChildren();
     $('add-member-results').replaceChildren();

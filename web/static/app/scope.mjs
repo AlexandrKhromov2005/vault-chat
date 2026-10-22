@@ -16,6 +16,7 @@ export class Scope {
     this.profiles = new Profiles(api);
     this.timelines = new Map(); // room_id → Timeline of the rooms opened so far
     this.files = new FileInfos(api);
+    this.unread = new Set(); // room_ids with messages the user has not opened yet
   }
 
   get alive() {

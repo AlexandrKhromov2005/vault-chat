@@ -43,6 +43,44 @@ body {
   font-size: 18px;
 }
 
+.connection {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.connection::before {
+  content: "●";
+  margin-right: 4px;
+}
+
+.connection[data-state="live"]::before {
+  color: #2e9d58;
+}
+
+.connection[data-state="connecting"]::before,
+.connection[data-state="reconnecting"]::before {
+  color: #d99a1e;
+}
+
+.connection[data-state="failed"]::before,
+.connection[data-state="stopped"]::before {
+  color: var(--error);
+}
+
+.room-item.unread .room-name {
+  color: var(--accent);
+}
+
+.unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
 main {
   flex: 1;
   display: flex;

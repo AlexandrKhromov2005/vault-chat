@@ -1,13 +1,14 @@
 // The signed-in part of the client: the room list with user search and
 // channel creation, and the open room with its members.
 
-import { createChannel, listAllRooms, openDirect, roomTitle } from './chat.mjs';
+import { createChannel, getRoom, listAllRooms, openDirect, roomTitle } from './chat.mjs';
 import { Conversation } from './conversation.mjs';
 import { el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
 import { Members } from './members.mjs';
 import { Scope } from './scope.mjs';
 import { bindUserSearch } from './search.mjs';
+import { eventEffect, roomListChanges } from './sync.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,6 +20,7 @@ export class Workspace {
   #scope;
   #rooms = []; // the room list, most recently active first
   #current = null; // room_id of the open room
+  #listed = false; // whether the room list was loaded since sign-in
   #conversation;
   #members;
 
@@ -66,8 +68,11 @@ export class Workspace {
     return this.#session.user?.id;
   }
 
-  // refresh re-reads the room list and catches up every room whose messages
-  // are loaded.
+  // refresh resynchronizes the client, as docs/chat/realtime.md asks after
+  // every (re)connection: it re-reads the room list, dropping vanished rooms
+  // and marking new and active ones, then catches up every room whose
+  // messages are loaded. Events lost while disconnected are not replayed;
+  // this is how they are recovered.
   async refresh() {
     const scope = this.#scope;
     $('sidebar-error').textContent = '';
@@ -80,6 +85,25 @@ export class Workspace {
     await Promise.all([...scope.timelines.keys()].map((roomId) => this.#conversation.sync(scope, roomId)));
   }
 
+  // handleEvent applies a live event from the WebSocket.
+  async handleEvent(frame) {
+    const scope = this.#scope;
+    const effect = eventEffect(frame, this.#me);
+    switch (effect.kind) {
+      case 'message':
+        return this.#liveMessage(scope, effect.roomId, effect.message);
+      case 'joined':
+        return this.#joined(scope, effect.roomId);
+      case 'left':
+        if (this.#room(effect.roomId)) this.#lostRoom(effect.roomId);
+        return undefined;
+      case 'members':
+        return this.#members.changed(effect.roomId);
+      default:
+        return undefined;
+    }
+  }
+
   // reset forgets the signed-in user's data after sign-out. Work still under
   // way for that user finds its scope ended and drops its results.
   reset() {
@@ -87,6 +111,7 @@ export class Workspace {
     this.#scope = new Scope(this.#api);
     this.#rooms = [];
     this.#current = null;
+    this.#listed = false;
     this.#conversation.close();
     this.#members.close({ reset: true });
     $('room-list').replaceChildren();
@@ -107,7 +132,18 @@ export class Workspace {
     const rooms = await listAllRooms(this.#api);
     await this.#loadPeers(scope, rooms);
     if (!scope.alive) return;
+    const changes = roomListChanges(this.#rooms, rooms);
     this.#rooms = rooms;
+    if (this.#listed) {
+      for (const roomId of [...changes.added, ...changes.active]) {
+        if (roomId !== this.#current) scope.unread.add(roomId);
+      }
+    }
+    this.#listed = true;
+    for (const roomId of changes.removed) {
+      scope.unread.delete(roomId);
+      if (roomId !== this.#current) scope.timelines.delete(roomId);
+    }
     if (this.#current && !this.#room(this.#current)) {
       this.#lostRoom(this.#current);
       return;
@@ -130,15 +166,18 @@ export class Workspace {
   }
 
   #renderRooms() {
-    const profiles = this.#scope.profiles;
+    const { profiles, unread } = this.#scope;
     $('room-list').replaceChildren(...this.#rooms.map((room) =>
       el('li', {},
         el('button', {
           type: 'button',
-          class: room.room_id === this.#current ? 'room-item active' : 'room-item',
+          class: ['room-item', room.room_id === this.#current && 'active', unread.has(room.room_id) && 'unread']
+            .filter(Boolean).join(' '),
           onclick: () => this.#openRoom(room.room_id),
         },
-        el('span', { class: 'room-name' }, roomTitle(room, this.#me, profiles)),
+        el('span', { class: 'room-name' },
+          roomTitle(room, this.#me, profiles),
+          unread.has(room.room_id) ? el('span', { class: 'unread-dot', title: 'Новые сообщения' }) : null),
         el('span', { class: 'hint' }, kindName(room), room.last_message_at ? ` · ${formatTime(room.last_message_at)}` : ''),
         ),
       ),
@@ -150,6 +189,7 @@ export class Workspace {
   #lostRoom(roomId, notice = 'Комната больше недоступна: вы не её участник.') {
     this.#rooms = this.#rooms.filter((room) => room.room_id !== roomId);
     this.#scope.timelines.delete(roomId);
+    this.#scope.unread.delete(roomId);
     if (this.#current === roomId) {
       this.#current = null;
       this.#conversation.close();
@@ -169,10 +209,46 @@ export class Workspace {
     this.#renderRooms();
   }
 
+  #markUnread(roomId) {
+    const { unread } = this.#scope;
+    if (roomId === this.#current || unread.has(roomId)) return;
+    unread.add(roomId);
+    this.#renderRooms();
+  }
+
+  // #liveMessage applies a message.created event.
+  async #liveMessage(scope, roomId, message) {
+    if (!this.#room(roomId)) {
+      // A room this client has not listed yet, e.g. joined in another tab.
+      try {
+        await this.#loadRooms(scope);
+      } catch {
+        return; // the next resync settles it
+      }
+      if (!scope.alive || !this.#room(roomId)) return;
+    }
+    this.#touch(roomId, message.created_at);
+    await this.#conversation.live(scope, roomId, message);
+    if (scope.alive && message.sender_id !== this.#me) this.#markUnread(roomId);
+  }
+
+  // #joined lists a room the user was just added to.
+  async #joined(scope, roomId) {
+    if (this.#room(roomId)) return;
+    try {
+      // The event carries no metadata (docs/chat/realtime.md).
+      const room = await getRoom(this.#api, roomId);
+      if (await this.#addRoom(scope, room)) this.#markUnread(roomId);
+    } catch {
+      // Removed again meanwhile, or unreachable: the next resync settles it.
+    }
+  }
+
   async #openRoom(roomId) {
     const room = this.#room(roomId);
     if (!room) return;
     this.#current = roomId;
+    this.#scope.unread.delete(roomId);
     $('room-title').textContent = roomTitle(room, this.#me, this.#scope.profiles);
     $('room-kind').textContent = kindName(room);
     this.#showRoom(true);
