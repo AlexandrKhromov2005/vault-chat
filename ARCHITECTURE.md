@@ -339,7 +339,7 @@ Developer Machine:
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Go 1.26+ (toolchain go1.27.2) |
+| Language | Go 1.26+ (toolchain go1.27.3) |
 | API (external) | HTTP/2, REST, WebSocket |
 | API (internal) | gRPC (grpc-go) + Protocol Buffers (codegen via buf) |
 | Message Bus | NATS (or Redis Streams as fallback) |
