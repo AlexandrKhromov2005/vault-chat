@@ -75,6 +75,13 @@ func TestMutualTLSOverTCP(t *testing.T) {
 	a := newAuthority(t)
 	serverConfig := loadTest(t, "auth", a.issue(t, "auth", false))
 	gateway := loadTest(t, "gateway", a.issue(t, "gateway", false))
+	foreign := loadTest(t, "gateway", newAuthority(t).issue(t, "gateway", false))
+	foreign.tls.RootCAs = gateway.tls.RootCAs
+	unknown := loadTest(t, "gateway", a.issue(t, "gateway", false))
+	dir := a.issue(t, "intruder", false)
+	pair, e := tls.LoadX509KeyPair(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"))
+	require.NoError(t, e)
+	unknown.tls.Certificates = []tls.Certificate{pair}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	server := grpc.NewServer(serverConfig.ServerOption(), grpc.ChainUnaryInterceptor(serverConfig.Unary()), grpc.ChainStreamInterceptor(serverConfig.Stream()))
@@ -85,7 +92,7 @@ func TestMutualTLSOverTCP(t *testing.T) {
 		name, target string
 		cfg          *Config
 		ok           bool
-	}{{"valid", "auth", gateway, true}, {"wrong server identity", "chat", gateway, false}, {"foreign CA", "auth", loadTest(t, "gateway", newAuthority(t).issue(t, "gateway", false)), false}, {"expired client", "auth", loadTest(t, "gateway", a.issue(t, "gateway", true)), false}} {
+	}{{"valid", "auth", gateway, true}, {"wrong server identity", "chat", gateway, false}, {"foreign client CA", "auth", foreign, false}, {"unknown signed identity", "auth", unknown, false}, {"expired client", "auth", loadTest(t, "gateway", a.issue(t, "gateway", true)), false}} {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, err := tt.cfg.Dial(l.Addr().String(), tt.target)
 			require.NoError(t, err)
@@ -163,7 +170,7 @@ func FuzzIdentity(f *testing.F) {
 		name := identity(&x509.Certificate{URIs: []*url.URL{u}})
 		if name != "" {
 			require.Contains(t, []string{"auth", "chat", "media", "gateway"}, name)
-			require.Equal(t, "spiffe://vault-chat/service/"+name, raw)
+			require.Equal(t, "spiffe://vault-chat/service/"+name, u.String())
 		}
 	})
 }
