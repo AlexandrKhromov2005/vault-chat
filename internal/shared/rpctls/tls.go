@@ -12,13 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 )
 
 // Config holds an immutable certificate snapshot. Rotate leaves by restarting processes.
@@ -82,7 +83,7 @@ func identity(cert *x509.Certificate) string {
 
 // Dial verifies both the CA/DNS name and the exact service URI in the server leaf.
 func (c *Config) Dial(addr, target string) (*grpc.ClientConn, error) {
-	var creds credentials.TransportCredentials = insecure.NewCredentials()
+	creds := insecure.NewCredentials()
 	if c.Enabled() {
 		if !known(target) {
 			return nil, errors.New("unknown RPC target identity")
