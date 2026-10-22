@@ -41,6 +41,9 @@ export class Realtime extends EventTarget {
   #reconnectTimer = null;
   #reauthTimer = null;
   #lastAuthAt = 0;
+  // #run changes on every start and stop, so that a callback of an earlier
+  // run, still waiting for a refresh, does nothing once it resumes.
+  #run = 0;
 
   constructor({
     session,
@@ -63,11 +66,13 @@ export class Realtime extends EventTarget {
 
   start() {
     if (this.#state !== 'stopped' && this.#state !== 'failed') return;
+    this.#run++;
     this.#backoff.reset();
     this.#connect();
   }
 
   stop() {
+    this.#run++;
     this.#setState('stopped');
     this.#clearTimers();
     const socket = this.#socket;
@@ -149,19 +154,21 @@ export class Realtime extends EventTarget {
     }
     this.#setState('reconnecting');
 
+    const run = this.#run;
     let delay = this.#backoff.next();
     if (code === UNAUTHORIZED) {
       try {
         await this.#session.refresh();
         delay = 0;
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
+        if (run === this.#run && err instanceof ApiError && err.status === 401) {
           this.#setState('stopped');
           return;
         }
       }
     }
-    if (this.#state !== 'reconnecting') return; // stopped meanwhile
+    // Stopped, and maybe started again, while the token was refreshed.
+    if (run !== this.#run) return;
     this.#reconnectTimer = this.#timers.set(() => this.#connect(), delay);
   }
 
