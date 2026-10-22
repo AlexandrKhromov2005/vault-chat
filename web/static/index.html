@@ -53,7 +53,23 @@
     </section>
 
     <section id="workspace" class="workspace" hidden>
-      <p class="placeholder">Вы вошли. Комнаты и переписка появятся в следующих изменениях.</p>
+      <aside class="sidebar">
+        <div class="section-header">
+          <h2>Комнаты</h2>
+          <button id="refresh" type="button" title="Обновить комнаты">Обновить</button>
+        </div>
+        <ul id="room-list" class="list rooms"></ul>
+        <p id="sidebar-error" class="error" role="alert"></p>
+      </aside>
+
+      <p id="no-room" class="placeholder">Выберите комнату.</p>
+
+      <section id="room" class="room" hidden>
+        <header class="room-header">
+          <h2 id="room-title"></h2>
+          <span id="room-kind" class="hint"></span>
+        </header>
+      </section>
     </section>
   </main>
 </body>
