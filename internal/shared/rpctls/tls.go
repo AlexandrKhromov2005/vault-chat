@@ -12,13 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 )
 
 // Config holds an immutable certificate snapshot. Rotate leaves by restarting processes.

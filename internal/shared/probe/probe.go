@@ -7,12 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"io"
 	"net/http"
 	"os"
 
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 )
 
 // HTTP reports whether a GET request to url answers with a 2xx status.
