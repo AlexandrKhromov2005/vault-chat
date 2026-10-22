@@ -26,6 +26,9 @@ export class Conversation {
   #draft = newDraft();
   #sending = false;
   #downloadUrl = null; // object URL of the latest download
+  // #behind holds timelines that missed a live event or a resynchronization
+  // while their first page was loading; they catch up once it is in.
+  #behind = new WeakSet();
 
   // workspace provides scope(), me(), lostRoom(roomId) and
   // touch(roomId, at), which moves a room with a new message to the top.
@@ -63,7 +66,10 @@ export class Conversation {
     await this.#guard(scope, roomId, async () => {
       const timeline = this.#timeline(scope, roomId);
       if (timeline.loaded) await catchUp(this.#api, roomId, timeline);
-      else await loadLatest(this.#api, roomId, timeline);
+      else {
+        await loadLatest(this.#api, roomId, timeline);
+        if (this.#behind.delete(timeline)) await catchUp(this.#api, roomId, timeline);
+      }
       await this.#render(scope, roomId, { stick: true });
     });
     if (this.#isOpen(scope, roomId)) $('message-text').focus();
@@ -87,7 +93,7 @@ export class Conversation {
   // new ones arrived.
   async sync(scope, roomId) {
     const timeline = scope.timelines.get(roomId);
-    if (!timeline?.loaded) return 0;
+    if (!this.#ready(timeline)) return 0;
     const appended = await this.#guard(scope, roomId, () => catchUp(this.#api, roomId, timeline));
     if (appended) await this.#render(scope, roomId);
     return appended ?? 0;
@@ -97,12 +103,19 @@ export class Conversation {
   // are loaded.
   async live(scope, roomId, message) {
     const timeline = scope.timelines.get(roomId);
-    if (!timeline?.loaded) return;
+    if (!this.#ready(timeline)) return;
     const result = timeline.apply(message);
     if (result === 'duplicate' || result === 'stale') return;
     // A lost event left a hole before this message: fill it from history.
     if (result === 'gap') await this.#guard(scope, roomId, () => catchUp(this.#api, roomId, timeline));
     await this.#render(scope, roomId);
+  }
+
+  // #ready tells whether a timeline can take news now. One still loading its
+  // first page is marked to catch up once loaded instead.
+  #ready(timeline) {
+    if (timeline && !timeline.loaded) this.#behind.add(timeline);
+    return Boolean(timeline?.loaded);
   }
 
   #isOpen(scope, roomId) {
