@@ -43,3 +43,15 @@ probe_ready() {
     compose exec -T gateway /usr/local/bin/healthcheck \
         -http "${VAULT_READY_URL:-https://$(value PUBLIC_IP)/ready}" -timeout 5s
 }
+
+# Legacy binaries ignore TLS environment variables; validate them before boot/update.
+check_rpc_images() {
+    [ -f "$VAULT_ROOT/.env.rpc" ] || return 0
+    rpc_tag=${1:-$(value VAULT_IMAGE_TAG)}
+    for rpc_service in auth chat media gateway; do
+        docker run --rm --network none --entrypoint /usr/local/bin/healthcheck \
+            -e RPC_TLS_MODE=mtls -e RPC_TLS_SERVICE="$rpc_service" -e RPC_TLS_DIR=/run/secrets/rpc \
+            --mount "type=bind,src=$VAULT_ROOT/secrets/rpc/$rpc_service,dst=/run/secrets/rpc,readonly" \
+            "vault-chat/$rpc_service:$rpc_tag" -check-rpc-tls
+    done
+}

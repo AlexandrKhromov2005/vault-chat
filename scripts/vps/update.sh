@@ -10,6 +10,7 @@ case "$tag" in ''|*[!a-zA-Z0-9_.-]*) echo 'Invalid image tag' >&2; exit 1;; esac
 for service in auth chat media gateway minio; do
     docker image inspect "vault-chat/$service:$tag" >/dev/null
 done
+check_rpc_images "$tag"
 "$VAULT_ROOT/scripts/vps.sh" backup
 # Change only the image selector; never regenerate passwords or JWT keys.
 python3 - "$VAULT_ROOT/.env.vps" "$tag" <<'PY'
