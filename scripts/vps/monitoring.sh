@@ -23,10 +23,13 @@ case "${1:-status}" in
         compose up -d --no-build --wait
         systemctl daemon-reload
         python3 "$VAULT_ROOT/scripts/monitoring/operations.py"
-        systemctl enable --now vault-alert-journal.service vault-operations.timer vault-monitoring.service
+        systemctl enable --now vault-alert-journal.service vault-operations.timer
+        systemctl enable vault-monitoring.service
+        systemctl restart vault-alert-journal.service
+        systemctl restart vault-monitoring.service
         ;;
     up)
-        monitor_compose up -d --no-build
+        monitor_compose up -d --no-build --force-recreate
         python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT" ready
         ;;
     stop) monitor_compose stop;;

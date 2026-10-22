@@ -36,8 +36,8 @@ Node exporter получает readonly host rootfs/proc/sys и host PID/network
 ssh -L 13000:127.0.0.1:3000 -L 19090:127.0.0.1:9090 -L 19093:127.0.0.1:9093 root@YOUR_PUBLIC_IPV4
 ```
 
-Открыть `http://localhost:13000/`, пользователь `admin`. Пароль прочитать
-в своём SSH-терминале командой ниже; не отправлять его в общий чат:
+Открыть `http://localhost:13000/`, пользователь `admin`. Первоначальный пароль прочитать
+в своём SSH-терминале командой ниже (если изменён в UI, использовать новый); не отправлять его в общий чат:
 
 ```sh
 cat /opt/vault-chat/secrets/grafana_admin_password
