@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-22
+
 ### Добавлено
 
 - Наблюдаемость четырёх сервисов: private Prometheus HTTP/gRPC metrics,
