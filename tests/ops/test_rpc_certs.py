@@ -38,3 +38,25 @@ class Certificates(unittest.TestCase):
             with self.assertRaises(ValueError):
                 certs.issue(directory)
             self.assertEqual((ca / 'ca.key').read_text(), 'existing signing key')
+
+class DowngradeProtection(unittest.TestCase):
+    def test_update_rejects_legacy_image_before_changing_tag_or_backing_up(self):
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / '.env.vps').write_text('VAULT_IMAGE_TAG=v0.4.0\n')
+            (root / '.env.rpc').write_text('RPC_TLS_MODE=mtls\n')
+            bindir = root / 'bin'
+            bindir.mkdir()
+            (bindir / 'id').write_text('#!/bin/sh\necho 0\n')
+            (bindir / 'docker').write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$TRACE"\ncase "$*" in "image inspect "*) exit 0;; run*) exit 42;; *) exit 99;; esac\n')
+            for p in bindir.iterdir():
+                p.chmod(0o700)
+            env = dict(os.environ, VAULT_ROOT=directory, TRACE=str(root / 'trace'), PATH=str(bindir) + ':' + os.environ['PATH'])
+            env.pop('VAULT_LOCK_HELD', None)
+            result = subprocess.run(['sh', str(ROOT / 'scripts/vps/update.sh'), 'v0.3.0'], env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('-check-rpc-tls', (root / 'trace').read_text())
+            self.assertNotIn('compose', (root / 'trace').read_text())
+            self.assertEqual((root / '.env.vps').read_text(), 'VAULT_IMAGE_TAG=v0.4.0\n')

@@ -25,7 +25,7 @@ case "$command" in
         done
         docker build --network "${VAULT_BUILD_NETWORK:-default}" -f "$script_dir/../Dockerfile.minio" \
             -t "vault-chat/minio:$tag" "$script_dir/..";;
-    up) root_only; compose up -d --no-build --wait;;
+    up) root_only; check_rpc_images; compose up -d --no-build --wait;;
     status) compose ps;;
     install|update|backup|restore|tls|monitoring|mtls)
         root_only; exec "$script_dir/vps/$command.sh" "$@";;

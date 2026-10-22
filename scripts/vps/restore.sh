@@ -31,6 +31,7 @@ if [ -f "$VAULT_ROOT/.env.rpc" ]; then
     chmod 700 "$VAULT_ROOT/secrets/rpc-ca"
     chmod 600 "$VAULT_ROOT/secrets/rpc-ca/ca.key"
 fi
+check_rpc_images
 compose up -d --no-build --pull never --wait postgres chat-postgres media-postgres redis
 for user in auth chat media; do
     case "$user" in auth) service=postgres;; *) service="$user-postgres";; esac

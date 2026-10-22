@@ -16,7 +16,7 @@ case "${1:-status}" in
         for service in auth chat media gateway; do
             docker run --rm --network none --entrypoint /usr/local/bin/healthcheck \
                 -e RPC_TLS_MODE=mtls -e RPC_TLS_SERVICE="$service" -e RPC_TLS_DIR=/run/secrets/rpc \
-                -v "$VAULT_ROOT/secrets/rpc/$service:/run/secrets/rpc:ro" \
+                --mount "type=bind,src=$VAULT_ROOT/secrets/rpc/$service,dst=/run/secrets/rpc,readonly" \
                 "vault-chat/$service:$(value VAULT_IMAGE_TAG)" -check-rpc-tls
         done
         "$VAULT_ROOT/scripts/vps.sh" backup
