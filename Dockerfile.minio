@@ -11,6 +11,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/healthcheck ./cmd/healthcheck
 COPY internal/shared/probe ./internal/shared/probe
+COPY internal/shared/rpctls ./internal/shared/rpctls
+COPY internal/shared/requestid ./internal/shared/requestid
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck && mkdir /data
