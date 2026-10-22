@@ -67,6 +67,7 @@ registry потребуется отдельная настройка. Если 
 
 ```sh
 cd /opt/vault-chat
+scripts/vps.sh backup  # до замены Compose и scripts новым релизом
 git fetch origin --tags
 git checkout NEW_RELEASE_TAG
 scripts/vps.sh build NEW_RELEASE_TAG
