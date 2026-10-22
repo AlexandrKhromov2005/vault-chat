@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Chat · Сервер и эксплуатация</title>
+<link rel="stylesheet" href="/user/dashboards.css">
+<script defer src="/user/dashboards.js">
+</script>
+<header>
+<p>VAULT CHAT / PROMETHEUS</p>
+<h1>Сервер и эксплуатация</h1>
+<nav>
+<a href="/consoles/services.html">Сервисы и API</a> <a href="/consoles/realtime.html">Realtime</a> <a href="/consoles/operations.html">Сервер и эксплуатация</a> <a href="/targets">Targets</a>
+<a href="/alerts">Alerts</a>
+</nav>
+<label>Период <select id="period">
+<option value="900">15 минут</option>
+<option value="3600" selected>1 час</option>
+<option value="21600">6 часов</option>
+</select>
+</label>
+<p id="updated">Обновление каждые 30 секунд · rates рассчитаны за 5 минут</p>
+</header>
+<main>
+<section class="panel" data-query="1-avg(rate(node_cpu_seconds_total{mode=&quot;idle&quot;}[5m]))" data-unit="percentunit">
+<h2>Загрузка CPU</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Загрузка CPU">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="1-node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes" data-unit="percentunit">
+<h2>Использование RAM</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Использование RAM">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="node_filesystem_avail_bytes{mountpoint=&quot;/&quot;,fstype!~&quot;tmpfs|overlay&quot;}" data-unit="bytes">
+<h2>Свободное место на диске</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Свободное место на диске">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="time()-vault_backup_last_success_timestamp_seconds" data-unit="s">
+<h2>Возраст резервной копии</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Возраст резервной копии">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="probe_ssl_earliest_cert_expiry-time()" data-unit="s">
+<h2>До истечения TLS-сертификата</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="До истечения TLS-сертификата">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="probe_success" data-unit="short">
+<h2>Проверки зависимостей</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Проверки зависимостей">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="sum by(device)(rate(node_network_receive_bytes_total{device!=&quot;lo&quot;}[5m]))" data-unit="Bps">
+<h2>Сетевой трафик / с</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Сетевой трафик / с">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="rate(node_disk_io_time_seconds_total{device=~&quot;vd[a-z]+|sd[a-z]+|nvme[0-9]+n[0-9]+&quot;}[5m])" data-unit="percentunit">
+<h2>Диск занят I/O</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Диск занят I/O">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="{__name__=~&quot;vault_backup_last_attempt_success|vault_certbot_last_attempt_success&quot;}" data-unit="short">
+<h2>Задания backup и certbot</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Задания backup и certbot">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="ALERTS{alertstate=&quot;firing&quot;}" data-unit="short">
+<h2>Активные алерты</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Активные алерты">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+</main>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Chat · Realtime</title>
+<link rel="stylesheet" href="/user/dashboards.css">
+<script defer src="/user/dashboards.js">
+</script>
+<header>
+<p>VAULT CHAT / PROMETHEUS</p>
+<h1>Realtime</h1>
+<nav>
+<a href="/consoles/services.html">Сервисы и API</a> <a href="/consoles/realtime.html">Realtime</a> <a href="/consoles/operations.html">Сервер и эксплуатация</a> <a href="/targets">Targets</a>
+<a href="/alerts">Alerts</a>
+</nav>
+<label>Период <select id="period">
+<option value="900">15 минут</option>
+<option value="3600" selected>1 час</option>
+<option value="21600">6 часов</option>
+</select>
+</label>
+<p id="updated">Обновление каждые 30 секунд · rates рассчитаны за 5 минут</p>
+</header>
+<main>
+<section class="panel" data-query="{__name__=~&quot;vault_websocket_connections|vault_websocket_unauthenticated_connections&quot;}" data-unit="short">
+<h2>WebSocket: все / ожидают входа</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="WebSocket: все / ожидают входа">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="vault_event_queue_pending / vault_event_queue_capacity" data-unit="percentunit">
+<h2>Заполнение очереди</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Заполнение очереди">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="increase(vault_events_dropped_total[5m])+increase(vault_events_publish_failures_total[5m])+increase(vault_events_encoding_failures_total[5m])" data-unit="short">
+<h2>Потери и ошибки публикаций / 5 минут</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Потери и ошибки публикаций / 5 минут">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="rate(vault_events_published_total[5m])" data-unit="ops">
+<h2>Успешные публикации / с</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Успешные публикации / с">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="increase(vault_events_publish_failures_total[5m])" data-unit="short">
+<h2>Ошибки публикаций / 5 минут</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Ошибки публикаций / 5 минут">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="increase(vault_events_dropped_total[5m])" data-unit="short">
+<h2>Потери очереди / 5 минут</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Потери очереди / 5 минут">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+</main>
+</html>
