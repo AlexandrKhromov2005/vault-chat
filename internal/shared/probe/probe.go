@@ -7,11 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"io"
 	"net/http"
+	"os"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -38,10 +38,14 @@ func HTTP(ctx context.Context, url string) error {
 }
 
 // GRPC reports whether the standard gRPC health service at addr says the
-// server as a whole is SERVING. Internal traffic is plaintext until mTLS
-// lands (ARCHITECTURE.md section 3.3), so the probe connects without TLS.
+// server as a whole is SERVING, using the local service identity for mTLS.
 func GRPC(ctx context.Context, addr string) error {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	service := os.Getenv("RPC_TLS_SERVICE")
+	config, err := rpctls.Load(service)
+	if err != nil {
+		return err
+	}
+	conn, err := config.Dial(addr, service)
 	if err != nil {
 		return fmt.Errorf("create health client for %s: %w", addr, err)
 	}
