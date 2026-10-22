@@ -172,3 +172,37 @@ test('an added room answered after sign-out does not reach the next user', async
 
   assert.deepEqual(rooms($), [['Проект', false], ['Другой', false]]);
 });
+
+test('a live message that overtakes the first page of history is shown', async () => {
+  // Review of #80: the event arrived while the room's history was loading
+  // and was dropped; nothing fetched it afterwards.
+  const late = deferred();
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', () => late.promise)
+    .on('GET /api/v1/rooms/r-team/messages?limit=100&after=1', { messages: [msg(2)], next_cursor: '' });
+  const { $, workspace } = await setup(api);
+  await openRoom($, 'Проект');
+
+  await workspace.handleEvent(created(msg(2)));
+  late.resolve({ messages: [msg(1)], next_cursor: '' });
+  await settle();
+  await settle();
+
+  assert.deepEqual(shown($), ['#1', '#2']);
+});
+
+test('a resync while the first page of history loads is caught up afterwards', async () => {
+  const late = deferred();
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', () => late.promise)
+    .on('GET /api/v1/rooms/r-team/messages?limit=100&after=1', { messages: [msg(2)], next_cursor: '' });
+  const { $, workspace } = await setup(api);
+  await openRoom($, 'Проект');
+
+  await workspace.refresh();
+  late.resolve({ messages: [msg(1)], next_cursor: '' });
+  await settle();
+  await settle();
+
+  assert.deepEqual(shown($), ['#1', '#2']);
+});
