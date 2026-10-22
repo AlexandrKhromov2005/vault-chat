@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-22
+
 ### Добавлено
 
 - Внутренний mTLS с отдельными service identity и unary/stream RPC ACL,
