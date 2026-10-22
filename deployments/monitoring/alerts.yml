@@ -17,7 +17,7 @@ groups:
         labels: {severity: warning}
         annotations: {summary: 'More than 10% API requests fail (at least 5 requests/5m)'}
       - alert: GRPCHighErrorRate
-        expr: sum by (service) (rate(vault_grpc_requests_total{code=~"Internal|Unavailable|DeadlineExceeded|DataLoss",method!~"/grpc.health.*"}[5m])) / clamp_min(sum by (service) (rate(vault_grpc_requests_total{method!~"/grpc.health.*"}[5m])), 0.001) > 0.1
+        expr: sum by (service) (rate(vault_grpc_requests_total{code=~"Internal|Unavailable|DeadlineExceeded|DataLoss|Unknown",method!~"/grpc.health.*"}[5m])) / clamp_min(sum by (service) (rate(vault_grpc_requests_total{method!~"/grpc.health.*"}[5m])), 0.001) > 0.1
         for: 5m
         labels: {severity: warning}
         annotations: {summary: 'RPC errors exceed 10% in {{ $labels.service }}'}

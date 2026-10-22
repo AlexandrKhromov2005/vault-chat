@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-22
+
+### Добавлено
+
+- Наблюдаемость четырёх сервисов: private Prometheus HTTP/gRPC metrics,
+  latency, WebSocket slots, очередь и исходы публикаций; labels без ID/токенов.
+- Закрытый стек Prometheus/Grafana/Alertmanager, host и dependency probes,
+  готовый дашборд, алерты и локальные firing/resolved уведомления.
+- `vps.sh monitoring install`, автоматические backup/certbot signals и
+  `xmake monitoring` с promtool fixtures; необязательная Telegram-доставка
+  через private secret files.
+
 ## [0.2.0] — 2026-10-22
 
 ### Добавлено
