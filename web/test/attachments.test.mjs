@@ -213,6 +213,26 @@ test('a file the user can no longer access is marked unavailable', async () => {
   assert.equal($('message-list').querySelector('span.attachment').textContent, 'файл недоступен');
 });
 
+test('a file becomes downloadable when access comes back', async () => {
+  // Review of #76: after a 404 the file stayed unavailable for good, even
+  // once the user was invited back to the room.
+  let member = false;
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', { messages: [message(1, ['f-1'])], next_cursor: '' })
+    .on('GET /api/v1/rooms/r-team/messages?limit=100&after=1', noMessages)
+    .on('GET /api/v1/files/f-1', () => {
+      if (!member) throw new ApiError(404, 'not_found', 'file not found');
+      return info('f-1', 'отчёт.pdf');
+    });
+  const { $ } = await openTeam(api);
+  assert.equal($('message-list').querySelector('span.attachment').textContent, 'файл недоступен');
+
+  member = true;
+  await click($('room-list').querySelectorAll('button')[0]); // opened again after the invitation
+
+  assert.equal($('message-list').querySelector('button.attachment').textContent, '📎 отчёт.pdf · 1,5 КиБ');
+});
+
 test('an upload answered after sign-out does not reach the next user\'s draft', async () => {
   const late = deferred();
   const api = scripted().on(UPLOAD, () => late.promise);
