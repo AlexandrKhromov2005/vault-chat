@@ -42,6 +42,7 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 - Go `1.26+` (the `toolchain go1.27.3` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
 - `xmake` 2.8+ ([installation](https://xmake.io/#/guide/installation); on Ubuntu `apt install xmake`)
 - Docker with Compose v2, for the integration tests in `xmake ci`
+- Python 3.11+ and OpenSSL, for the deployment checks in `xmake ci`
 - `golangci-lint` v2.14.0+ built with Go 1.27+ ([installation](https://golangci-lint.run/usage/install/)); older releases or binaries built with an earlier Go fail to load this module
 - `govulncheck` built with Go 1.27+ (`go install` picks the toolchain from the tool's own `go.mod`, so set it explicitly: `GOTOOLCHAIN=go1.27.3 go install golang.org/x/vuln/cmd/govulncheck@latest`)
 - `git` with `user.name` and `user.email` configured

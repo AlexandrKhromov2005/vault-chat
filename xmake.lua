@@ -42,6 +42,7 @@ check("fmt", "Format the code with gofmt and goimports.", {{"golangci-lint", "fm
 check("fmt-check", "Check formatting without changing files.", {{"golangci-lint", "fmt", "--diff"}})
 check("vet", "Run go vet.", {{"go", "vet", "./..."}})
 check("lint", "Run golangci-lint.", {{"golangci-lint", "run"}})
+check("deployment", "Check VPS scripts, backup safety and Compose policy.", {{"sh", "scripts/check-deployment.sh"}})
 check("vuln", "Check reachable vulnerabilities with govulncheck.", {{"govulncheck", "./..."}})
 
 task("setup")
@@ -103,7 +104,7 @@ task("ci")
         import("core.project.task")
         local steps = {
             {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"test-integration"},
-            {"test-coverage"}, {"fuzz", {time = "10s"}}, {"vuln"},
+            {"test-coverage"}, {"deployment"}, {"fuzz", {time = "10s"}}, {"vuln"},
         }
         local timings = {}
         for _, step in ipairs(steps) do
