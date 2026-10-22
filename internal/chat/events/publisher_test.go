@@ -298,3 +298,20 @@ func TestPublisher_CloseGivesUpAfterItsDeadline(t *testing.T) {
 	require.Equal(t, uint64(3), publisher.Dropped(), "the held change and the queued ones are dropped")
 	require.Zero(t, gated.calls.Load())
 }
+
+func TestPublisher_MetricsDistinguishRedisAndEncodingFailures(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1, DialTimeout: 10 * time.Millisecond})
+	defer client.Close()
+	server.Close()
+	p := events.NewPublisher(client, slog.New(slog.NewTextHandler(io.Discard, nil)), events.WithQueueSize(4))
+	p.Notify(context.Background(), domain.Event{Kind: "invalid", Recipients: []string{uuid.NewString()}})
+	p.Notify(context.Background(), memberLeft(uuid.NewString()))
+	closePublisher(t, p)
+	stats := p.Stats()
+	require.Equal(t, uint64(1), stats.Failed)
+	require.Equal(t, uint64(1), stats.EncodingFailures)
+	require.Zero(t, stats.Published)
+	require.Zero(t, stats.Pending)
+	require.Equal(t, 4, stats.Capacity)
+}
