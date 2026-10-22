@@ -1,10 +1,11 @@
 // The signed-in part of the client: the room list with user search and
-// channel creation, and the open room.
+// channel creation, and the open room with its members.
 
 import { createChannel, listAllRooms, openDirect, roomTitle } from './chat.mjs';
 import { Conversation } from './conversation.mjs';
 import { el, formatTime } from './dom.mjs';
 import { describeError } from './errors.mjs';
+import { Members } from './members.mjs';
 import { Scope } from './scope.mjs';
 import { bindUserSearch } from './search.mjs';
 
@@ -19,6 +20,7 @@ export class Workspace {
   #rooms = []; // the room list, most recently active first
   #current = null; // room_id of the open room
   #conversation;
+  #members;
 
   constructor({ api, session, searchDelayMs = 300 }) {
     this.#api = api;
@@ -32,6 +34,17 @@ export class Workspace {
         lostRoom: (roomId) => this.#lostRoom(roomId),
         touch: (roomId, at) => this.#touch(roomId, at),
       },
+    });
+    this.#members = new Members({
+      api,
+      workspace: {
+        scope: () => this.#scope,
+        me: () => this.#me,
+        lostRoom: (roomId) => this.#lostRoom(roomId),
+        // Leaving was intended: the missing room needs no explanation.
+        leftRoom: (roomId) => this.#lostRoom(roomId, ''),
+      },
+      searchDelayMs,
     });
 
     bindUserSearch({
@@ -75,6 +88,7 @@ export class Workspace {
     this.#rooms = [];
     this.#current = null;
     this.#conversation.close();
+    this.#members.close({ reset: true });
     $('room-list').replaceChildren();
     $('user-results').replaceChildren();
     $('sidebar-error').textContent = '';
@@ -133,14 +147,15 @@ export class Workspace {
 
   // #lostRoom drops a room the user can no longer access: it was left, the
   // user was removed, or it never was theirs.
-  #lostRoom(roomId) {
+  #lostRoom(roomId, notice = 'Комната больше недоступна: вы не её участник.') {
     this.#rooms = this.#rooms.filter((room) => room.room_id !== roomId);
     this.#scope.timelines.delete(roomId);
     if (this.#current === roomId) {
       this.#current = null;
       this.#conversation.close();
+      this.#members.close();
       this.#showRoom(false);
-      $('sidebar-error').textContent = 'Комната больше недоступна: вы не её участник.';
+      $('sidebar-error').textContent = notice;
     }
     this.#renderRooms();
   }
@@ -162,6 +177,7 @@ export class Workspace {
     $('room-kind').textContent = kindName(room);
     this.#showRoom(true);
     this.#renderRooms();
+    this.#members.open(room);
     await this.#conversation.open(room);
   }
 

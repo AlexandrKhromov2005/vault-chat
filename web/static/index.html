@@ -86,6 +86,7 @@
         <header class="room-header">
           <h2 id="room-title"></h2>
           <span id="room-kind" class="hint"></span>
+          <button id="toggle-members" type="button" aria-pressed="false">Участники</button>
         </header>
         <div id="messages" class="messages">
           <button id="load-older" type="button" hidden>Показать более ранние</button>
@@ -99,6 +100,19 @@
           </div>
         </form>
       </section>
+
+      <aside id="members" class="members" hidden>
+        <h3>Участники</h3>
+        <ul id="member-list" class="list"></ul>
+        <div id="add-member" class="stack" hidden>
+          <label>Добавить участника
+            <input id="add-member-search" type="search" autocomplete="off" placeholder="Начало имени">
+          </label>
+          <ul id="add-member-results" class="list"></ul>
+        </div>
+        <button id="leave-room" type="button" hidden>Покинуть канал</button>
+        <p id="members-error" class="error" role="alert"></p>
+      </aside>
     </section>
   </main>
 </body>
