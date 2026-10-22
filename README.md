@@ -114,8 +114,10 @@ presence и уведомления. Также не реализованы mTLS 
 - `xmake.lua` и команды `xmake`, описанные в регламенте, пока не реализованы.
   Ниже приведены доступные команды Go и вспомогательных инструментов.
 
-`govulncheck` v1.9.0 с Go 1.27.2 и базой уязвимостей от 8 октября 2026 года
+`govulncheck` v1.9.0 с Go 1.27.3 и базой уязвимостей от 21 октября 2026 года
 не находит достижимых уязвимостей ни в стандартной библиотеке, ни в зависимостях.
+На Go 1.27.2 была достижима GO-2026-6809 в `crypto/x509` стандартной
+библиотеки, исправленная в Go 1.27.3.
 До обновления Go и зависимостей проверка на Go 1.23.4 находила 49 достижимых
 уязвимостей: 42 в стандартной библиотеке и 11 в модулях `golang.org/x/net`,
 `golang.org/x/text`, `google.golang.org/grpc` и `github.com/jackc/pgx/v5`
@@ -194,11 +196,11 @@ loopback; чтобы открыть его в сети (например, для
 Как устроены образы:
 
 - Один `Dockerfile` для всех сервисов: сервис выбирается аргументом сборки
-  `SERVICE`, версия Go — аргументом `GO_VERSION` (по умолчанию 1.27.2; держите
+  `SERVICE`, версия Go — аргументом `GO_VERSION` (по умолчанию 1.27.3; держите
   её равной строке `toolchain` в `go.mod`). Бинарники собираются статически
   (`CGO_ENABLED=0`, `-trimpath`).
 - Базовые образы закреплены: сборочный — точной версией Go и Alpine
-  (`golang:1.27.2-alpine3.24`), runtime — по digest. Новый digest берётся из
+  (`golang:1.27.3-alpine3.24`), runtime — по digest. Новый digest берётся из
   `docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot`.
 - Runtime-образ — `distroless/static` без shell, запуск от непривилегированного
   пользователя (uid 65532), корневая ФС только для чтения.
@@ -226,7 +228,7 @@ loopback; чтобы открыть его в сети (например, для
 ## Локальный запуск Auth, Chat и Gateway
 
 Нужны Go **1.26+**, Docker с Compose и OpenSSL. Для race-тестов нужен C-компилятор.
-В `go.mod` указан toolchain `go1.27.2`: при стандартном `GOTOOLCHAIN=auto` команда
+В `go.mod` указан toolchain `go1.27.3`: при стандартном `GOTOOLCHAIN=auto` команда
 `go` сама скачает и использует его, если локальная версия Go старше.
 Все команды выполняются из корня репозитория.
 
@@ -393,7 +395,7 @@ golangci-lint v2 и `govulncheck` должны быть собраны Go 1.27 �
 версию Go для сборки `govulncheck` нужно указать явно:
 
 ```sh
-GOTOOLCHAIN=go1.27.2 go install golang.org/x/vuln/cmd/govulncheck@latest
+GOTOOLCHAIN=go1.27.3 go install golang.org/x/vuln/cmd/govulncheck@latest
 ```
 
 Без переменных тестовых БД PostgreSQL integration-тесты пропускаются.

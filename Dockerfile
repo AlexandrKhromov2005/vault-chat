@@ -14,7 +14,7 @@
 # rebuild produces the same image: the builder by exact Go and Alpine
 # release, the runtime by digest (update the digest deliberately, e.g. from
 # `docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot`).
-ARG GO_VERSION=1.27.2
+ARG GO_VERSION=1.27.3
 ARG ALPINE_VERSION=3.24
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS build
