@@ -191,7 +191,8 @@ label {
   gap: 4px;
 }
 
-.room-item {
+.room-item,
+.user-item {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -201,7 +202,8 @@ label {
   border-color: transparent;
 }
 
-.room-item:hover {
+.room-item:hover,
+.user-item:hover {
   background: var(--bg);
 }
 
@@ -215,7 +217,25 @@ label {
   overflow-wrap: anywhere;
 }
 
+.new-channel summary {
+  cursor: pointer;
+  font-weight: 500;
+}
 
+.new-channel form {
+  margin-top: 8px;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+
+.checkbox input {
+  width: auto;
+}
 
 .room {
   display: flex;
