@@ -1,0 +1,57 @@
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - name: service failure requires two minutes and resolves on recovery
+    interval: 1m
+    input_series:
+      - series: 'up{job="auth",service="auth",instance="127.0.0.1:9101"}'
+        values: '0+0x3 1+0x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts:
+          - exp_labels: {job: auth, service: auth, instance: '127.0.0.1:9101', severity: critical}
+            exp_annotations: {summary: 'Metrics unavailable for auth'}
+      - eval_time: 5m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts: []
+  - name: Redis publication failure is visible even without queue overflow
+    interval: 1m
+    input_series:
+      - series: 'vault_events_dropped_total{service="chat"}'
+        values: '0+0x5'
+      - series: 'vault_events_publish_failures_total{service="chat"}'
+        values: '0 1+0x5'
+      - series: 'vault_events_encoding_failures_total{service="chat"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RealtimeEventsLost
+        exp_alerts:
+          - exp_labels: {service: chat, severity: warning}
+            exp_annotations: {summary: 'Realtime events were dropped or could not be published; clients must catch up'}
+  - name: missing backup becomes overdue after 26 hours
+    interval: 1m
+    input_series:
+      - series: vault_backup_last_success_timestamp_seconds
+        values: '0+0x1630'
+    alert_rule_test:
+      - eval_time: 27h
+        alertname: BackupOverdue
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: 'No successful local backup for 26 hours'}
+  - name: served certificate expiry is checked
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://example.com/ready"}'
+        values: '3600+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CertificateExpiring
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: 'https://example.com/ready'}
+            exp_annotations: {summary: 'Served TLS certificate expires in less than 24 hours'}

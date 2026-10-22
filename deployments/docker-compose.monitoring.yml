@@ -1,0 +1,94 @@
+# Separate monitoring project; private listeners only. See docs/monitoring.md.
+x-monitor: &monitor
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+services:
+  prometheus:
+    <<: *monitor
+    image: prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    network_mode: host
+    mem_limit: 256m
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.listen-address=127.0.0.1:${PROMETHEUS_PORT:-9090}
+      - --storage.tsdb.retention.time=3d
+      - --storage.tsdb.retention.size=512MB
+      - --query.max-concurrency=4
+    volumes:
+      - ./monitoring/runtime/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+  alertmanager:
+    <<: *monitor
+    image: prom/alertmanager@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    network_mode: host
+    mem_limit: 96m
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --web.listen-address=127.0.0.1:${ALERTMANAGER_PORT:-9093}
+      - --cluster.listen-address=
+    volumes:
+      - ./monitoring/runtime/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../secrets/monitoring:/run/secrets/monitoring:ro
+      - alertmanager_data:/alertmanager
+  node-exporter:
+    <<: *monitor
+    image: prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    network_mode: host
+    pid: host
+    mem_limit: 64m
+    command:
+      - --web.listen-address=127.0.0.1:${NODE_EXPORTER_PORT:-9100}
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($$|/)
+    volumes:
+      - type: bind
+        source: /
+        target: /host
+        read_only: true
+        bind: {propagation: rslave}
+      - /var/lib/vault-chat/metrics:/textfile:ro
+  blackbox:
+    <<: *monitor
+    image: prom/blackbox-exporter@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    mem_limit: 64m
+    command: [--config.file=/etc/blackbox/blackbox.yml]
+    ports: ['127.0.0.1:${BLACKBOX_PORT:-9115}:9115']
+    networks: [application]
+    volumes: ['./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro']
+  grafana:
+    <<: *monitor
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    network_mode: host
+    mem_limit: 384m
+    tmpfs: [/tmp]
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: ${GRAFANA_PORT:-3000}
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../secrets/grafana_admin_password:/run/secrets/grafana_admin_password:ro
+      - ./monitoring/runtime/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+networks:
+  application:
+    external: true
+    name: ${VAULT_PROJECT:-vault-chat}_default
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
