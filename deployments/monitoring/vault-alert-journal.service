@@ -1,0 +1,16 @@
+[Unit]
+Description=Local Vault Chat alert notifications
+After=network.target
+[Service]
+Type=simple
+DynamicUser=yes
+EnvironmentFile=/opt/vault-chat/.env.monitoring
+ExecStart=/usr/bin/python3 /usr/local/lib/vault-chat/alerts.py
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET
+[Install]
+WantedBy=multi-user.target

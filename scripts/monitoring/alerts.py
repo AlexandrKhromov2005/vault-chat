@@ -22,6 +22,13 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(5)
 
+    def do_GET(self):
+        if self.path != "/health":
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.end_headers()
+
     def do_POST(self):
         if self.path != '/alerts':
             self.send_error(404)

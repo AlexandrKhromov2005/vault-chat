@@ -1,0 +1,6 @@
+[Unit]
+Description=Collect Vault Chat backup and certificate job signals
+After=vault-chat.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vault-chat/scripts/monitoring/operations.py

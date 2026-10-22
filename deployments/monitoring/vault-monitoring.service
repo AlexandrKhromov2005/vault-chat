@@ -1,0 +1,15 @@
+[Unit]
+Description=Private Vault Chat monitoring
+Requires=docker.service vault-chat.service vault-alert-journal.service
+After=docker.service vault-chat.service vault-alert-journal.service
+PartOf=vault-chat.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/vault-chat
+ExecStart=/opt/vault-chat/scripts/vps.sh monitoring up
+ExecStop=/opt/vault-chat/scripts/vps.sh monitoring stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+[Install]
+WantedBy=multi-user.target

@@ -32,6 +32,7 @@ def settings(root):
 
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o755)
     temporary = path.with_suffix('.next')
     temporary.write_text(json.dumps(data, indent=2) + '\n')
     temporary.chmod(0o644)
@@ -98,7 +99,7 @@ def render(root):
 def ready(root):
     ports = settings(root)
     pending = {'PROMETHEUS_PORT': '/-/ready', 'ALERTMANAGER_PORT': '/-/ready', 'GRAFANA_PORT': '/api/health',
-               'BLACKBOX_PORT': '/-/healthy', 'NODE_EXPORTER_PORT': '/metrics'}
+               'BLACKBOX_PORT': '/-/healthy', 'NODE_EXPORTER_PORT': '/metrics', 'ALERT_JOURNAL_PORT': '/health'}
     for _ in range(60):
         for key, path in list(pending.items()):
             try:
