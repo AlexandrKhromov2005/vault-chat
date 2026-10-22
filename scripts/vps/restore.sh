@@ -24,6 +24,13 @@ while IFS= read -r image; do docker image inspect "$image" >/dev/null; done < "$
 tar --no-same-owner -C "$VAULT_ROOT" -xzf "$backup_dir/config.tar.gz"
 chmod 600 "$VAULT_ROOT/.env.vps"
 chown -R 65532:65532 "$VAULT_ROOT/secrets/tls"
+if [ -f "$VAULT_ROOT/.env.rpc" ]; then
+    chown -R 65532:65532 "$VAULT_ROOT/secrets/rpc"
+    chmod 700 "$VAULT_ROOT/secrets/rpc/"*
+    chmod 400 "$VAULT_ROOT/secrets/rpc/"*/tls.key
+    chmod 700 "$VAULT_ROOT/secrets/rpc-ca"
+    chmod 600 "$VAULT_ROOT/secrets/rpc-ca/ca.key"
+fi
 compose up -d --no-build --pull never --wait postgres chat-postgres media-postgres redis
 for user in auth chat media; do
     case "$user" in auth) service=postgres;; *) service="$user-postgres";; esac

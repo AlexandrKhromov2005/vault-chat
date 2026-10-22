@@ -27,7 +27,7 @@ case "$command" in
             -t "vault-chat/minio:$tag" "$script_dir/..";;
     up) root_only; compose up -d --no-build --wait;;
     status) compose ps;;
-    install|update|backup|restore|tls|monitoring)
+    install|update|backup|restore|tls|monitoring|mtls)
         root_only; exec "$script_dir/vps/$command.sh" "$@";;
-    *) echo 'Usage: scripts/vps.sh {init IP TAG|build TAG|install|up|status|update TAG|backup|restore BACKUP_DIR|tls|monitoring install/up/stop/status}' >&2; exit 2;;
+    *) echo 'Usage: scripts/vps.sh {init IP TAG|build TAG|install|up|status|update TAG|backup|restore BACKUP_DIR|tls|monitoring install/up/stop/status|mtls init/enable/rotate/status}' >&2; exit 2;;
 esac

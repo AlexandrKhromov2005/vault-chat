@@ -26,6 +26,7 @@ media_path=$(docker volume inspect "${VAULT_PROJECT}_miniodata" --format '{{.Mou
 tar -C "$media_path" -czf "$backup_dir/media-objects.tar.gz" .
 set -- .env.vps secrets deployments/docker-compose.vps.yml
 if [ -f "$VAULT_ROOT/.env.monitoring" ]; then set -- "$@" .env.monitoring deployments/monitoring/app.yml; fi
+if [ -f "$VAULT_ROOT/.env.rpc" ]; then set -- "$@" .env.rpc deployments/docker-compose.mtls.yml; fi
 tar -C "$VAULT_ROOT" -czf "$backup_dir/config.tar.gz" "$@"
 compose config --images > "$backup_dir/images.txt"
 cleanup

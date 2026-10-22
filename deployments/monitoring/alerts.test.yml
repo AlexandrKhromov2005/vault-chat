@@ -55,3 +55,16 @@ tests:
         exp_alerts:
           - exp_labels: {severity: critical, instance: 'https://example.com/ready'}
             exp_annotations: {summary: 'Served TLS certificate expires in less than 24 hours'}
+  - name: internal certificate expiry excludes plaintext services
+    interval: 1m
+    input_series:
+      - series: 'vault_rpc_certificate_not_after_timestamp_seconds{service="auth"}'
+        values: '3600+0x10'
+      - series: 'vault_rpc_certificate_not_after_timestamp_seconds{service="chat"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: InternalCertificateExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, service: auth}
+            exp_annotations: {summary: 'Internal RPC certificate expires in less than 14 days for auth'}

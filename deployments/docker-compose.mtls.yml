@@ -1,0 +1,46 @@
+# Optional mTLS overlay for development and VPS Compose.
+services:
+  auth:
+    environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_DIR: /run/secrets/rpc
+      RPC_TLS_SERVICE: auth
+    volumes:
+      - type: bind
+        source: ../secrets/rpc/auth
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  chat:
+    environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_DIR: /run/secrets/rpc
+      RPC_TLS_SERVICE: chat
+    volumes:
+      - type: bind
+        source: ../secrets/rpc/chat
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  media:
+    environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_DIR: /run/secrets/rpc
+      RPC_TLS_SERVICE: media
+    volumes:
+      - type: bind
+        source: ../secrets/rpc/media
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  gateway:
+    environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_DIR: /run/secrets/rpc
+      RPC_TLS_SERVICE: gateway
+    volumes:
+      - type: bind
+        source: ../secrets/rpc/gateway
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}

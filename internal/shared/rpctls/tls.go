@@ -26,6 +26,7 @@ import (
 type Config struct {
 	service string
 	tls     *tls.Config
+	expiry  float64
 }
 
 // Load permits plaintext only when explicitly selected or in the default local setup.
@@ -62,13 +63,17 @@ func Load(service string) (*Config, error) {
 	if identity(leaf) != service {
 		return nil, errors.New("RPC certificate does not identify this service")
 	}
+	c.expiry = float64(leaf.NotAfter.Unix())
 	c.tls = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}, RootCAs: roots, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert}
 	return c, nil
 }
 
 // Enabled reports whether mutual TLS and RPC authorization are enabled.
 func (c *Config) Enabled() bool { return c.tls != nil }
-func known(s string) bool       { return s == "auth" || s == "chat" || s == "media" || s == "gateway" }
+
+// CertificateExpiry is the loaded certificate expiry, or zero in plaintext mode.
+func (c *Config) CertificateExpiry() float64 { return c.expiry }
+func known(s string) bool                    { return s == "auth" || s == "chat" || s == "media" || s == "gateway" }
 func identity(cert *x509.Certificate) string {
 	if len(cert.URIs) != 1 {
 		return ""

@@ -75,3 +75,8 @@ groups:
         for: 2m
         labels: {severity: warning}
         annotations: {summary: 'Alertmanager could not deliver one or more notifications'}
+      - alert: InternalCertificateExpiring
+        expr: vault_rpc_certificate_not_after_timestamp_seconds > 0 and vault_rpc_certificate_not_after_timestamp_seconds - time() < 1209600
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Internal RPC certificate expires in less than 14 days for {{ $labels.service }}'}
