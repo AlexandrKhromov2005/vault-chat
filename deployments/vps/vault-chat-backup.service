@@ -1,0 +1,8 @@
+[Unit]
+Description=Consistent local Vault Chat backup
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/opt/vault-chat/scripts/vps.sh backup
+TimeoutStartSec=20min
