@@ -26,3 +26,6 @@ build/
 backups/
 .vps.lock
 __pycache__/
+
+.env.monitoring
+deployments/monitoring/runtime/

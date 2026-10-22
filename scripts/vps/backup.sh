@@ -24,7 +24,9 @@ for user in auth chat media; do
 done
 media_path=$(docker volume inspect "${VAULT_PROJECT}_miniodata" --format '{{.Mountpoint}}')
 tar -C "$media_path" -czf "$backup_dir/media-objects.tar.gz" .
-tar -C "$VAULT_ROOT" -czf "$backup_dir/config.tar.gz" .env.vps secrets deployments/docker-compose.vps.yml
+set -- .env.vps secrets deployments/docker-compose.vps.yml
+if [ -f "$VAULT_ROOT/.env.monitoring" ]; then set -- "$@" .env.monitoring deployments/monitoring/app.yml; fi
+tar -C "$VAULT_ROOT" -czf "$backup_dir/config.tar.gz" "$@"
 compose config --images > "$backup_dir/images.txt"
 cleanup
 paused_ids=''

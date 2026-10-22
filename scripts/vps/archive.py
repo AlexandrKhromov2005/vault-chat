@@ -32,7 +32,7 @@ def verify(root):
                 if p.is_absolute() or '..' in p.parts or not (member.isfile() or member.isdir()):
                     raise ValueError('Unsafe archive member')
                 if name == 'config.tar.gz' and not (
-                    p.as_posix() in {'.env.vps', 'deployments/docker-compose.vps.yml'}
+                    p.as_posix() in {'.env.vps', '.env.monitoring', 'deployments/docker-compose.vps.yml', 'deployments/monitoring/app.yml'}
                     or p.parts[:1] == ('secrets',)
                 ):
                     raise ValueError('Unexpected configuration path')
