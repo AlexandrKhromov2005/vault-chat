@@ -69,8 +69,11 @@ type Publisher struct {
 	mu     sync.RWMutex
 	closed bool
 
-	dropped     atomic.Uint64
-	lastDropLog atomic.Int64
+	failed           atomic.Uint64
+	published        atomic.Uint64
+	encodingFailures atomic.Uint64
+	dropped          atomic.Uint64
+	lastDropLog      atomic.Int64
 }
 
 // Option configures a Publisher.
@@ -135,6 +138,7 @@ func (p *Publisher) Notify(ctx context.Context, events ...domain.Event) {
 		}
 		payload, err := Encode(event)
 		if err != nil {
+			p.encodingFailures.Add(1)
 			p.logger.ErrorContext(ctx, "encode chat event failed", "kind", event.Kind, "error", err)
 			continue
 		}
@@ -208,12 +212,14 @@ func (p *Publisher) publish(queued change) {
 		return nil
 	})
 	if err == nil {
+		p.published.Add(uint64(len(queued.publications)))
 		return
 	}
 	if p.base.Err() != nil {
 		p.drop(queued, "shutdown timed out")
 		return
 	}
+	p.failed.Add(uint64(len(queued.publications)))
 	first := queued.publications[0]
 	p.logger.WarnContext(queued.ctx, "publish chat events failed", "kind", first.kind, "room_id", first.roomID,
 		"events", len(queued.publications), "error", err)
@@ -257,4 +263,15 @@ func Encode(event domain.Event) ([]byte, error) {
 		return nil, fmt.Errorf("marshal event: %w", err)
 	}
 	return payload, nil
+}
+
+// Stats is a race-safe, approximate scrape-time view of the event publisher.
+type Stats struct {
+	Pending, Capacity                            int
+	Dropped, Failed, Published, EncodingFailures uint64
+}
+
+// Stats distinguishes queue/shutdown losses from ambiguous Redis failures.
+func (p *Publisher) Stats() Stats {
+	return Stats{Pending: len(p.queue), Capacity: cap(p.queue), Dropped: p.dropped.Load(), Failed: p.failed.Load(), Published: p.published.Load(), EncodingFailures: p.encodingFailures.Load()}
 }

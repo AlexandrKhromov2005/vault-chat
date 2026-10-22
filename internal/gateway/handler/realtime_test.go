@@ -602,3 +602,15 @@ func TestRealtime_ConnectionHoldsItsSlotUntilClosed(t *testing.T) {
 	await(t, served, "the handler did not return after the close handshake")
 	dial(t, url)
 }
+
+func TestRealtime_MetricsTrackPendingAndClosedConnections(t *testing.T) {
+	h, url := startRealtimeHandler(t, realtime.NewHub(nopStream{}, 5, 8), tokens{"token": {"alice", time.Now().Add(time.Hour)}}, testOptions())
+	c := dial(t, url)
+	open, pending := h.ConnectionCounts()
+	require.Equal(t, 1, open)
+	require.Equal(t, 1, pending)
+	authenticate(t, c, "token")
+	require.Eventually(t, func() bool { open, pending = h.ConnectionCounts(); return open == 1 && pending == 0 }, time.Second, time.Millisecond)
+	require.NoError(t, c.Close(websocket.StatusNormalClosure, ""))
+	require.Eventually(t, func() bool { open, pending = h.ConnectionCounts(); return open == 0 && pending == 0 }, time.Second, time.Millisecond)
+}

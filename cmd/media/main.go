@@ -28,6 +28,7 @@ import (
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
@@ -46,6 +47,12 @@ func run() error {
 	slog.SetDefault(logger)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	metrics := telemetry.New("media")
+	stopMetrics, err := metrics.Listen(ctx, os.Getenv("MEDIA_METRICS_ADDR"))
+	if err != nil {
+		return fmt.Errorf("listen metrics: %w", err)
+	}
+	defer stopMetrics()
 	startup, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(startup, cfg.DatabaseURL)
@@ -79,7 +86,7 @@ func run() error {
 		return err
 	}
 	defer listener.Close()
-	server := grpc.NewServer(grpc.MaxRecvMsgSize(128<<10), grpc.UnaryInterceptor(requestid.UnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.MaxRecvMsgSize(128<<10), grpc.ChainUnaryInterceptor(metrics.Unary(), requestid.UnaryServerInterceptor()))
 	mediav1.RegisterMediaServiceServer(server, handler.New(svc, authv1.NewAuthServiceClient(auth)))
 	hs := health.NewServer()
 	healthpb.RegisterHealthServer(server, hs)

@@ -497,3 +497,11 @@ func (c *connection) write(ctx context.Context, frame []byte) error {
 	defer cancel()
 	return c.conn.Write(ctx, websocket.MessageText, frame)
 }
+
+// ConnectionCounts returns admitted connections and those awaiting authentication.
+// A slot remains counted until its connection has completely closed.
+func (h *Realtime) ConnectionCounts() (open, pending int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.open, h.unauthenticated
+}
