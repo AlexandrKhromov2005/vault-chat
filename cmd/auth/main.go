@@ -58,6 +58,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure RPC TLS: %w", err)
 	}
+	metrics.Gauge("vault_rpc_mtls_enabled", "Whether internal RPC requires mutual TLS.", func() float64 {
+		if rpcTLS.Enabled() {
+			return 1
+		}
+		return 0
+	})
+	metrics.Gauge("vault_rpc_certificate_not_after_timestamp_seconds", "Loaded internal certificate expiry; zero if mTLS is off.", rpcTLS.CertificateExpiry)
 
 	privatePEM, err := os.ReadFile(cfg.JWTPrivateKeyPath)
 	if err != nil {

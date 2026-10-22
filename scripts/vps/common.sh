@@ -4,14 +4,16 @@ VAULT_PROJECT=${VAULT_PROJECT:-vault-chat}
 case "$VAULT_PROJECT" in ''|*[!a-z0-9_-]*) echo 'Invalid VAULT_PROJECT' >&2; exit 1;; esac
 export VAULT_ROOT VAULT_PROJECT
 compose() {
-    if [ -f "$VAULT_ROOT/.env.monitoring" ]; then
-        docker compose -p "$VAULT_PROJECT" --env-file "$VAULT_ROOT/.env.vps" --env-file "$VAULT_ROOT/.env.monitoring" \
-            -f "$VAULT_ROOT/deployments/docker-compose.vps.yml" -f "$VAULT_ROOT/deployments/monitoring/app.yml" "$@"
-    else
-        docker compose -p "$VAULT_PROJECT" --env-file "$VAULT_ROOT/.env.vps" \
-            -f "$VAULT_ROOT/deployments/docker-compose.vps.yml" "$@"
+    if [ -f "$VAULT_ROOT/.env.rpc" ]; then
+        set -- -f "$VAULT_ROOT/deployments/docker-compose.mtls.yml" "$@"
     fi
+    if [ -f "$VAULT_ROOT/.env.monitoring" ]; then
+        set -- --env-file "$VAULT_ROOT/.env.monitoring" -f "$VAULT_ROOT/deployments/monitoring/app.yml" "$@"
+    fi
+    docker compose -p "$VAULT_PROJECT" --env-file "$VAULT_ROOT/.env.vps" \
+        -f "$VAULT_ROOT/deployments/docker-compose.vps.yml" "$@"
 }
+
 monitor_compose() {
     docker compose -p "$VAULT_PROJECT-monitoring" --env-file "$VAULT_ROOT/.env.vps" --env-file "$VAULT_ROOT/.env.monitoring" \
         -f "$VAULT_ROOT/deployments/docker-compose.monitoring.yml" "$@"
