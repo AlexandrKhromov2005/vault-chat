@@ -127,7 +127,7 @@ volumes выбранного проекта. Он проверяет checksum в
 
 На другом IP сначала получить сертификат для нового адреса и обновить
 `PUBLIC_IP`/TLS; сертификат старого IP не подходит. Для изолированных проверок
-допустимы `VAULT_ROOT`, `VAULT_PROJECT`, `VAULT_BACKUP_ROOT`: указать отдельные
+допустимы `VAULT_ROOT`, `VAULT_PROJECT`, `VAULT_BACKUP_ROOT`, `VAULT_READY_URL`: указать отдельные
 каталоги, проект, порты и TLS healthcheck в копии Compose. Systemd installer
 намеренно работает только с `/opt/vault-chat` и стандартным проектом.
 

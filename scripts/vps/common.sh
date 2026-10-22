@@ -27,3 +27,7 @@ lock_operations() {
         export VAULT_LOCK_HELD
     fi
 }
+probe_ready() {
+    compose exec -T gateway /usr/local/bin/healthcheck \
+        -http "${VAULT_READY_URL:-https://$(value PUBLIC_IP)/ready}" -timeout 5s
+}

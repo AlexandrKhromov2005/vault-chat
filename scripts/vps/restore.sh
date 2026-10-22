@@ -36,5 +36,5 @@ media_path=$(docker volume inspect "${VAULT_PROJECT}_miniodata" --format '{{.Mou
 tar --no-same-owner -C "$media_path" -xzf "$backup_dir/media-objects.tar.gz"
 chown -R 65532:65532 "$media_path"
 compose up -d --no-build --pull never --wait
-compose exec -T gateway /usr/local/bin/healthcheck -http "https://$(value PUBLIC_IP)/ready" -timeout 5s
+probe_ready
 echo 'Restore complete; configure HTTPS renewal on the target host with install'
