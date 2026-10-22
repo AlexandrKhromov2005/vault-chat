@@ -59,3 +59,82 @@ export function deferred() {
   });
   return { promise, resolve };
 }
+
+// flush lets pending promise callbacks run.
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+// FakeTimers runs scheduled callbacks when a test advances its clock. set,
+// clear and now stand in for the browser's timers and clock.
+export class FakeTimers {
+  #queue = [];
+  #nextId = 1;
+
+  constructor(now = 0) {
+    this.now = now;
+  }
+
+  set = (fn, ms) => {
+    const id = this.#nextId++;
+    this.#queue.push({ id, at: this.now + ms, fn });
+    return id;
+  };
+
+  clear = (id) => {
+    this.#queue = this.#queue.filter((timer) => timer.id !== id);
+  };
+
+  async advance(ms) {
+    const until = this.now + ms;
+    for (;;) {
+      this.#queue.sort((a, b) => a.at - b.at);
+      const due = this.#queue[0];
+      if (!due || due.at > until) break;
+      this.#queue.shift();
+      this.now = due.at;
+      due.fn();
+      await flush();
+    }
+    this.now = until;
+    await flush();
+  }
+
+  get pending() {
+    return this.#queue.length;
+  }
+}
+
+// FakeSocket plays the Gateway's side of one WebSocket connection.
+export class FakeSocket extends EventTarget {
+  sent = [];
+  closedWith = null;
+
+  constructor(url) {
+    super();
+    this.url = url;
+  }
+
+  send(data) {
+    this.sent.push(JSON.parse(data));
+  }
+
+  close(code) {
+    this.closedWith = code;
+  }
+
+  open() {
+    this.dispatchEvent(new Event('open'));
+  }
+
+  receive(frame) {
+    this.dispatchEvent(Object.assign(new Event('message'), { data: typeof frame === 'string' ? frame : JSON.stringify(frame) }));
+  }
+
+  serverClose(code) {
+    this.dispatchEvent(Object.assign(new Event('close'), { code }));
+  }
+
+  // fail reports a connection failure, such as an upgrade refused with 429.
+  fail() {
+    this.dispatchEvent(new Event('error'));
+  }
+}
