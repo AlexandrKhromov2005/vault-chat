@@ -1,0 +1,4 @@
+#!/bin/sh
+# Installed by `xmake setup`: the fast checks before every commit. The full
+# pipeline, `xmake ci`, runs before a push.
+xmake fmt-check && xmake vet && xmake lint
