@@ -17,9 +17,13 @@ services:
       - --storage.tsdb.retention.time=3d
       - --storage.tsdb.retention.size=512MB
       - --query.max-concurrency=4
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.user-assets=/etc/prometheus/user
     volumes:
       - ./monitoring/runtime/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./monitoring/consoles:/etc/prometheus/consoles:ro
+      - ./monitoring/user:/etc/prometheus/user:ro
       - prometheus_data:/prometheus
   alertmanager:
     <<: *monitor

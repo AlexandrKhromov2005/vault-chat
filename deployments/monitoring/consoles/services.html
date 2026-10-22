@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Chat · Сервисы и API</title>
+<link rel="stylesheet" href="/user/dashboards.css">
+<script defer src="/user/dashboards.js">
+</script>
+<header>
+<p>VAULT CHAT / PROMETHEUS</p>
+<h1>Сервисы и API</h1>
+<nav>
+<a href="/consoles/services.html">Сервисы и API</a> <a href="/consoles/realtime.html">Realtime</a> <a href="/consoles/operations.html">Сервер и эксплуатация</a> <a href="/targets">Targets</a>
+<a href="/alerts">Alerts</a>
+</nav>
+<label>Период <select id="period">
+<option value="900">15 минут</option>
+<option value="3600" selected>1 час</option>
+<option value="21600">6 часов</option>
+</select>
+</label>
+<p id="updated">Обновление каждые 30 секунд · rates рассчитаны за 5 минут</p>
+</header>
+<main>
+<section class="panel" data-query="up{job=~&quot;auth|chat|media|gateway&quot;}" data-unit="short">
+<h2>Доступность сервисов</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Доступность сервисов">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="sum(rate(vault_http_requests_total{kind=&quot;api&quot;}[5m]))" data-unit="reqps">
+<h2>HTTP-запросы / с</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="HTTP-запросы / с">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="(sum(rate(vault_http_requests_total{kind=&quot;api&quot;,status=~&quot;5..&quot;}[5m])) or vector(0)) / clamp_min(sum(rate(vault_http_requests_total{kind=&quot;api&quot;}[5m])),0.001)" data-unit="percentunit">
+<h2>Доля HTTP 5xx</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Доля HTTP 5xx">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="histogram_quantile(0.95,sum by(le)(rate(vault_http_request_duration_seconds_bucket{kind=&quot;api&quot;}[5m])))" data-unit="s">
+<h2>HTTP задержка p95</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="HTTP задержка p95">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="sum by(service)(rate(vault_grpc_requests_total{method!~&quot;/grpc.health.*&quot;}[5m]))" data-unit="reqps">
+<h2>RPC-запросы / с</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="RPC-запросы / с">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="histogram_quantile(0.95,sum by(service,le)(rate(vault_grpc_request_duration_seconds_bucket{method!~&quot;/grpc.health.*&quot;}[5m])))" data-unit="s">
+<h2>RPC задержка p95</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="RPC задержка p95">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="process_resident_memory_bytes{service=~&quot;auth|chat|media|gateway&quot;}" data-unit="bytes">
+<h2>Память приложений RSS</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Память приложений RSS">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="(sum by(service)(rate(vault_grpc_requests_total{code=~&quot;Internal|Unavailable|DeadlineExceeded|DataLoss|Unknown&quot;,method!~&quot;/grpc.health.*&quot;}[5m])) or on(service) (0 * sum by(service)(rate(vault_grpc_requests_total{method!~&quot;/grpc.health.*&quot;}[5m])))) / clamp_min(sum by(service)(rate(vault_grpc_requests_total{method!~&quot;/grpc.health.*&quot;}[5m])),0.001)" data-unit="percentunit">
+<h2>Доля неожиданных RPC-ошибок</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Доля неожиданных RPC-ошибок">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="sum by(service)(rate(go_gc_duration_seconds_count{service=~&quot;auth|chat|media|gateway&quot;}[5m]))" data-unit="ops">
+<h2>Сборка мусора / с</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Сборка мусора / с">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+<section class="panel" data-query="go_goroutines{service=~&quot;auth|chat|media|gateway&quot;}" data-unit="short">
+<h2>Goroutines</h2>
+<p class="status">Загрузка…</p>
+<svg viewBox="0 0 720 210" role="img" aria-label="Goroutines">
+</svg>
+<div class="legend">
+</div>
+<a class="query">Открыть запрос</a>
+</section>
+</main>
+</html>

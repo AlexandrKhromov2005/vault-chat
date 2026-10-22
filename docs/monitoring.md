@@ -141,3 +141,21 @@ monitoring install. Внешнее копирование данных прил�
 
 Проверки: `xmake monitoring` (private exposure + promtool fixtures),
 `xmake deployment` (ops/privacy/secrets), `xmake ci` (весь проект).
+
+## Тематические дашборды
+
+В Grafana, кроме общего обзора, доступны три дашборда в папке Vault Chat:
+
+- `/d/vault-chat-services` — запросы, ошибки, задержки, RSS, GC и goroutines.
+- `/d/vault-chat-realtime` — WebSocket, очередь, успешные публикации и ошибки Redis.
+- `/d/vault-chat-operations` — CPU/RAM/диск, сеть, backup, TLS и активные алерты.
+
+В Prometheus открыть `/consoles/index.html` (через туннель —
+`http://localhost:19090/consoles/index.html`). Там те же тематические страницы
+с графиками за 15 минут, час или 6 часов и ссылкой на каждый PromQL-запрос.
+Обновление раз в 30 секунд; rate использует окно 5 минут. Пустые данные
+показаны отдельно от нулевого значения. Приложения показывают только уже
+экспортируемые метрики; число пользователей и сообщений в БД не измеряется.
+Consoles и JS/CSS поставляются из этого репозитория без сторонних библиотек.
+В Prometheus 3 они подключаются явно через `web.console.templates` и
+`web.user-assets`; доступ остаётся только через loopback/SSH.
