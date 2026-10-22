@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { Api } from '../static/app/api.mjs';
 import { Session } from '../static/app/session.mjs';
 import { apiError, deferred, fakeFetch, memoryStorage } from './fakes.mjs';
 
@@ -245,4 +246,24 @@ test('the next account does not share the previous account refresh', async () =>
   late.resolve(tokenPair(2));
   await assert.rejects(aliceRefresh, { status: 401 });
   assert.equal(session.accessToken, 'access-bob-2');
+});
+
+test('a request of the previous account is not repeated for the next one', async () => {
+  // Review of #66, end to end: Alice's message, answered 401 after Bob
+  // signed in, must not be refreshed and sent again with Bob's token.
+  const late = deferred();
+  const { session, fetchFn } = newSession([tokenPair(1), me, () => late.promise, { status: 204 }, bobPair, bobMe]);
+  const api = new Api({ fetchFn, session });
+  await session.login('alice@example.com', 'password1');
+  const sending = api.call('POST', '/api/v1/rooms/r-1/messages', { body: { text: 'от Alice' } });
+  await new Promise((resolve) => setImmediate(resolve)); // the message is on its way
+
+  await session.logout();
+  await session.login('bob@example.com', 'password1');
+  late.resolve(apiError(401, 'unauthenticated', 'invalid or expired token'));
+
+  await assert.rejects(sending, { status: 401 });
+  assert.equal(fetchFn.calls.filter((call) => call.url === '/api/v1/rooms/r-1/messages').length, 1);
+  assert.equal(fetchFn.calls.filter((call) => call.url === '/api/v1/auth/refresh').length, 0);
+  assert.deepEqual(session.user, { id: 'u-2', username: 'bob' });
 });
