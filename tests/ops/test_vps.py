@@ -83,5 +83,31 @@ esac
             self.assertEqual(list((root / 'backups').glob('*/COMPLETE')), [])
 
 
+class RestoreProtection(unittest.TestCase):
+    def test_existing_volume_without_labels_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bindir = root / 'bin'
+            bindir.mkdir()
+            (bindir / 'id').write_text('#!/bin/sh\necho 0\n')
+            (bindir / 'docker').write_text("""#!/bin/sh
+case "$*" in
+    'volume ls'*) exit 0;;
+    'volume inspect vault-chat_pgdata') exit 0;;
+    *) exit 42;;
+esac
+""")
+            for script in bindir.iterdir():
+                script.chmod(0o700)
+            env = dict(os.environ, VAULT_ROOT=directory, VAULT_PROJECT='vault-chat',
+                       PATH=str(bindir) + ':' + os.environ['PATH'])
+            env.pop('VAULT_LOCK_HELD', None)
+            result = subprocess.run(['sh', str(ROOT / 'scripts/vps/restore.sh'), directory],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already exists', result.stderr)
+            self.assertFalse((root / '.env.vps').exists())
+
+
 if __name__ == '__main__':
     unittest.main()

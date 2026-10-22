@@ -17,9 +17,10 @@ case "$command" in
                 echo "Refusing to overwrite existing image $image" >&2; exit 1
             fi
         done
+        revision=$(git -C "$script_dir/.." rev-parse HEAD 2>/dev/null || cat "$script_dir/../DEPLOYED_COMMIT")
         for service in auth chat media gateway; do
             docker build --network "${VAULT_BUILD_NETWORK:-default}" --build-arg "SERVICE=$service" \
-                --label "org.opencontainers.image.revision=$(git -C "$script_dir/.." rev-parse HEAD)" \
+                --label "org.opencontainers.image.revision=${revision}" \
                 -t "vault-chat/$service:$tag" "$script_dir/.."
         done
         docker build --network "${VAULT_BUILD_NETWORK:-default}" -f "$script_dir/../Dockerfile.minio" \

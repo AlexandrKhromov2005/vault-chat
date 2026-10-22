@@ -13,6 +13,11 @@ backup_dir=$(realpath "$1")
 [ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$VAULT_PROJECT")" ] || {
     echo 'Project volumes already exist; restore into a fresh project' >&2; exit 1;
 }
+for volume in pgdata chat_pgdata media_pgdata redisdata miniodata; do
+    if docker volume inspect "${VAULT_PROJECT}_$volume" >/dev/null 2>&1; then
+        echo "Volume ${VAULT_PROJECT}_$volume already exists; refusing restore" >&2; exit 1
+    fi
+done
 python3 "$VAULT_ROOT/scripts/vps/archive.py" "$backup_dir"
 # No image pulls or builds while restoring: load the recorded images first.
 while IFS= read -r image; do docker image inspect "$image" >/dev/null; done < "$backup_dir/images.txt"
@@ -31,5 +36,5 @@ media_path=$(docker volume inspect "${VAULT_PROJECT}_miniodata" --format '{{.Mou
 tar --no-same-owner -C "$media_path" -xzf "$backup_dir/media-objects.tar.gz"
 chown -R 65532:65532 "$media_path"
 compose up -d --no-build --pull never --wait
-compose exec -T gateway /usr/local/bin/healthcheck -http "https://$(value PUBLIC_IP)/ready" -timeout 5s
+probe_ready
 echo 'Restore complete; configure HTTPS renewal on the target host with install'

@@ -24,5 +24,5 @@ os.replace(str(p)+'.next',p)
 PY
 compose up -d --no-build --wait
 # Probe dependencies as well as the listener. Health probe verifies the IP cert.
-compose exec -T gateway /usr/local/bin/healthcheck -http "https://$(value PUBLIC_IP)/ready" -timeout 5s
+probe_ready
 echo 'Update complete; the previous state is retained in the backup'
