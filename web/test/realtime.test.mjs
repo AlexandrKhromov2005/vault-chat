@@ -246,3 +246,59 @@ test('an error followed by close is handled once', async () => {
   assert.equal(t.sockets.length, 2);
   assert.equal(t.timers.pending, 0);
 });
+
+test('a late refresh of a stopped connection leaves the next one alone', async () => {
+  // Review of #79: Alice's connection closed with 4001 and its refresh was
+  // held back; after sign-out Bob's connection went live, and the refresh,
+  // rejected with 401, stopped Bob's connection for good.
+  let failRefresh;
+  const t = setup({
+    refresh: () => new Promise((_, reject) => {
+      failRefresh = reject;
+    }),
+  });
+  t.realtime.start();
+  await connect(t);
+  t.sockets[0].serverClose(4001);
+  await settle();
+
+  t.realtime.stop();
+  t.realtime.start();
+  await connect(t);
+  failRefresh(new ApiError(401, 'unauthenticated', 'Сессия уже завершена'));
+  await settle();
+
+  assert.equal(t.realtime.state, 'live');
+  t.sockets[1].serverClose(1001);
+  await settle();
+  await t.timers.advance(500);
+  assert.equal(t.sockets.length, 3);
+});
+
+test('a late refresh of a stopped connection does not open another one', async () => {
+  // The same with a refresh that succeeds while the next connection is
+  // itself reconnecting: only that connection's timer may reconnect.
+  let finishRefresh;
+  const t = setup({
+    refresh: () => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }),
+  });
+  t.realtime.start();
+  await connect(t);
+  t.sockets[0].serverClose(4001);
+  await settle();
+
+  t.realtime.stop();
+  t.realtime.start();
+  await connect(t);
+  t.sockets[1].serverClose(1001);
+  await settle();
+  finishRefresh('access-old');
+  await settle();
+  await t.timers.advance(0);
+
+  assert.equal(t.sockets.length, 2);
+  await t.timers.advance(500);
+  assert.equal(t.sockets.length, 3);
+});
