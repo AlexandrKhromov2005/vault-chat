@@ -42,10 +42,33 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 - Go `1.26+` (the `toolchain go1.27.3` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
 - `xmake` 2.8+ ([installation](https://xmake.io/#/guide/installation); on Ubuntu `apt install xmake`)
 - Docker with Compose v2, for the integration tests in `xmake ci`
-- Python 3.11+ and OpenSSL, for the deployment checks in `xmake ci`
-- `golangci-lint` v2.14.0+ built with Go 1.27+ ([installation](https://golangci-lint.run/usage/install/)); older releases or binaries built with an earlier Go fail to load this module
-- `govulncheck` built with Go 1.27+ (`go install` picks the toolchain from the tool's own `go.mod`, so set it explicitly: `GOTOOLCHAIN=go1.27.3 go install golang.org/x/vuln/cmd/govulncheck@latest`)
+- Python 3.11+, OpenSSL, `age` and `age-keygen`, for mandatory deployment/crypto checks
+- Node.js 22.23.4, for web tests
+- Buf 1.47.2, for protobuf lint
+- `golangci-lint` v2.14.0 built with Go 1.27.3
+- `govulncheck` v1.9.0 built with Go 1.27.3 (pin the toolchain explicitly)
 - `git` with `user.name` and `user.email` configured
+
+Install the pinned Go analyzers into the ignored project tool directory:
+
+```bash
+mkdir -p .tools/bin
+GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age@v1.3.1
+GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age-keygen@v1.3.1
+export PATH="$PWD/.tools/bin:$PATH"
+```
+
+The hooks and verification commands prefer `.tools/bin`; individual test tasks
+also use the exported PATH above. For Node 22.23.4, use the official
+[release artifacts](https://nodejs.org/dist/v22.23.4/) and verify the archive against
+`SHASUMS256.txt` before installing. Install the remaining tools
+through their official distributions, then run `xmake doctor` to catch missing or
+incompatible tools before expensive checks. This workflow requires local Unix
+Docker, not a remote Docker context.
+If the bridge cannot reach the Go proxy, see the explicit build-network option in
+[secure development](docs/security-development.md); it is part of the CI evidence.
 
 **Install dependencies and hooks:**
 
@@ -54,7 +77,8 @@ xmake setup
 ```
 
 This will install:
-- a `pre-commit` hook (`.githooks/pre-commit`) that runs `xmake fmt-check`, `xmake vet` and `xmake lint`
+- a `pre-commit` hook that scans staged Git blobs for secrets, then runs formatting, vet and lint
+- a `pre-push` hook that requires current commit-bound CI evidence for every pushed tip
 - project dependencies (`go mod download`)
 
 ### 3. Verify Everything Works
@@ -621,6 +645,10 @@ xmake ci              # run the complete local CI pipeline (see below);
 
 | Step | Command | Description |
 |------|---------|-------------|
+| Preflight | `xmake doctor` | Compatible pinned analyzers, Node, crypto and local Docker |
+| Secrets | `xmake secret-scan` | Tracked Git blobs; findings never print secret values |
+| Verification gates | `xmake dev-test` | Regression tests of stale/failed evidence and isolation |
+| Protobuf | `xmake proto` | Buf lint |
 | Format check | `xmake fmt-check` | Verify `gofmt` / `goimports` compliance |
 | Vet | `xmake vet` | `go vet` static analysis |
 | Lint | `xmake lint` | `golangci-lint` full suite |
@@ -632,9 +660,19 @@ xmake ci              # run the complete local CI pipeline (see below);
 
 `xmake test-integration` uses `VAULT_CHAT_TEST_DATABASE_URL`, `VAULT_CHAT_TEST_CHAT_DATABASE_URL`,
 `VAULT_CHAT_TEST_MEDIA_DATABASE_URL` and `VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT` when they are all set.
-Otherwise it starts `postgres` and `minio` from `deployments/docker-compose.yml` and creates the test
-databases `vault_chat_auth_test`, `vault_chat_chat_test` and `vault_chat_media_test` there; the tests
-clean their tables, so they never use the service databases.
+It fails if any endpoint is absent. Use `xmake ci` to provision disposable fixtures
+in a unique Docker project with ephemeral loopback ports; it never reuses the
+normal development Compose project or inherited test URLs.
+
+Commit first, then run `xmake ci` on a clean checkout. It tests a separate checkout
+of that exact commit without copying ignored `.env` or secrets, and writes local
+evidence only when source, tools and checks remain valid. Do not edit during CI.
+Use `xmake test` for uncommitted iterations. Push requires evidence less than 24
+hours old; publish the status with `python3 scripts/dev/verification.py publish`.
+The profile excludes the 10 live gateway web tests, Go `-tags compose` tests, a
+full remote backup/restore drill and production setup. Provide separate committed
+acceptance scenarios for changes affecting those boundaries. See
+[secure development](docs/security-development.md) for the trust limitations.
 
 **PRs with failing local CI are not reviewed and not merged.**
 
@@ -656,15 +694,17 @@ xmake build           # build every package
 xmake ci              # full local pipeline (see the table above)
 ```
 
-### Git Pre-Commit Hook
+### Git Hooks
 
-The `xmake setup` command installs a pre-commit hook with the fast checks: `xmake fmt-check`, `xmake vet` and
-`xmake lint`. The full `xmake ci` takes several minutes, so it is not a hook: run it yourself before pushing.
-You can skip the hook in emergencies (not recommended):
+`xmake setup` installs both hooks via `core.hooksPath=.githooks`. The commit hook
+checks staged secrets and fast Go checks. The push hook validates the exact pushed
+commits against local CI evidence; it does not start CI automatically. Missing,
+failed, expired or mismatched evidence requires a new `xmake ci` run.
 
-```bash
-git commit --no-verify   # skip hooks — use only in real emergencies
-```
+Do not bypass hooks or protection to finish a task. Another participant must
+approve the latest push; new pushes dismiss stale approvals. The guarded merge
+command is `python3 scripts/dev/verification.py merge <PR>` and has no admin
+fallback. Local evidence and the author-published status do not replace review.
 
 ---
 
@@ -727,7 +767,8 @@ git commit --no-verify   # skip hooks — use only in real emergencies
 
 - Never commit secrets: tokens, passwords, private keys.
 - Use `.env.example` instead of real `.env` files.
-- Check dependencies: `go list -m all | nancy sleuth`.
+- Check reachable dependency vulnerabilities: `xmake vuln`.
+- Follow [secure development](docs/security-development.md) and the PR security acceptance template.
 - If you find a vulnerability — contact maintainers privately via [SECURITY.md](SECURITY.md), do not open a public Issue.
 
 ---
@@ -736,7 +777,7 @@ git commit --no-verify   # skip hooks — use only in real emergencies
 
 - General questions — GitHub Discussions
 - Bugs and features — GitHub Issues
-- Urgent / private — Telegram / Discord (links in maintainer profiles)
+- Private security reports — [SECURITY.md](SECURITY.md)
 
 ---
 
