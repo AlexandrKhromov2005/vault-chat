@@ -18,6 +18,7 @@ func clearGatewayEnv(t *testing.T) {
 		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL", "GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "GATEWAY_WS_SEND_BUFFER",
 		"GATEWAY_WS_AUTH_TIMEOUT", "GATEWAY_WS_PING_INTERVAL", "GATEWAY_WS_WRITE_TIMEOUT",
 		"GATEWAY_WS_MAX_CONNECTIONS", "GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS",
+		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", "GATEWAY_AUTH_RATE_LIMIT_BURST",
 	} {
 		t.Setenv(key, "")
 	}
@@ -41,6 +42,8 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, 10*time.Second, cfg.RequestTimeout)
 		require.Equal(t, uint32(120), cfg.RateLimitPerMinute)
 		require.Equal(t, uint32(30), cfg.RateLimitBurst)
+		require.Equal(t, uint32(5), cfg.AuthRateLimitPerMinute)
+		require.Equal(t, uint32(5), cfg.AuthRateLimitBurst)
 		require.Equal(t, "info", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 5, SendBuffer: 64, AuthTimeout: 5 * time.Second, PingInterval: 30 * time.Second, WriteTimeout: 10 * time.Second,
@@ -62,6 +65,8 @@ func TestLoadGateway(t *testing.T) {
 		t.Setenv("GATEWAY_REQUEST_TIMEOUT", "3s")
 		t.Setenv("GATEWAY_RATE_LIMIT_PER_MINUTE", "600")
 		t.Setenv("GATEWAY_RATE_LIMIT_BURST", "50")
+		t.Setenv("GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", "20")
+		t.Setenv("GATEWAY_AUTH_RATE_LIMIT_BURST", "10")
 		t.Setenv("GATEWAY_LOG_LEVEL", "debug")
 		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "2")
 		t.Setenv("GATEWAY_WS_SEND_BUFFER", "16")
@@ -85,6 +90,8 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, 3*time.Second, cfg.RequestTimeout)
 		require.Equal(t, uint32(600), cfg.RateLimitPerMinute)
 		require.Equal(t, uint32(50), cfg.RateLimitBurst)
+		require.Equal(t, uint32(20), cfg.AuthRateLimitPerMinute)
+		require.Equal(t, uint32(10), cfg.AuthRateLimitBurst)
 		require.Equal(t, "debug", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 2, SendBuffer: 16, AuthTimeout: 2 * time.Second, PingInterval: 15 * time.Second, WriteTimeout: 4 * time.Second,
@@ -126,10 +133,12 @@ func TestLoadGateway(t *testing.T) {
 
 func TestLoadGateway_InvalidValues(t *testing.T) {
 	cases := map[string][]string{
-		"GATEWAY_MAX_BODY_BYTES":        {"0", "-1", "invalid", "4294967296"},
-		"GATEWAY_REQUEST_TIMEOUT":       {"0s", "-1s", "soon"},
-		"GATEWAY_RATE_LIMIT_PER_MINUTE": {"0", "-1", "many"},
-		"GATEWAY_RATE_LIMIT_BURST":      {"0", "-1", "many"},
+		"GATEWAY_MAX_BODY_BYTES":             {"0", "-1", "invalid", "4294967296"},
+		"GATEWAY_REQUEST_TIMEOUT":            {"0s", "-1s", "soon"},
+		"GATEWAY_RATE_LIMIT_PER_MINUTE":      {"0", "-1", "many"},
+		"GATEWAY_RATE_LIMIT_BURST":           {"0", "-1", "many"},
+		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE": {"0", "-1", "many", "65536"},
+		"GATEWAY_AUTH_RATE_LIMIT_BURST":      {"0", "-1", "many", "65536"},
 		// Per-connection queues are allocated upfront, so they are bounded.
 		"GATEWAY_WS_MAX_CONNECTIONS_PER_USER": {"0", "-1", "65536"},
 		"GATEWAY_WS_SEND_BUFFER":              {"0", "many", "65536"},

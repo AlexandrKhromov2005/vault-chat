@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -18,6 +19,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
 )
@@ -31,14 +33,16 @@ type MediaClient interface {
 
 // MediaHandler translates bounded file requests without publishing object URLs.
 type MediaHandler struct {
-	client MediaClient
-	logger *slog.Logger
-	slots  chan struct{}
+	client   MediaClient
+	logger   *slog.Logger
+	slots    chan struct{}
+	uploadMu sync.Mutex
+	uploads  map[string]int
 }
 
 // NewMediaHandler binds private Media RPCs.
 func NewMediaHandler(client MediaClient, logger *slog.Logger) *MediaHandler {
-	return &MediaHandler{client: client, logger: logger, slots: make(chan struct{}, 8)}
+	return &MediaHandler{client: client, logger: logger, slots: make(chan struct{}, 8), uploads: make(map[string]int)}
 }
 
 type fileResponse struct {
@@ -63,10 +67,29 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	identity, _ := middleware.IdentityFromContext(r.Context())
+	h.uploadMu.Lock()
+	if h.uploads[identity.UserID] >= 2 {
+		h.uploadMu.Unlock()
+		w.Header().Set("Retry-After", "1")
+		response.Error(w, http.StatusTooManyRequests, "rate_limited", "upload concurrency limit reached")
+		return
+	}
 	select {
 	case h.slots <- struct{}{}:
-		defer func() { <-h.slots }()
+		h.uploads[identity.UserID]++
+		h.uploadMu.Unlock()
+		defer func() {
+			h.uploadMu.Lock()
+			h.uploads[identity.UserID]--
+			if h.uploads[identity.UserID] == 0 {
+				delete(h.uploads, identity.UserID)
+			}
+			<-h.slots
+			h.uploadMu.Unlock()
+		}()
 	default:
+		h.uploadMu.Unlock()
 		response.Error(w, 503, "unavailable", "upload capacity reached")
 		return
 	}

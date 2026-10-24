@@ -12,21 +12,23 @@ import (
 // GatewayConfig holds the API gateway configuration. See .env.example for the
 // full list of GATEWAY_* variables.
 type GatewayConfig struct {
-	HTTPAddr           string
-	AuthGRPCAddr       string
-	ChatGRPCAddr       string
-	MediaGRPCAddr      string
-	RedisAddr          string
-	RedisPassword      string
-	TLSCertPath        string
-	TLSKeyPath         string
-	CORSAllowedOrigins []string
-	MaxBodyBytes       int64
-	RequestTimeout     time.Duration
-	RateLimitPerMinute uint32
-	RateLimitBurst     uint32
-	LogLevel           string
-	WebSocket          WebSocketConfig
+	HTTPAddr               string
+	AuthGRPCAddr           string
+	ChatGRPCAddr           string
+	MediaGRPCAddr          string
+	RedisAddr              string
+	RedisPassword          string
+	TLSCertPath            string
+	TLSKeyPath             string
+	CORSAllowedOrigins     []string
+	MaxBodyBytes           int64
+	RequestTimeout         time.Duration
+	RateLimitPerMinute     uint32
+	RateLimitBurst         uint32
+	AuthRateLimitPerMinute uint32
+	AuthRateLimitBurst     uint32
+	LogLevel               string
+	WebSocket              WebSocketConfig
 }
 
 // WebSocketConfig holds the limits of real-time connections (GATEWAY_WS_*).
@@ -84,6 +86,12 @@ func LoadGateway() (*GatewayConfig, error) {
 		return nil, err
 	}
 	if cfg.RateLimitBurst, err = uintEnv("GATEWAY_RATE_LIMIT_BURST", 30, 32); err != nil {
+		return nil, err
+	}
+	if cfg.AuthRateLimitPerMinute, err = uintEnv("GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", 5, 16); err != nil {
+		return nil, err
+	}
+	if cfg.AuthRateLimitBurst, err = uintEnv("GATEWAY_AUTH_RATE_LIMIT_BURST", 5, 16); err != nil {
 		return nil, err
 	}
 	if cfg.WebSocket, err = loadWebSocket(); err != nil {

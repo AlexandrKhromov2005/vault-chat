@@ -224,6 +224,10 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // failures are logged with their cause, which the client never sees.
 func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	statusCode, code, message := response.FromGRPC(err)
+	if statusCode == http.StatusTooManyRequests {
+		// Auth refills account admission at one attempt per minute.
+		w.Header().Set("Retry-After", "60")
+	}
 	if statusCode >= http.StatusInternalServerError {
 		h.logger.ErrorContext(r.Context(), "auth backend call failed", "operation", operation, "error", err)
 	}

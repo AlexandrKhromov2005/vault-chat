@@ -10,20 +10,26 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/ratelimit"
 )
 
 // Deps are the collaborators and settings the routes are built from.
 type Deps struct {
-	Auth               *handler.AuthHandler
-	Chat               *handler.ChatHandler
-	Media              *handler.MediaHandler
-	Health             *handler.Health
-	TokenValidator     middleware.TokenValidator
-	Limiter            middleware.Limiter
-	Logger             *slog.Logger
-	CORSAllowedOrigins []string
-	MaxBodyBytes       int64
-	RequestTimeout     time.Duration
+	Auth           *handler.AuthHandler
+	Chat           *handler.ChatHandler
+	Media          *handler.MediaHandler
+	Health         *handler.Health
+	TokenValidator middleware.TokenValidator
+	Limiter        middleware.Limiter
+	// AuthLimiter enforces the shared credential quota and fails closed.
+	// The process-local credential quota is always enforced as well.
+	AuthLimiter            middleware.Limiter
+	AuthRateLimitPerMinute uint32
+	AuthRateLimitBurst     uint32
+	Logger                 *slog.Logger
+	CORSAllowedOrigins     []string
+	MaxBodyBytes           int64
+	RequestTimeout         time.Duration
 	// Realtime serves WebSocket connections; nil disables the route.
 	Realtime http.Handler
 	// Web serves the browser client at "/" and "/app/"; nil disables it.
@@ -41,6 +47,24 @@ type Deps struct {
 // the request timeout and body limit; its upgrade is rate limited per IP,
 // and the connection authenticates in-band and checks origins itself.
 func New(d Deps) http.Handler {
+	perMinute, burst := d.AuthRateLimitPerMinute, d.AuthRateLimitBurst
+	if perMinute == 0 {
+		perMinute = 5
+	}
+	if burst == 0 {
+		burst = 5
+	}
+	credentialLimiter := ratelimit.NewMemoryLimiter(time.Minute/time.Duration(perMinute), int(burst), 4096)
+	credentialKey := func(r *http.Request) string { return "auth:" + middleware.ByClientIP(r) }
+	credentials := func(h http.HandlerFunc) http.Handler {
+		limits := []func(http.Handler) http.Handler{
+			middleware.RateLimit(credentialLimiter, credentialKey, d.Logger),
+		}
+		if d.AuthLimiter != nil {
+			limits = append(limits, middleware.RateLimitRequired(d.AuthLimiter, credentialKey, d.Logger))
+		}
+		return middleware.Chain(h, limits...)
+	}
 	protected := func(h http.HandlerFunc) http.Handler {
 		return middleware.Chain(h,
 			middleware.Authenticate(d.TokenValidator),
@@ -49,8 +73,8 @@ func New(d Deps) http.Handler {
 	}
 
 	api := http.NewServeMux()
-	api.HandleFunc("POST /api/v1/auth/register", d.Auth.Register)
-	api.HandleFunc("POST /api/v1/auth/login", d.Auth.Login)
+	api.Handle("POST /api/v1/auth/register", credentials(d.Auth.Register))
+	api.Handle("POST /api/v1/auth/login", credentials(d.Auth.Login))
 	api.HandleFunc("POST /api/v1/auth/refresh", d.Auth.Refresh)
 	api.HandleFunc("POST /api/v1/auth/logout", d.Auth.Logout)
 	api.Handle("GET /api/v1/auth/me", protected(d.Auth.Me))

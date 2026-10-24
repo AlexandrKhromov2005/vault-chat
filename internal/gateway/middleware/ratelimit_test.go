@@ -3,8 +3,10 @@ package middleware_test
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -106,7 +108,10 @@ func TestKeyFuncs(t *testing.T) {
 	}
 
 	require.Equal(t, "ip:203.0.113.7", middleware.ByClientIP(request("203.0.113.7:5555")))
-	require.Equal(t, "ip:::1", middleware.ByClientIP(request("[::1]:5555")))
+	require.Equal(t, "ip:::/64", middleware.ByClientIP(request("[::1]:5555")))
+	require.Equal(t, "ip:2001:db8:1234:5678::/64", middleware.ByClientIP(request("[2001:db8:1234:5678::1]:5555")))
+	require.Equal(t, "ip:2001:db8:1234:5678::/64", middleware.ByClientIP(request("[2001:0db8:1234:5678::abcd]:5555")))
+	require.Equal(t, "ip:203.0.113.7", middleware.ByClientIP(request("[::ffff:203.0.113.7]:5555")))
 	require.Equal(t, "ip:pipe", middleware.ByClientIP(request("pipe")))
 
 	anonymous := request("203.0.113.7:5555")
@@ -115,4 +120,43 @@ func TestKeyFuncs(t *testing.T) {
 	authenticated := anonymous.WithContext(
 		middleware.WithIdentity(context.Background(), middleware.Identity{UserID: "u-1"}))
 	require.Equal(t, "user:u-1", middleware.ByUserID(authenticated))
+}
+
+func TestRequiredRateLimitRejectsUnavailableRedis(t *testing.T) {
+	limiter := mocks.NewMockLimiter(t)
+	limiter.EXPECT().Allow(mock.Anything, mock.Anything).
+		Return(ratelimit.Result{}, errors.New("redis down"))
+	logger, _ := newLogger()
+	called := false
+	h := middleware.RateLimitRequired(limiter, middleware.ByClientIP, logger)(http.HandlerFunc(
+		func(http.ResponseWriter, *http.Request) { called = true }))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
+	require.False(t, called)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func FuzzClientIP(f *testing.F) {
+	for _, input := range []string{"2001:db8:1234:5678::abcd", "::ffff:203.0.113.7", "127.0.0.1", "::1", "fe80::1%eth0", "bad"} {
+		f.Add(input)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = input
+		key := middleware.ByClientIP(r)
+		require.NotEmpty(t, key)
+		addr, err := netip.ParseAddr(input)
+		if err != nil {
+			return
+		}
+		// netip accepts arbitrary zone strings, including ']', which cannot
+		// form a bracketed host:port. Zones do not contribute to our quota.
+		r.RemoteAddr = net.JoinHostPort(addr.WithZone("").String(), "1234")
+		require.Equal(t, key, middleware.ByClientIP(r), "ports cannot change the quota")
+		addr = addr.Unmap().WithZone("")
+		if addr.Is6() {
+			r.RemoteAddr = netip.PrefixFrom(addr, 64).Masked().Addr().Next().String()
+			require.Equal(t, key, middleware.ByClientIP(r), "addresses in one /64 share the quota")
+		}
+	})
 }

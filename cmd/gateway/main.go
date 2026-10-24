@@ -96,6 +96,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to init rate limiter: %w", err)
 	}
+	credentialLimiter, err := ratelimit.NewRedisLimiter(redisClient, cfg.AuthRateLimitPerMinute, cfg.AuthRateLimitBurst)
+	if err != nil {
+		return fmt.Errorf("failed to init credential rate limiter: %w", err)
+	}
 
 	// Every instance subscribes to the event channels of its own WebSocket
 	// users on the same Redis; nothing is shared between instances.
@@ -141,18 +145,21 @@ func run() error {
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: metrics.HTTP(router.New(router.Deps{
-			Auth:               handler.NewAuthHandler(authClient, logger),
-			Chat:               handler.NewChatHandler(chatClient, logger),
-			Health:             health,
-			Media:              mediaHandler,
-			TokenValidator:     authClient,
-			Limiter:            limiter,
-			Logger:             logger,
-			CORSAllowedOrigins: cfg.CORSAllowedOrigins,
-			MaxBodyBytes:       cfg.MaxBodyBytes,
-			RequestTimeout:     cfg.RequestTimeout,
-			Realtime:           websockets,
-			Web:                handler.NewWebApp(web.Files()),
+			Auth:                   handler.NewAuthHandler(authClient, logger),
+			Chat:                   handler.NewChatHandler(chatClient, logger),
+			Health:                 health,
+			Media:                  mediaHandler,
+			TokenValidator:         authClient,
+			Limiter:                limiter,
+			AuthLimiter:            credentialLimiter,
+			AuthRateLimitPerMinute: cfg.AuthRateLimitPerMinute,
+			AuthRateLimitBurst:     cfg.AuthRateLimitBurst,
+			Logger:                 logger,
+			CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
+			MaxBodyBytes:           cfg.MaxBodyBytes,
+			RequestTimeout:         cfg.RequestTimeout,
+			Realtime:               websockets,
+			Web:                    handler.NewWebApp(web.Files()),
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Backstop only: API request bodies are cut off at the request

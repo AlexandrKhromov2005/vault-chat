@@ -9,6 +9,7 @@ import (
 	_ "image/jpeg" // Register the supported image decoder.
 	_ "image/png"  // Register the supported image decoder.
 	"net/http"
+	"path"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -28,15 +29,39 @@ var (
 
 // Filename permits display names only; names never become storage paths.
 func Filename(name string) error {
-	if name == "" || len(name) > 255 || !utf8.ValidString(name) || strings.TrimSpace(name) != name || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+	if name == "" || len(name) > 255 || !utf8.ValidString(name) || strings.TrimSpace(name) != name || name == "." || strings.HasSuffix(name, ".") || strings.ContainsAny(name, `/\:`) {
 		return ErrInvalidFile
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return ErrInvalidFile
 		}
 	}
 	return nil
+}
+
+// DownloadFilename binds the extension to the detected type, including for
+// files stored before this rule existed. Unsafe legacy names get a fallback.
+func DownloadFilename(name, typ string) string {
+	ext := ".txt"
+	switch typ {
+	case "image/png":
+		ext = ".png"
+	case "image/jpeg":
+		ext = ".jpg"
+	case "application/pdf":
+		ext = ".pdf"
+	}
+	if Filename(name) == nil {
+		current := strings.ToLower(path.Ext(name))
+		if current == ext || (typ == "image/jpeg" && current == ".jpeg") {
+			return name
+		}
+		if len(name)+len(ext) <= 255 {
+			return name + ext
+		}
+	}
+	return "attachment" + ext
 }
 
 // Content derives the type from bytes, never the client's Content-Type.

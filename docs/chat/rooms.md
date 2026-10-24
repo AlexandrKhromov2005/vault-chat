@@ -30,8 +30,8 @@ Chat database, never to the Auth database. `cmd/chat` applies these migrations o
 startup. Compose provides a separate `chat-postgres` instance on port 5433. Chat
 uses `CHAT_DATABASE_URL`; its unary requests are bounded by
 `CHAT_REQUEST_TIMEOUT` (10 seconds by default), including Auth and PostgreSQL.
-An earlier caller deadline takes precedence. Internal RPC is plaintext for now;
-mTLS remains a separate implementation task.
+An earlier caller deadline takes precedence. Internal RPC supports the optional
+[mTLS overlay](../mtls.md); without it, RPC uses plaintext.
 
 ## Room rules
 
@@ -90,7 +90,9 @@ check membership in the same statement as the data they return. A removed
 member loses access to metadata, history, sending
 and the roster as soon as the change commits, and the room disappears from
 their list. A former member can be invited again and then sees the whole
-history.
+history. The first invitation also grants the complete room history, including
+messages and attachments from before the user joined; enrollment time is not a
+history visibility boundary.
 
 ## Room list
 

@@ -106,6 +106,11 @@ func TestUserRepository_Create_Duplicates(t *testing.T) {
 	sameUsername.Username = user.Username
 	err = repo.Create(ctx, sameUsername)
 	require.ErrorIs(t, err, repository.ErrUsernameTaken)
+
+	sameUsername.ID = uuid.NewString()
+	sameUsername.Username = strings.ToUpper(user.Username)
+	err = repo.Create(ctx, sameUsername)
+	require.ErrorIs(t, err, repository.ErrUsernameTaken)
 }
 
 func TestUserRepository_GetByID(t *testing.T) {
@@ -130,7 +135,7 @@ func TestUserRepository_SearchByUsernamePrefix(t *testing.T) {
 	repo := newTestRepository(t)
 	ctx := context.Background()
 	ids := map[string]string{}
-	for _, name := range []string{"bobby", "Bob", "bob", "bo_b", "boxb", "bob-x", "alice", "BOBCAT"} {
+	for _, name := range []string{"bobby", "Bob", "bo_b", "boxb", "bob-x", "alice", "BOBCAT"} {
 		user := newTestUser()
 		user.Username = name
 		require.NoError(t, repo.Create(ctx, user))
@@ -151,7 +156,7 @@ func TestUserRepository_SearchByUsernamePrefix(t *testing.T) {
 	}
 
 	// Case-insensitive, exact matches first, the excluded caller is skipped.
-	require.Equal(t, []string{"Bob", "bob", "bob-x", "bobby"}, search("BOB", ids["BOBCAT"], 10))
+	require.Equal(t, []string{"Bob", "bob-x", "bobby"}, search("BOB", ids["BOBCAT"], 10))
 	require.Equal(t, []string{"bo_b", "Bob"}, search("b", uuid.NewString(), 2))
 	// LIKE metacharacters are literal.
 	require.Equal(t, []string{"bo_b"}, search("bo_", uuid.NewString(), 10))
@@ -222,4 +227,32 @@ func TestMigrate_Idempotent(t *testing.T) {
 
 	require.NoError(t, repository.Migrate(ctx, pool, migrations.AuthFS, "auth"))
 	require.NoError(t, repository.Migrate(ctx, pool, migrations.AuthFS, "auth"))
+}
+
+func TestUsernameMigrationPreservesExistingCaseCollisions(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Recreate the old uniqueness rule inside a rollback-only transaction.
+	_, err = tx.Exec(ctx, `DROP INDEX users_username_casefold_unique;
+CREATE UNIQUE INDEX users_username_unique ON users (username)`)
+	require.NoError(t, err)
+	for _, name := range []string{"Admin", "admin"} {
+		_, err = tx.Exec(ctx, `INSERT INTO users (id,email,username,password_hash) VALUES ($1,$2,$3,'hash')`, uuid.NewString(), name+"@"+uuid.NewString()+".example", name)
+		require.NoError(t, err)
+	}
+	sql, err := migrations.AuthFS.ReadFile("auth/0004_username_casefold_unique.up.sql")
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, "SAVEPOINT migration_attempt")
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, string(sql))
+	require.Error(t, err, "colliding account names must require operator resolution")
+	_, err = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT migration_attempt")
+	require.NoError(t, err)
+	var names []string
+	err = tx.QueryRow(ctx, "SELECT array_agg(username ORDER BY username) FROM users").Scan(&names)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Admin", "admin"}, names)
 }

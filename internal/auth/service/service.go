@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,9 +16,14 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/ratelimit"
 )
 
 var (
+	// ErrPasswordCapacity rejects work before another Argon2 allocation.
+	ErrPasswordCapacity = errors.New("service: password capacity reached")
+	// ErrLoginRateLimited bounds attempts against an account across client IPs.
+	ErrLoginRateLimited = errors.New("service: too many login attempts")
 	// ErrEmailTaken is returned when the email is already registered.
 	ErrEmailTaken = errors.New("service: email already registered")
 	// ErrUsernameTaken is returned when the username is already taken.
@@ -70,12 +78,14 @@ type TokenPair struct {
 // Service implements the auth business logic: registration, login, token
 // validation, and session management.
 type Service struct {
-	repo      UserRepository
-	sessions  SessionRepository
-	hasher    Hasher
-	tokens    TokenManager
-	logger    *slog.Logger
-	dummyHash string
+	repo          UserRepository
+	sessions      SessionRepository
+	hasher        Hasher
+	tokens        TokenManager
+	logger        *slog.Logger
+	dummyHash     string
+	passwordSlots chan struct{}
+	loginLimiter  *ratelimit.MemoryLimiter
 }
 
 // NewService wires a Service. A dummy hash is precomputed so that login
@@ -99,6 +109,10 @@ func NewService(
 		tokens:    tokens,
 		logger:    logger,
 		dummyHash: dummyHash,
+		// Two default 64 MiB hashes leave room for the heap and runtime in
+		// the 512 MiB Auth container. Admission never queues extra hash work.
+		passwordSlots: make(chan struct{}, 2),
+		loginLimiter:  ratelimit.NewMemoryLimiter(time.Minute, 5, 4096),
 	}, nil
 }
 
@@ -114,7 +128,7 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 		return nil, fmt.Errorf("register: %w", err)
 	}
 
-	hash, err := s.hasher.Hash(password)
+	hash, err := s.hashPassword(ctx, password)
 	if err != nil {
 		return nil, fmt.Errorf("register: failed to hash password: %w", err)
 	}
@@ -150,23 +164,31 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 	if password == "" {
 		return nil, ErrInvalidCredentials
 	}
+	// CITEXT email lookup is case-insensitive. Hash the same normalized key
+	// for unknown accounts too; neither logs nor limiter keys contain email.
+	account := sha256.Sum256([]byte(strings.ToLower(email)))
+	quota, err := s.loginLimiter.Allow(ctx, hex.EncodeToString(account[:]))
+	if err != nil {
+		return nil, err
+	}
+	if !quota.Allowed {
+		return nil, ErrLoginRateLimited
+	}
 
 	user, err := s.repo.GetByEmail(ctx, email)
-	if errors.Is(err, repository.ErrNotFound) {
-		// Equalize timing with the real-password path so attackers cannot
-		// probe account existence via response latency.
-		_, _ = s.hasher.Verify(password, s.dummyHash)
-		return nil, ErrInvalidCredentials
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, fmt.Errorf("login: failed to load user: %w", err)
 	}
-
-	match, err := s.hasher.Verify(password, user.PasswordHash)
+	hash := s.dummyHash
+	if user != nil {
+		hash = user.PasswordHash
+	}
+	// Unknown accounts do the same bounded password work as real ones.
+	match, err := s.verifyPassword(ctx, password, hash)
 	if err != nil {
 		return nil, fmt.Errorf("login: failed to verify password: %w", err)
 	}
-	if !match {
+	if user == nil || !match {
 		return nil, ErrInvalidCredentials
 	}
 

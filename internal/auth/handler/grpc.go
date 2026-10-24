@@ -131,6 +131,8 @@ var publicErrors = []struct {
 	code    codes.Code
 	message string
 }{
+	{service.ErrPasswordCapacity, codes.Unavailable, "password capacity reached"},
+	{service.ErrLoginRateLimited, codes.ResourceExhausted, "too many login attempts"},
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
 	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},

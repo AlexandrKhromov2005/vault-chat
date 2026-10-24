@@ -17,6 +17,17 @@ info:
     `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429` responses carry
     `Retry-After` (seconds).
 
+    IPv6 addresses share their /64 quota; IPv4-mapped addresses use the IPv4
+    key. Login and registration share an additional quota (default 5/minute,
+    burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`GATEWAY_AUTH_RATE_LIMIT_BURST`)
+    per IP/network, enforced both locally and in Redis. These routes return
+    `503` when Redis is unavailable. Ordinary API limiting still fails open.
+    Auth also limits login attempts per case-insensitive email: burst 5,
+    refill 1/minute, regardless of whether the account exists (`429`,
+    `Retry-After: 60`). This account quota is per Auth process, with bounded
+    storage; it does not replace a shared quota when scaling Auth replicas.
+    At most two password operations run per Auth process; overload is `503`.
+
     **Time budget.** Each `/api/` request has one budget,
     `GATEWAY_REQUEST_TIMEOUT` (10s by default), covering rate limiting,
     reading the body, and backend calls. A body not received within it gets
@@ -61,6 +72,7 @@ paths:
   /api/v1/auth/register:
     post:
       summary: Register a new account
+      description: Usernames are unique without regard to ASCII letter case.
       tags: [auth]
       requestBody:
         required: true

@@ -113,7 +113,7 @@ func TestRouter_PublicAuthRoutes(t *testing.T) {
 		rec := f.serve(req)
 
 		require.Equal(t, http.StatusCreated, rec.Code)
-		require.Equal(t, "29", rec.Header().Get("X-RateLimit-Remaining"))
+		require.Equal(t, "4", rec.Header().Get("X-RateLimit-Remaining"))
 	})
 
 	t.Run("login", func(t *testing.T) {

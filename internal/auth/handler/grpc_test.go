@@ -89,6 +89,22 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 }
 
 func TestAuthGRPCHandler_Login(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{"password capacity", service.ErrPasswordCapacity, codes.Unavailable},
+		{"account quota", service.ErrLoginRateLimited, codes.ResourceExhausted},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewMockAuthService(t)
+			h := handler.NewAuthGRPCHandler(svc)
+			svc.EXPECT().Login(mock.Anything, mock.Anything, mock.Anything).Return(nil, tt.err)
+			_, err := h.Login(context.Background(), &authv1.LoginRequest{})
+			require.Equal(t, tt.code, status.Code(err))
+		})
+	}
 	t.Run("success", func(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)

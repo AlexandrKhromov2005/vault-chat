@@ -73,6 +73,7 @@ func (s *Service) Upload(ctx context.Context, owner, room, name string, data []b
 	if err != nil {
 		return nil, err
 	}
+	name = validator.DownloadFilename(name, typ)
 	f := &domain.File{ID: uuid.NewString(), RoomID: room, OwnerID: owner, Name: name, ContentType: typ, Size: int64(len(data)), CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
 	if err := s.repo.Create(ctx, f); err != nil {
 		return nil, fmt.Errorf("create pending file: %w", err)
@@ -112,7 +113,11 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.File, error) {
 	if err := s.gate.CheckRoom(ctx, f.RoomID); err != nil {
 		return nil, err
 	}
-	return f, nil
+	// Normalize legacy records for both metadata consumers (the web client)
+	// and HTTP Content-Disposition without mutating the persisted record.
+	safe := *f
+	safe.Name = validator.DownloadFilename(f.Name, f.ContentType)
+	return &safe, nil
 }
 
 // Download checks membership before opening storage; no presigned URLs escape.

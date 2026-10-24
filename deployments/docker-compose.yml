@@ -267,6 +267,8 @@ services:
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
       GATEWAY_CHAT_GRPC_ADDR: passthrough:///chat:50052
       GATEWAY_REDIS_ADDR: redis:6379
+      GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-5}
+      GATEWAY_AUTH_RATE_LIMIT_BURST: ${GATEWAY_AUTH_RATE_LIMIT_BURST:-5}
       # Plain HTTP for local use; TLS needs a certificate mounted like the
       # JWT keys and GATEWAY_TLS_CERT_PATH / GATEWAY_TLS_KEY_PATH set.
       # WebSocket upgrades (/api/v1/ws) also accept clients without an Origin
