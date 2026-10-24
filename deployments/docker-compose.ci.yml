@@ -1,0 +1,53 @@
+# Disposable integration fixtures only. Public credentials match test fixtures;
+# never mount host data, Docker sockets, working secrets, or application volumes.
+services:
+  postgres:
+    image: postgres:16-alpine
+    mem_limit: 512m
+    cpus: 2
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: auth
+      POSTGRES_DB: postgres
+    ports: ["127.0.0.1::5432"]
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U auth -d postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  minio:
+    image: vault-chat/ci-minio:${CI_IMAGE_TAG:?unique CI image tag required}
+    mem_limit: 2g
+    cpus: 2
+    build:
+      context: ..
+      dockerfile: Dockerfile.minio
+      network: ${VAULT_CI_BUILD_NETWORK:-default}
+    command: [server, /data]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["127.0.0.1::9000"]
+    healthcheck:
+      test: [CMD, /usr/local/bin/healthcheck, -http, "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  s3-init:
+    image: vault-chat/ci-minio:${CI_IMAGE_TAG:?unique CI image tag required}
+    entrypoint: [/usr/local/bin/s3-init]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: vault-chat-media
+      S3_ROOT_ACCESS_KEY: minioadmin
+      S3_ROOT_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: vaultmedia
+      S3_SECRET_KEY: vaultmedia-secret
+    depends_on:
+      minio:
+        condition: service_healthy
