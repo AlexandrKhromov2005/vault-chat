@@ -30,9 +30,10 @@ type AuthClient interface {
 }
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Email           string `json:"email"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	InvitationToken string `json:"invitation_token"`
 }
 
 type userResponse struct {
@@ -112,9 +113,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.client.Register(r.Context(), &authv1.RegisterRequest{
-		Email:    req.Email,
-		Username: req.Username,
-		Password: req.Password,
+		Email:           req.Email,
+		Username:        req.Username,
+		Password:        req.Password,
+		InvitationToken: req.InvitationToken,
 	})
 	if err != nil {
 		h.backendError(w, r, "register", err)
@@ -224,6 +226,10 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // failures are logged with their cause, which the client never sees.
 func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	statusCode, code, message := response.FromGRPC(err)
+	if statusCode == http.StatusTooManyRequests {
+		// Auth refills account admission at one attempt per minute.
+		w.Header().Set("Retry-After", "60")
+	}
 	if statusCode >= http.StatusInternalServerError {
 		h.logger.ErrorContext(r.Context(), "auth backend call failed", "operation", operation, "error", err)
 	}

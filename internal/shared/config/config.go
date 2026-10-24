@@ -21,6 +21,8 @@ type Config struct {
 	Argon2Time        uint32
 	Argon2Parallelism uint8
 	LogLevel          string
+	RedisAddr         string
+	RedisPassword     string
 }
 
 // Load reads configuration from AUTH_* environment variables. DatabaseURL
@@ -34,6 +36,8 @@ func Load() (*Config, error) {
 		Argon2Time:        3,
 		Argon2Parallelism: 2,
 		LogLevel:          envOr("AUTH_LOG_LEVEL", "info"),
+		RedisAddr:         envOr("AUTH_REDIS_ADDR", "localhost:6379"),
+		RedisPassword:     os.Getenv("AUTH_REDIS_PASSWORD"),
 	}
 
 	var err error

@@ -47,7 +47,10 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 	if err == nil {
 		return nil
 	}
+	return userCreationError(err)
+}
 
+func userCreationError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		switch {

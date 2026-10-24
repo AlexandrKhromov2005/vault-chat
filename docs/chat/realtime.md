@@ -94,8 +94,10 @@ open, the client refreshes the token over REST and sends a new `auth` frame
 with the new access token before `expires_at`. The token must belong to the
 same user; the Gateway answers with a new `ready` frame. Auth frames sent
 less than 10 seconds apart close the connection with 1008. Logout and session
-revocation do not end a connection earlier, just as an issued access token
-stays valid for REST until it expires.
+revocation invalidate access immediately in Auth. Gateway checks the current
+session before every event and after a Redis revocation hint; a one-second idle
+check catches lost hints. Unavailable Auth closes the connection rather than
+forwarding unchecked events. In-flight writes already authorized may finish.
 
 ### Events
 

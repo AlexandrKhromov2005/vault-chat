@@ -5,7 +5,9 @@ cd "$(dirname -- "$0")/.."
 for script in scripts/vps/*.sh; do sh -n "$script"; done
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml -f deployments/monitoring/app.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin)

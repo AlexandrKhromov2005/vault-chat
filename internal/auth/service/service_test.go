@@ -29,6 +29,7 @@ func newServiceFixture(t *testing.T) serviceFixture {
 
 	repo := mocks.NewMockUserRepository(t)
 	sessions := mocks.NewMockSessionRepository(t)
+	sessions.EXPECT().IsActive(mock.Anything, mock.Anything, "11111111-1111-4111-8111-111111111111").Return(true, nil).Maybe()
 	tokens := mocks.NewMockTokenManager(t)
 	hasher := service.NewArgon2idHasher(fastParams)
 
@@ -47,7 +48,7 @@ var refreshExpiresAt = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 func (fx serviceFixture) expectTokenPair(user *domain.User) *string {
 	var sessionID string
 	fx.tokens.EXPECT().
-		IssueAccessToken(user.ID, user.Email, user.Username).
+		IssueAccessToken(user.ID, user.Email, user.Username, mock.Anything).
 		Return("access-token", time.Now().Add(15*time.Minute), nil)
 	fx.tokens.EXPECT().
 		IssueRefreshToken(mock.Anything, user.ID, user.Email, user.Username).
@@ -203,7 +204,7 @@ func TestService_Login(t *testing.T) {
 func TestService_ValidateToken(t *testing.T) {
 	t.Run("valid token returns claims", func(t *testing.T) {
 		fx := newServiceFixture(t)
-		want := &jwt.Claims{
+		want := &jwt.Claims{SessionID: "11111111-1111-4111-8111-111111111111",
 			UserID:    "user-1",
 			Email:     "user@example.com",
 			Username:  "username1",
@@ -237,7 +238,7 @@ func TestService_ValidateToken_RejectsNonAccessTokens(t *testing.T) {
 	for _, tokenType := range []jwt.TokenType{jwt.RefreshToken, "", "unknown"} {
 		t.Run(string(tokenType), func(t *testing.T) {
 			fx := newServiceFixture(t)
-			fx.tokens.EXPECT().Validate("token").Return(&jwt.Claims{TokenType: tokenType}, nil)
+			fx.tokens.EXPECT().Validate("token").Return(&jwt.Claims{SessionID: "11111111-1111-4111-8111-111111111111", TokenType: tokenType}, nil)
 			_, err := fx.svc.ValidateToken(context.Background(), "token")
 			require.ErrorIs(t, err, service.ErrInvalidToken)
 		})

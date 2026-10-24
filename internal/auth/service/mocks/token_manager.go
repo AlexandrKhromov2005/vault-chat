@@ -22,9 +22,16 @@ func (_m *MockTokenManager) EXPECT() *MockTokenManager_Expecter {
 	return &MockTokenManager_Expecter{mock: &_m.Mock}
 }
 
-// IssueAccessToken provides a mock function with given fields: userID, email, username
-func (_m *MockTokenManager) IssueAccessToken(userID string, email string, username string) (string, time.Time, error) {
-	ret := _m.Called(userID, email, username)
+// IssueAccessToken provides a mock function with given fields: userID, email, username, sessionID
+func (_m *MockTokenManager) IssueAccessToken(userID string, email string, username string, sessionID ...string) (string, time.Time, error) {
+	_va := make([]interface{}, len(sessionID))
+	for _i := range sessionID {
+		_va[_i] = sessionID[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, userID, email, username)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for IssueAccessToken")
@@ -33,23 +40,23 @@ func (_m *MockTokenManager) IssueAccessToken(userID string, email string, userna
 	var r0 string
 	var r1 time.Time
 	var r2 error
-	if rf, ok := ret.Get(0).(func(string, string, string) (string, time.Time, error)); ok {
-		return rf(userID, email, username)
+	if rf, ok := ret.Get(0).(func(string, string, string, ...string) (string, time.Time, error)); ok {
+		return rf(userID, email, username, sessionID...)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string) string); ok {
-		r0 = rf(userID, email, username)
+	if rf, ok := ret.Get(0).(func(string, string, string, ...string) string); ok {
+		r0 = rf(userID, email, username, sessionID...)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string) time.Time); ok {
-		r1 = rf(userID, email, username)
+	if rf, ok := ret.Get(1).(func(string, string, string, ...string) time.Time); ok {
+		r1 = rf(userID, email, username, sessionID...)
 	} else {
 		r1 = ret.Get(1).(time.Time)
 	}
 
-	if rf, ok := ret.Get(2).(func(string, string, string) error); ok {
-		r2 = rf(userID, email, username)
+	if rf, ok := ret.Get(2).(func(string, string, string, ...string) error); ok {
+		r2 = rf(userID, email, username, sessionID...)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -66,13 +73,21 @@ type MockTokenManager_IssueAccessToken_Call struct {
 //   - userID string
 //   - email string
 //   - username string
-func (_e *MockTokenManager_Expecter) IssueAccessToken(userID interface{}, email interface{}, username interface{}) *MockTokenManager_IssueAccessToken_Call {
-	return &MockTokenManager_IssueAccessToken_Call{Call: _e.mock.On("IssueAccessToken", userID, email, username)}
+//   - sessionID ...string
+func (_e *MockTokenManager_Expecter) IssueAccessToken(userID interface{}, email interface{}, username interface{}, sessionID ...interface{}) *MockTokenManager_IssueAccessToken_Call {
+	return &MockTokenManager_IssueAccessToken_Call{Call: _e.mock.On("IssueAccessToken",
+		append([]interface{}{userID, email, username}, sessionID...)...)}
 }
 
-func (_c *MockTokenManager_IssueAccessToken_Call) Run(run func(userID string, email string, username string)) *MockTokenManager_IssueAccessToken_Call {
+func (_c *MockTokenManager_IssueAccessToken_Call) Run(run func(userID string, email string, username string, sessionID ...string)) *MockTokenManager_IssueAccessToken_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string))
+		variadicArgs := make([]string, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		run(args[0].(string), args[1].(string), args[2].(string), variadicArgs...)
 	})
 	return _c
 }
@@ -82,7 +97,7 @@ func (_c *MockTokenManager_IssueAccessToken_Call) Return(_a0 string, _a1 time.Ti
 	return _c
 }
 
-func (_c *MockTokenManager_IssueAccessToken_Call) RunAndReturn(run func(string, string, string) (string, time.Time, error)) *MockTokenManager_IssueAccessToken_Call {
+func (_c *MockTokenManager_IssueAccessToken_Call) RunAndReturn(run func(string, string, string, ...string) (string, time.Time, error)) *MockTokenManager_IssueAccessToken_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -91,7 +91,7 @@ services:
 networks:
   application:
     external: true
-    name: ${VAULT_PROJECT:-vault-chat}_default
+    name: ${VAULT_PROJECT:-vault-chat}_rpc
 volumes:
   prometheus_data:
   grafana_data:

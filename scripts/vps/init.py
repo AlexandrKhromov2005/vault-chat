@@ -36,6 +36,22 @@ else:
     fd = os.open(env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         stream.write(''.join(f'{key}={val}\n' for key, val in values.items()))
+# Append new least-privilege credentials on upgrade without replacing live keys.
+missing_secrets = [key for key in ('AUTH_RUNTIME_DB_PASSWORD', 'CHAT_RUNTIME_DB_PASSWORD',
+                                  'MEDIA_RUNTIME_DB_PASSWORD', 'S3_ROOT_ACCESS_KEY', 'S3_ROOT_SECRET_KEY')
+                   if key not in values]
+if missing_secrets:
+    with env.open('a') as stream:
+        if env.stat().st_size and not env.read_bytes().endswith(b'\n'):
+            stream.write('\n')
+        for key in missing_secrets:
+            stream.write(f'{key}={secrets.token_hex(24)}\n')
 env.chmod(0o600)
 subprocess.run(['sh', str(root / 'scripts/gen-jwt-keys.sh'), str(root / 'secrets')], check=True)
+subprocess.run(['python3', str(root / 'scripts/gen-rpc-certs.py'), str(root / 'secrets')], check=True)
+rpc_env = root / '.env.rpc'
+if not rpc_env.exists():
+    fd = os.open(rpc_env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write('RPC_TLS_MODE=mtls\n')
 print('Configuration ready; existing credentials and JWT keys are preserved')

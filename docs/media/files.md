@@ -36,22 +36,35 @@ while ordinary text messages remain available.
 ## Bounds and storage lifecycle
 
 The maximum file size is 10 MiB. Metadata names are valid UTF-8, at most 255 bytes,
-without path separators or control characters; object keys are server-generated
+without path separators, colons, control/format characters (including bidi),
+or a trailing dot; object keys are server-generated
 UUIDs. The allowlist uses content bytes: PNG, JPEG, PDF and UTF-8 plain text.
 Images require a valid header and at most 40 million pixels. Active HTML/SVG roots
 are rejected. Signature/header validation is not antivirus scanning or full file
 sanitization; clients must not render untrusted files inline.
 
+Names returned by upload, metadata and download always have an extension
+matching the detected type: `.png`, `.jpg`/`.jpeg`, `.pdf` or `.txt`. A mismatched
+extension gets the safe extension appended (for example `manual.js.txt`). Unsafe
+or overly long legacy names become `attachment.<extension>`. This also protects
+previously stored files without rewriting their immutable records; the browser
+client receives the safe name through metadata as well as Content-Disposition.
+
 Downloads set `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`
 and `Cache-Control: private, no-store`. No public or presigned object URL is
 returned. A bucket policy makes Media startup fail; the dedicated development
-bucket is created private. For another S3 provider, configure private ACLs and
+bucket is provisioned private by a separate S3 initialization job. Media uses a
+bucket-scoped user with object read/write/delete and bucket metadata permissions;
+it cannot create other buckets or administer users. For another S3 provider, configure private ACLs and
 public-access blocking at the provider as well.
 
 Media buffers at most 10 MiB of content per upload, permits 16 concurrent uploads,
-uses 64 KiB data frames and a 30-second RPC budget. Gateway permits eight uploads
-per instance and applies its usual authentication, IP/user rate limits, CORS and
-request budget (10 seconds by default). Only the upload route has the larger body
+uses 64 KiB data frames. HTTP and streaming RPC transfers have a five-minute
+total budget and require progress within 30 seconds. The short storage commit
+inside Media remains bounded by 30 seconds. Gateway permits eight uploads
+per instance, at most two per authenticated user (`429` for that user's excess),
+and applies its usual authentication, IP/user rate limits, CORS and
+a separate file transfer budget; JSON retains its 10-second budget. Only the upload route has the larger body
 allowance; ordinary JSON keeps its existing limit. Oversized files return `413`;
 invalid/unsupported files and extra multipart parts return `400`.
 
@@ -75,9 +88,9 @@ run it inside Compose; its PostgreSQL port is not published.
 [`7aac2a2c5b7c`](https://github.com/minio/minio/tree/7aac2a2c5b7c) via a pinned
 Go module version and includes its AGPL license. This is a development fixture:
 [community MinIO is source-only and no longer maintained](https://github.com/minio/minio#readme).
-A maintained S3 provider is required before production. Internal gRPC and the
-local S3 endpoint use plaintext; mTLS and production secret management are not
-part of this block.
+A maintained S3 provider is required before production. The local S3 endpoint
+uses plaintext. Local development RPC supports the optional [mTLS overlay](../mtls.md);
+VPS requires mTLS by default.
 
 ## Verification
 

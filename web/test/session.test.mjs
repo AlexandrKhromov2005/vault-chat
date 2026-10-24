@@ -63,9 +63,9 @@ test('register creates the account and signs in', async () => {
     me,
   ]);
 
-  await session.register('alice@example.com', 'alice', 'password1');
+  await session.register('alice@example.com', 'alice', 'password1', 'invite-token');
 
-  assert.deepEqual(fetchFn.calls[0].body, { email: 'alice@example.com', username: 'alice', password: 'password1' });
+  assert.deepEqual(fetchFn.calls[0].body, { email: 'alice@example.com', username: 'alice', password: 'password1', invitation_token: 'invite-token' });
   assert.equal(session.user.username, 'alice');
 });
 

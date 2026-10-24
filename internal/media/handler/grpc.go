@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/transfer"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
@@ -94,7 +95,7 @@ func (h *Handler) identity(ctx context.Context) (context.Context, string, error)
 
 // Upload accepts one metadata frame followed by bounded data frames.
 func (h *Handler) Upload(stream grpc.ClientStreamingServer[mediav1.UploadRequest, mediav1.UploadResponse]) error {
-	ctx, cancel := context.WithTimeout(stream.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(stream.Context(), transfer.MaxDuration)
 	defer cancel()
 	ctx, actor, err := h.identity(ctx)
 	if err != nil {
@@ -146,6 +147,8 @@ func (h *Handler) Upload(stream grpc.ClientStreamingServer[mediav1.UploadRequest
 	return stream.SendAndClose(&mediav1.UploadResponse{File: fileProto(file)})
 }
 func receive(ctx context.Context, s grpc.ClientStreamingServer[mediav1.UploadRequest, mediav1.UploadResponse]) (*mediav1.UploadRequest, error) {
+	ctx, cancel := context.WithTimeout(ctx, transfer.IdleTimeout)
+	defer cancel()
 	type result struct {
 		frame *mediav1.UploadRequest
 		err   error
@@ -177,7 +180,7 @@ func (h *Handler) GetFile(ctx context.Context, r *mediav1.GetFileRequest) (*medi
 
 // Download sends metadata before bytes so the gateway can set safe headers.
 func (h *Handler) Download(r *mediav1.DownloadRequest, s grpc.ServerStreamingServer[mediav1.DownloadResponse]) error {
-	ctx, cancel := context.WithTimeout(s.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.Context(), transfer.MaxDuration)
 	defer cancel()
 	ctx, _, err := h.identity(ctx)
 	if err != nil {
@@ -188,14 +191,14 @@ func (h *Handler) Download(r *mediav1.DownloadRequest, s grpc.ServerStreamingSer
 		return safeError(err)
 	}
 	defer body.Close()
-	if err := s.Send(&mediav1.DownloadResponse{File: fileProto(f)}); err != nil {
+	if err := sendDownload(ctx, s, &mediav1.DownloadResponse{File: fileProto(f)}); err != nil {
 		return err
 	}
 	buf := make([]byte, 64<<10)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			if err := s.Send(&mediav1.DownloadResponse{Data: buf[:n]}); err != nil {
+			if err := sendDownload(ctx, s, &mediav1.DownloadResponse{Data: buf[:n]}); err != nil {
 				return err
 			}
 		}
@@ -208,6 +211,18 @@ func (h *Handler) Download(r *mediav1.DownloadRequest, s grpc.ServerStreamingSer
 		if ctx.Err() != nil {
 			return safeError(ctx.Err())
 		}
+	}
+}
+func sendDownload(ctx context.Context, stream grpc.ServerStreamingServer[mediav1.DownloadResponse], frame *mediav1.DownloadResponse) error {
+	ctx, cancel := context.WithTimeout(ctx, transfer.IdleTimeout)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- stream.Send(frame) }()
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return status.FromContextError(ctx.Err()).Err()
 	}
 }
 func fileProto(f *domain.File) *mediav1.File {

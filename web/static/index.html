@@ -35,6 +35,10 @@
       </form>
 
       <form id="register-form" class="stack" hidden>
+        <label>Код приглашения
+          <input name="invitation_token" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="64" maxlength="64" pattern="[a-f0-9]{64}" required>
+        </label>
+        <p class="hint">Получите приглашение для вашего email у администратора.</p>
         <label>Email
           <input name="email" type="email" autocomplete="email" maxlength="254" required>
         </label>

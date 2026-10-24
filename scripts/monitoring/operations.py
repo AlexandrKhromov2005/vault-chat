@@ -10,7 +10,7 @@ import time
 def last_backup(root):
     stamps = []
     for marker in Path(root).glob('*/COMPLETE'):
-        if marker.read_text().strip() == '1':
+        if marker.read_text().strip() in ('1', '2'):
             try:
                 stamps.append(datetime.datetime.strptime(marker.parent.name, '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc).timestamp())
             except ValueError:

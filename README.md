@@ -24,7 +24,7 @@ REST; комнаты, отправка сообщений и история до
 | Сообщения Chat | Неизменяемый текст до 4096 символов, проверка членства, повторная отправка по UUID без дубликатов, история с курсором, номер сообщения в комнате и догрузка пропущенных сообщений после известной позиции, публикация событий о сообщениях и составе комнат в Redis Pub/Sub после фиксации | PostgreSQL, gRPC и REST через Gateway |
 | Реальное время | Chat публикует события о сообщениях и составе комнат в Redis Pub/Sub после фиксации только участникам комнаты; Gateway доставляет их по WebSocket с авторизацией первым сообщением, продлением токена без переподключения, пингами, лимитами и закрытием медленных клиентов; пропущенное догружается по `after` | WebSocket через Gateway, несколько экземпляров Gateway через общий Redis |
 | Контракт Chat | Protobuf-контракт операций с комнатами и событий, сгенерированный gRPC-код | Реализованы все десять RPC; актор проверяется через Auth |
-| Данные | Миграции пользователей и сессий Auth, отдельные миграции комнат, участников и сообщений Chat | Auth и Chat применяют миграции своих отдельных БД при запуске |
+| Данные | Миграции пользователей и сессий Auth, отдельные миграции комнат, участников и сообщений Chat | Отдельные одноразовые задачи применяют миграции; сервисы используют роли без DDL |
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
 | Проверки | Unit-, PostgreSQL integration- и race-тесты, 33 цели фаззинга, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
 | Media | Загрузка и скачивание закрытых файлов, метаданные в отдельной БД, текущие права участника комнаты, вложения в сообщениях, истории и WebSocket; лимит 10 МиБ и проверка содержимого | gRPC и REST; [правила и ограничения](docs/media/files.md) |
@@ -91,11 +91,14 @@ presence и уведомления. Также не реализованы E2EE,
 
 ## Текущие ограничения
 
-- Logout и отзыв сессий блокируют дальнейшее обновление токенов. Уже выданный
-  access token действует до истечения срока, по умолчанию 15 минут.
-- Gateway → Auth/Chat и Chat → Auth используют gRPC без TLS. Публичный TLS Gateway включается
-  отдельно через сертификат и ключ в конфигурации.
-- При недоступности Redis rate limiter пропускает запросы; IP определяется
+- Регистрация требует одноразовое приглашение на конкретный email от оператора.
+  Logout отзывает access и refresh одной семьи сессий; отзыв всех сессий и
+  повтор refresh-токена блокируют все токены пользователя. WebSocket проверяет
+  сессию перед событиями; потерянное уведомление обнаруживается проверкой раз в секунду.
+- VPS использует внутренний mTLS по умолчанию; `init` создаёт отдельные ключи
+  сервисов. Локальный Compose использует plaintext RPC, пока не подключён mTLS overlay.
+- При недоступности Redis обычный API продолжает работать, вход и регистрация
+  возвращают `503`; IP определяется
   по адресу соединения, без поддержки доверенных reverse proxy.
 - Chat проверяет токен и существование получателя через Auth. Профиль по ID
   и результаты поиска содержат только ID и имя пользователя. Любой авторизованный
@@ -149,7 +152,7 @@ docker compose -f deployments/docker-compose.yml up -d --build --wait
 закрытого: скрипт создаёт его заново вместе с новым закрытым ключом, а также
 если он отсутствует или не соответствует закрытому. Вторая команда собирает четыре
 Go-сервиса и локальное S3 из закреплённого исходного кода, поднимает три PostgreSQL
-и Redis и ждёт healthy. Каждый сервис применяет свои миграции при старте.
+и Redis и ждёт healthy. Миграции выполняют отдельные задачи до запуска сервисов.
 Первая сборка S3 занимает несколько минут. Ограничение поддержки MinIO и порядок
 работы с файлами описаны в [документации Media](docs/media/files.md).
 
@@ -251,6 +254,13 @@ docker compose -f deployments/docker-compose.yml up -d postgres chat-postgres re
 Не запускайте одновременно полный стек в Docker и сервисы через `go run`:
 они займут одни и те же порты.
 
+Миграции выполняются отдельно от сервисов. Для локального запуска перед `go run`:
+
+```sh
+MIGRATION_SERVICE=auth MIGRATION_DATABASE_URL='postgres://auth:auth@localhost:5432/auth_db?sslmode=disable' MIGRATION_RUNTIME_PASSWORD=auth-runtime go run ./cmd/migrate
+MIGRATION_SERVICE=chat MIGRATION_DATABASE_URL='postgres://chat:chat@localhost:5433/chat_db?sslmode=disable' MIGRATION_RUNTIME_PASSWORD=chat-runtime go run ./cmd/migrate
+```
+
 В первом терминале загрузите переменные и запустите Auth:
 
 ```sh
@@ -280,8 +290,9 @@ go run ./cmd/gateway
 
 Приложения читают переменные окружения; `.env` автоматически не загружается.
 По умолчанию Auth слушает `:50051`, Chat — `:50052`, Gateway — `:8080`.
-Auth и Chat применяют миграции своих БД при запуске. `/ready` требует готовности
-обоих gRPC-сервисов; Redis не входит в readiness из-за режима fail-open.
+`/ready` требует готовности
+обоих gRPC-сервисов; Redis не входит в readiness: обычный API продолжает
+работать без лимитера, а вход и регистрация при отказе Redis возвращают `503`.
 Chat публикует события в тот же Redis (`CHAT_REDIS_ADDR`) в фоне; если Redis
 недоступен, операции выполняются без задержки, а события теряются.
 
@@ -290,10 +301,19 @@ curl --fail http://localhost:8080/health
 curl --fail http://localhost:8080/ready
 curl --fail http://localhost:8080/api/v1/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"email":"demo@example.com","username":"demo_user","password":"DemoPassword123"}'
+  -d '{"email":"demo@example.com","username":"demo_user","password":"DemoPassword123","invitation_token":"КОД_ИЗ_КОМАНДЫ_INVITE"}'
 ```
 
 Этот локальный запуск обслуживает Auth API, комнаты и сообщения Chat и WebSocket-события. Для вложений запустите также `cmd/media` с настройками `MEDIA_*` из `.env.example` или используйте полный Compose-стек. Ключи и `.env` исключены из Git через `.gitignore`.
+
+Приглашение для полного Compose-стека создаёт оператор:
+
+```sh
+docker compose -f deployments/docker-compose.yml exec -T auth /usr/local/bin/invite demo@example.com
+```
+
+Код действует сутки и используется один раз только с указанным email. Для
+локального Auth: `go run ./cmd/invite demo@example.com` с `AUTH_DATABASE_URL`.
 
 ## Веб-клиент
 
@@ -351,6 +371,7 @@ node --test "web/test/*.test.mjs"
 догрузка пропущенного. Без переменной эти тесты пропускаются:
 
 ```sh
+VAULT_CHAT_WEB_INVITE_DATABASE_URL='postgres://auth:auth@127.0.0.1:5432/auth_db?sslmode=disable' \
 VAULT_CHAT_WEB_GATEWAY_URL=http://127.0.0.1:8080 node --test "web/test/*.test.mjs"
 ```
 
@@ -358,7 +379,7 @@ VAULT_CHAT_WEB_GATEWAY_URL=http://127.0.0.1:8080 node --test "web/test/*.test.mj
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| POST | `/api/v1/auth/register` | Регистрация |
+| POST | `/api/v1/auth/register` | Регистрация по приглашению |
 | POST | `/api/v1/auth/login` | Вход и получение пары токенов |
 | POST | `/api/v1/auth/refresh` | Ротация refresh token и новая пара токенов |
 | POST | `/api/v1/auth/logout` | Завершение сессии по refresh token |
@@ -449,6 +470,7 @@ VAULT_CHAT_TEST_CHAT_DATABASE_URL='postgres://auth:auth@localhost:5432/vault_cha
 
 ```sh
 docker compose -f deployments/docker-compose.yml up -d --build --wait && \
+  VAULT_CHAT_COMPOSE_AUTH_DATABASE_URL='postgres://auth:auth@127.0.0.1:5432/auth_db?sslmode=disable' \
   VAULT_CHAT_COMPOSE_GATEWAY_URL=http://127.0.0.1:8080 \
   go test -tags compose -count=1 ./tests/compose/...
 ```

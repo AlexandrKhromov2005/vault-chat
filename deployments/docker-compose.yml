@@ -32,6 +32,7 @@ x-go-service: &go-service
 
 services:
   postgres:
+    networks: [auth-data]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: auth
@@ -48,6 +49,7 @@ services:
       retries: 10
 
   chat-postgres:
+    networks: [chat-data]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: chat
@@ -64,6 +66,7 @@ services:
       retries: 10
 
   redis:
+    networks: [events]
     image: redis:7-alpine
     ports:
       - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
@@ -77,6 +80,7 @@ services:
 
   # NATS remains an optional development tool; Redis carries chat events.
   nats:
+    networks: [events]
     profiles: [events]
     image: nats:2.10-alpine
     command: ["-js", "-m", "8222"]
@@ -92,6 +96,7 @@ services:
       retries: 10
 
   minio:
+    networks: [objects]
     build:
       context: ..
       dockerfile: Dockerfile.minio
@@ -121,6 +126,7 @@ services:
   # to the dialer.
 
   auth:
+    networks: [rpc, auth-data, events]
     <<: *go-service
     build:
       context: ..
@@ -128,8 +134,9 @@ services:
       args:
         SERVICE: auth
     environment:
+      AUTH_REDIS_ADDR: redis:6379
       AUTH_GRPC_ADDR: ":50051"
-      AUTH_DATABASE_URL: postgres://auth:auth@postgres:5432/auth_db?sslmode=disable
+      AUTH_DATABASE_URL: postgres://auth_app:${AUTH_RUNTIME_DB_PASSWORD:-auth-runtime}@postgres:5432/auth_db?sslmode=disable
       AUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/auth_jwt_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/auth_jwt_public.pem
       # Shorten for a demo of token renewal, e.g. AUTH_JWT_ACCESS_TTL=2m.
@@ -155,6 +162,8 @@ services:
         bind:
           create_host_path: false
     depends_on:
+      auth-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     healthcheck:
@@ -165,6 +174,7 @@ services:
       start_period: 10s
 
   chat:
+    networks: [rpc, chat-data, events]
     <<: *go-service
     build:
       context: ..
@@ -175,7 +185,7 @@ services:
       CHAT_GRPC_ADDR: ":50052"
       CHAT_MEDIA_GRPC_ADDR: passthrough:///media:50053
       CHAT_AUTH_GRPC_ADDR: passthrough:///auth:50051
-      CHAT_DATABASE_URL: postgres://chat:chat@chat-postgres:5432/chat_db?sslmode=disable
+      CHAT_DATABASE_URL: postgres://chat_app:${CHAT_RUNTIME_DB_PASSWORD:-chat-runtime}@chat-postgres:5432/chat_db?sslmode=disable
       # Real-time events go to the Redis the gateway subscribes to. Redis has
       # no password in development, as for the gateway.
       CHAT_REDIS_ADDR: redis:6379
@@ -189,6 +199,8 @@ services:
     # keeps serving, drops the events it cannot publish and clients recover
     # them through catch-up.
     depends_on:
+      chat-migrate:
+        condition: service_completed_successfully
       chat-postgres:
         condition: service_healthy
       auth:
@@ -207,6 +219,7 @@ services:
     stop_grace_period: 15s
 
   media-postgres:
+    networks: [media-data]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: media
@@ -221,6 +234,7 @@ services:
       retries: 10
 
   media:
+    networks: [rpc, media-data, objects]
     <<: *go-service
     build:
       context: ..
@@ -229,15 +243,19 @@ services:
         SERVICE: media
     environment:
       MEDIA_GRPC_ADDR: ":50053"
-      MEDIA_DATABASE_URL: postgres://media:media@media-postgres:5432/media_db?sslmode=disable
+      MEDIA_DATABASE_URL: postgres://media_app:${MEDIA_RUNTIME_DB_PASSWORD:-media-runtime}@media-postgres:5432/media_db?sslmode=disable
       MEDIA_AUTH_GRPC_ADDR: passthrough:///auth:50051
       MEDIA_CHAT_GRPC_ADDR: passthrough:///chat:50052
       MEDIA_S3_ENDPOINT: minio:9000
-      MEDIA_S3_ACCESS_KEY: minioadmin
-      MEDIA_S3_SECRET_KEY: minioadmin
+      MEDIA_S3_ACCESS_KEY: vaultmedia
+      MEDIA_S3_SECRET_KEY: vaultmedia-secret
       MEDIA_S3_BUCKET: vault-chat-media
       MEDIA_S3_SECURE: "false"
     depends_on:
+      s3-init:
+        condition: service_completed_successfully
+      media-migrate:
+        condition: service_completed_successfully
       media-postgres:
         condition: service_healthy
       minio:
@@ -255,6 +273,7 @@ services:
     stop_grace_period: 10s
 
   gateway:
+    networks: [rpc, events, edge]
     <<: *go-service
     build:
       context: ..
@@ -267,6 +286,10 @@ services:
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
       GATEWAY_CHAT_GRPC_ADDR: passthrough:///chat:50052
       GATEWAY_REDIS_ADDR: redis:6379
+      GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-5}
+      GATEWAY_AUTH_RATE_LIMIT_BURST: ${GATEWAY_AUTH_RATE_LIMIT_BURST:-5}
+      GATEWAY_RATE_LIMIT_PER_MINUTE: ${GATEWAY_RATE_LIMIT_PER_MINUTE:-120}
+      GATEWAY_RATE_LIMIT_BURST: ${GATEWAY_RATE_LIMIT_BURST:-30}
       # Plain HTTP for local use; TLS needs a certificate mounted like the
       # JWT keys and GATEWAY_TLS_CERT_PATH / GATEWAY_TLS_KEY_PATH set.
       # WebSocket upgrades (/api/v1/ws) also accept clients without an Origin
@@ -299,6 +322,102 @@ services:
     # Redis and gRPC connections.
     stop_grace_period: 20s
 
+  auth-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - auth-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: auth
+      MIGRATION_DATABASE_URL: postgres://auth:auth@postgres:5432/auth_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${AUTH_RUNTIME_DB_PASSWORD:-auth-runtime}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: auth
+  chat-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - chat-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: chat
+      MIGRATION_DATABASE_URL: postgres://chat:chat@chat-postgres:5432/chat_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${CHAT_RUNTIME_DB_PASSWORD:-chat-runtime}
+    depends_on:
+      chat-postgres:
+        condition: service_healthy
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: chat
+  media-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - media-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: media
+      MIGRATION_DATABASE_URL: postgres://media:media@media-postgres:5432/media_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${MEDIA_RUNTIME_DB_PASSWORD:-media-runtime}
+    depends_on:
+      media-postgres:
+        condition: service_healthy
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: media
+  s3-init:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp
+    networks:
+    - objects
+    entrypoint:
+    - /usr/local/bin/s3-init
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: vault-chat-media
+      S3_ROOT_ACCESS_KEY: minioadmin
+      S3_ROOT_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: vaultmedia
+      S3_SECRET_KEY: vaultmedia-secret
+    depends_on:
+      minio:
+        condition: service_healthy
+    build:
+      context: ..
+      dockerfile: Dockerfile.minio
+
 volumes:
   pgdata:
   chat_pgdata:
@@ -306,3 +425,12 @@ volumes:
   redisdata:
   natsdata:
   miniodata:
+
+networks:
+  rpc: {internal: true}
+  events: {}
+  objects: {}
+  auth-data: {}
+  chat-data: {}
+  media-data: {}
+  edge: {}

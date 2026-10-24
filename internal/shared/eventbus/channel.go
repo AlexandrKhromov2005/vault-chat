@@ -8,6 +8,9 @@ import "strings"
 // userChannelPrefix precedes the user ID in the name of a user's channel.
 const userChannelPrefix = "chat:user:"
 
+// SessionRevoked asks gateways to recheck access against Auth's session store.
+const SessionRevoked = "auth:session-revoked:v1"
+
 // UserChannel is the Pub/Sub channel carrying the events of one user.
 func UserChannel(userID string) string { return userChannelPrefix + userID }
 

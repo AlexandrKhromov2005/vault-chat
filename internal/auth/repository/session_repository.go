@@ -30,6 +30,17 @@ func NewSessionRepository(pool *pgxpool.Pool) *SessionRepository {
 	return &SessionRepository{pool: pool}
 }
 
+// IsActive checks the login family, so refresh rotation does not invalidate
+// requests already using the previous access token. Logout/reuse revoke it.
+func (r *SessionRepository) IsActive(ctx context.Context, userID, sessionID string) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS (
+SELECT 1 FROM sessions original JOIN sessions current ON current.family_id=original.family_id
+WHERE original.id=$1::uuid AND original.user_id=$2::uuid AND current.user_id=$2::uuid
+AND current.revoked_at IS NULL AND current.expires_at>now())`, sessionID, userID).Scan(&active)
+	return active, err
+}
+
 // Create stores a new active session that starts a session family.
 func (r *SessionRepository) Create(ctx context.Context, session *domain.Session) error {
 	const query = `INSERT INTO sessions (id, user_id, family_id, expires_at)

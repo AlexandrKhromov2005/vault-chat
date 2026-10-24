@@ -10,8 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -114,4 +117,58 @@ func TestMediaHTTP(t *testing.T) {
 	if w.Code != 200 || w.Body.String() != "hello" || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Disposition") != "attachment; filename=a.txt" {
 		t.Fatalf("download: %+v %s", w.Result().Header, w.Body.String())
 	}
+}
+
+type stalledUploadBody struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *stalledUploadBody) Read([]byte) (int, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return 0, io.EOF
+}
+func (*stalledUploadBody) Close() error { return nil }
+
+func TestUploadSlotsAreSharedFairlyAndReleased(t *testing.T) {
+	h := NewMediaHandler(nil, slog.Default())
+	entered, release, done := make(chan struct{}, 8), make(chan struct{}), make(chan struct{}, 8)
+	t.Cleanup(func() { close(release) })
+	request := func(user string, body io.Reader) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/", body)
+		r.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+		return r.WithContext(middleware.WithIdentity(r.Context(), middleware.Identity{Token: "token", UserID: user}))
+	}
+	for i, user := range []string{"one", "one", "two", "two", "three", "three", "four", "four"} {
+		go func() {
+			h.Upload(httptest.NewRecorder(), request(user, &stalledUploadBody{entered, release}))
+			done <- struct{}{}
+		}()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("upload failed to acquire its slot")
+		}
+		if i == 1 {
+			w := httptest.NewRecorder()
+			h.Upload(w, request("one", strings.NewReader("")))
+			require.Equal(t, http.StatusTooManyRequests, w.Code, "one user cannot fill the global pool")
+		}
+	}
+	w := httptest.NewRecorder()
+	h.Upload(w, request("one", strings.NewReader("")))
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	w = httptest.NewRecorder()
+	h.Upload(w, request("five", strings.NewReader("")))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	for range 8 {
+		release <- struct{}{}
+	}
+	for range 8 {
+		<-done
+	}
+	w = httptest.NewRecorder()
+	h.Upload(w, request("one", strings.NewReader("")))
+	require.Equal(t, http.StatusBadRequest, w.Code, "failed bodies must release their slots")
 }

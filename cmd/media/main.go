@@ -25,11 +25,9 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/storage"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
-	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
 func main() {
@@ -71,9 +69,6 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err := migration.Apply(startup, pool, migrations.MediaFS, "media"); err != nil {
-		return err
-	}
 	blobs, err := storage.NewS3(startup, cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Secure)
 	if err != nil {
 		return err

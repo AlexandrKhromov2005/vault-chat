@@ -7,14 +7,25 @@ for script in scripts/vps.sh scripts/vps/*.sh; do sh -n "$script"; done
 python3 -m unittest discover -s tests/ops -v
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin); services=c["services"]
-assert len(services)==9
+assert len(services)==13
+for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-postgres")]:
+    assert name+"_app:" in services[name]["environment"][name.upper()+"_DATABASE_URL"]
+    assert services[name]["depends_on"][name+"-migrate"]["condition"]=="service_completed_successfully"
+    own=set(services[db]["networks"])
+    for other in ["auth","chat","media","gateway"]:
+        if other!=name:
+            assert not own.intersection(services[other]["networks"])
+assert services["minio"]["environment"]["MINIO_ROOT_USER"] != services["media"]["environment"]["MEDIA_S3_ACCESS_KEY"]
+assert set(services["minio"]["networks"])=={"objects"}
 for name,s in services.items():
     assert "build" not in s
-    assert s["restart"]=="unless-stopped"
+    assert s["restart"]==("no" if name.endswith("-migrate") or name=="s3-init" else "unless-stopped")
     assert int(s["mem_limit"])>0
     assert s["logging"]["options"]["max-size"]=="10m"
     ports=s.get("ports",[])
@@ -27,7 +38,9 @@ print("VPS Compose: TLS, private data services, limits and image-only deployment
 
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.mtls.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin)

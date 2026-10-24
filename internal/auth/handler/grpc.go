@@ -21,7 +21,7 @@ import (
 type AuthService interface {
 	GetUser(ctx context.Context, accessToken, userID string) (*domain.User, error)
 	SearchUsers(ctx context.Context, accessToken, query string, limit int32) ([]*domain.User, error)
-	Register(ctx context.Context, email, username, password string) (*domain.User, error)
+	RegisterInvited(ctx context.Context, email, username, password, invitationToken string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
@@ -42,7 +42,7 @@ func NewAuthGRPCHandler(svc AuthService) *AuthGRPCHandler {
 
 // Register creates a new user account.
 func (h *AuthGRPCHandler) Register(ctx context.Context, req *authv1.RegisterRequest) (*authv1.RegisterResponse, error) {
-	user, err := h.svc.Register(ctx, req.GetEmail(), req.GetUsername(), req.GetPassword())
+	user, err := h.svc.RegisterInvited(ctx, req.GetEmail(), req.GetUsername(), req.GetPassword(), req.GetInvitationToken())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -131,6 +131,9 @@ var publicErrors = []struct {
 	code    codes.Code
 	message string
 }{
+	{service.ErrInvalidInvitation, codes.PermissionDenied, "invalid or expired invitation"},
+	{service.ErrPasswordCapacity, codes.Unavailable, "password capacity reached"},
+	{service.ErrLoginRateLimited, codes.ResourceExhausted, "too many login attempts"},
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
 	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},

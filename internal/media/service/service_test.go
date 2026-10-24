@@ -141,3 +141,21 @@ func TestRejectedAndFailedUploadsStayInvisible(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutableNamesAreSafeForNewAndLegacyFiles(t *testing.T) {
+	s, repo, _, _ := fixture()
+	ctx := context.Background()
+	f, err := s.Upload(ctx, uuid.NewString(), uuid.NewString(), "Инструкция.js", []byte("WScript.Echo('hello')"))
+	require.NoError(t, err)
+	require.Equal(t, "Инструкция.js.txt", f.Name)
+	// Simulate an immutable file created before filename hardening.
+	repo.files[f.ID].Name = "legacy.hta"
+	metadata, err := s.Get(ctx, f.ID)
+	require.NoError(t, err)
+	require.Equal(t, "legacy.hta.txt", metadata.Name)
+	metadata, body, err := s.Download(ctx, f.ID)
+	require.NoError(t, err)
+	defer func() { _ = body.Close() }()
+	require.Equal(t, "legacy.hta.txt", metadata.Name)
+	require.Equal(t, "legacy.hta", repo.files[f.ID].Name)
+}

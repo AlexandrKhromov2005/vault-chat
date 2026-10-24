@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	sharedlimit "github.com/AlexandrKhromov2005/vault-chat/internal/shared/ratelimit"
 )
 
 // keyPrefix namespaces bucket keys in Redis: rate:<key>.
@@ -61,12 +63,7 @@ return {allowed, math.floor(units / unit), retry}
 `)
 
 // Result is the outcome of a single rate limit check.
-type Result struct {
-	Allowed    bool
-	Limit      int
-	Remaining  int
-	RetryAfter time.Duration
-}
+type Result = sharedlimit.Result
 
 // RedisLimiter is a token bucket: each key may spend up to burst requests at
 // once, and its budget refills at perMinute requests per minute.

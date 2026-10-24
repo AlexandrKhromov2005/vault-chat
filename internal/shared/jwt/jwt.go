@@ -32,6 +32,7 @@ type Claims struct {
 	// ID is the token identifier (jti). For refresh tokens it is the id of
 	// the server-side session the token is bound to.
 	ID        string
+	SessionID string
 	UserID    string
 	Email     string
 	Username  string
@@ -73,14 +74,21 @@ func NewManager(privatePEM, publicPEM []byte, accessTTL, refreshTTL time.Duratio
 }
 
 // IssueAccessToken mints a short-lived access token for the given identity.
-func (m *Manager) IssueAccessToken(userID, email, username string) (string, time.Time, error) {
-	return m.issue(uuid.NewString(), userID, email, username, AccessToken, m.accessTTL)
+func (m *Manager) IssueAccessToken(userID, email, username string, sessionIDs ...string) (string, time.Time, error) {
+	var sid string
+	if len(sessionIDs) > 1 {
+		return "", time.Time{}, errors.New("one session identifier required")
+	}
+	if len(sessionIDs) == 1 {
+		sid = sessionIDs[0]
+	}
+	return m.issue(uuid.NewString(), sid, userID, email, username, AccessToken, m.accessTTL)
 }
 
 // IssueRefreshToken mints a long-lived refresh token for the given identity,
 // bound to sessionID via the jti claim so that it can be revoked server-side.
 func (m *Manager) IssueRefreshToken(sessionID, userID, email, username string) (string, time.Time, error) {
-	return m.issue(sessionID, userID, email, username, RefreshToken, m.refreshTTL)
+	return m.issue(sessionID, "", userID, email, username, RefreshToken, m.refreshTTL)
 }
 
 // Validate verifies the signature, expiry, and issuer of tokenString and
@@ -100,6 +108,7 @@ func (m *Manager) Validate(tokenString string) (*Claims, error) {
 
 	return &Claims{
 		ID:        claims.ID,
+		SessionID: claims.SessionID,
 		UserID:    claims.Subject,
 		Email:     claims.Email,
 		Username:  claims.Username,
@@ -114,9 +123,10 @@ type tokenClaims struct {
 	TokenType string `json:"token_type"`
 	Email     string `json:"email"`
 	Username  string `json:"username"`
+	SessionID string `json:"sid,omitempty"`
 }
 
-func (m *Manager) issue(id, userID, email, username string, tokenType TokenType, ttl time.Duration) (string, time.Time, error) {
+func (m *Manager) issue(id, sessionID, userID, email, username string, tokenType TokenType, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 
@@ -131,6 +141,7 @@ func (m *Manager) issue(id, userID, email, username string, tokenType TokenType,
 		TokenType: string(tokenType),
 		Email:     email,
 		Username:  username,
+		SessionID: sessionID,
 	}
 
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodRS256, claims)

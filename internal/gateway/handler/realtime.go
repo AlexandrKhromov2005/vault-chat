@@ -18,6 +18,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
 // Close codes of the WebSocket endpoint in the range RFC 6455 leaves to
@@ -61,6 +62,9 @@ type RealtimeOptions struct {
 	// so that clients without a token cannot take every slot. Zero means no
 	// limit besides MaxConnections.
 	MaxUnauthenticated int
+	// SessionCheckInterval bounds idle connections when an invalidation hint
+	// is lost. Production sets one second; zero disables only the idle poll.
+	SessionCheckInterval time.Duration
 }
 
 // Realtime serves GET /api/v1/ws: authenticated connections that receive the
@@ -167,6 +171,7 @@ type closeError struct {
 type session struct {
 	userID    string
 	expiresAt time.Time
+	token     string
 }
 
 // connection is the state of one accepted WebSocket connection.
@@ -174,7 +179,7 @@ type connection struct {
 	*Realtime
 	conn *websocket.Conn
 	// renewed carries the expiry of a token sent by the client in-band.
-	renewed chan time.Time
+	renewed chan session
 	// ended asks the writer to close; nil means the connection is already gone.
 	ended   chan *closeError
 	workers sync.WaitGroup
@@ -232,7 +237,7 @@ func (h *Realtime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuse(w, refused)
 		return
 	}
-	c := &connection{Realtime: h, renewed: make(chan time.Time), ended: make(chan *closeError, 2)}
+	c := &connection{Realtime: h, renewed: make(chan session), ended: make(chan *closeError, 2)}
 	defer h.release(c)
 	// The origin was checked above against the configured list.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
@@ -370,7 +375,7 @@ func (c *connection) validate(ctx context.Context, token string) (session, *clos
 	if !resp.GetValid() || resp.GetUserId() == "" || resp.GetExpiresAt() == nil || !expiresAt.After(time.Now()) {
 		return session{}, &closeError{closeUnauthorized, "invalid or expired token"}
 	}
-	return session{userID: resp.GetUserId(), expiresAt: expiresAt}, nil
+	return session{userID: resp.GetUserId(), expiresAt: expiresAt, token: token}, nil
 }
 
 // readFrames handles in-band re-authentication until the connection ends.
@@ -397,7 +402,7 @@ func (c *connection) readFrames(ctx context.Context, userID string) {
 			return
 		}
 		select {
-		case c.renewed <- renewed.expiresAt:
+		case c.renewed <- renewed:
 		case <-ctx.Done():
 			return
 		}
@@ -438,9 +443,23 @@ func (c *connection) finish(ctx context.Context, end *closeError) {
 func (c *connection) relay(ctx context.Context, client *realtime.Client, current session) *closeError {
 	expiry := time.NewTimer(time.Until(current.expiresAt))
 	defer expiry.Stop()
+	var checks <-chan time.Time
+	if c.options.SessionCheckInterval > 0 {
+		ticker := time.NewTicker(c.options.SessionCheckInterval)
+		defer ticker.Stop()
+		checks = ticker.C
+	}
 	for {
 		select {
 		case payload := <-client.Frames():
+			// Check the authoritative session before every event. Lost Redis
+			// invalidations can never extend permission to receive messages.
+			if _, end := c.validate(ctx, current.token); end != nil {
+				return end
+			}
+			if string(payload) == eventbus.SessionRevoked {
+				continue
+			}
 			frame, known, err := eventFrame(payload)
 			if err != nil {
 				c.logger.WarnContext(ctx, "skipping undecodable chat event", "error", err)
@@ -451,13 +470,17 @@ func (c *connection) relay(ctx context.Context, client *realtime.Client, current
 			if err := c.write(ctx, frame); err != nil {
 				return nil
 			}
-		case current.expiresAt = <-c.renewed:
+		case current = <-c.renewed:
 			expiry.Reset(time.Until(current.expiresAt))
 			if err := c.writeReady(ctx, current); err != nil {
 				return nil
 			}
 		case <-expiry.C:
 			return &closeError{closeUnauthorized, "access token expired"}
+		case <-checks:
+			if _, end := c.validate(ctx, current.token); end != nil {
+				return end
+			}
 		case <-client.Done():
 			return clientEnd(client.Reason())
 		case end := <-c.ended:

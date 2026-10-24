@@ -27,6 +27,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
 // tokens maps access tokens to their owners and expiry; "down" fails like an
@@ -49,6 +50,39 @@ func (v tokens) ValidateToken(_ context.Context, in *authv1.ValidateTokenRequest
 
 // nopStream subscribes instantly; tests deliver events through the hub.
 type nopStream struct{}
+
+type revocableToken struct{ revoked atomic.Bool }
+
+func (v *revocableToken) ValidateToken(context.Context, *authv1.ValidateTokenRequest, ...grpc.CallOption) (*authv1.ValidateTokenResponse, error) {
+	return &authv1.ValidateTokenResponse{Valid: !v.revoked.Load(), UserId: "alice", ExpiresAt: timestamppb.New(time.Now().Add(time.Hour))}, nil
+}
+
+func TestRealtimeRevocationClosesIdleConnectionsAndBlocksEvents(t *testing.T) {
+	for _, mode := range []string{"event", "hint", "lost hint"} {
+		t.Run(mode, func(t *testing.T) {
+			hub := realtime.NewHub(nopStream{}, 5, 8)
+			validator := &revocableToken{}
+			options := testOptions()
+			if mode == "lost hint" {
+				options.SessionCheckInterval = 10 * time.Millisecond
+			}
+			_, url := startRealtimeHandler(t, hub, validator, options)
+			conn := dial(t, url)
+			authenticate(t, conn, "token")
+			validator.revoked.Store(true)
+			if mode == "hint" {
+				hub.Deliver("alice", []byte(eventbus.SessionRevoked))
+			}
+			if mode == "event" {
+				hub.Deliver("alice", eventPayload(t, &chatv1.Event{Kind: &chatv1.Event_MemberLeft{MemberLeft: &chatv1.MemberChange{RoomId: "secret", UserId: "alice"}}}))
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, _, err := conn.Read(ctx)
+			require.Equal(t, websocket.StatusCode(4001), websocket.CloseStatus(err), "no event may pass after session revocation")
+		})
+	}
+}
 
 func (nopStream) Subscribe(context.Context, string) error   { return nil }
 func (nopStream) Unsubscribe(context.Context, string) error { return nil }

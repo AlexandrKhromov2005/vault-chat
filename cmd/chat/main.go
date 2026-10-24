@@ -28,11 +28,9 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
-	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
 func main() {
@@ -77,9 +75,6 @@ func run() error {
 	defer pool.Close()
 	if err := pool.Ping(startup); err != nil {
 		return fmt.Errorf("connect chat database: %w", err)
-	}
-	if err := migration.Apply(startup, pool, migrations.ChatFS, "chat"); err != nil {
-		return fmt.Errorf("migrate chat database: %w", err)
 	}
 	// Each client pins the expected service identity when mTLS is enabled.
 	authConn, err := rpcTLS.Dial(cfg.AuthGRPCAddr, "auth")

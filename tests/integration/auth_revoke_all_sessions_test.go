@@ -40,6 +40,7 @@ func newAuthHandler(t *testing.T) *handler.AuthGRPCHandler {
 		}),
 		tokens,
 		slog.Default(),
+		service.WithInvitations(repository.NewUserRepository(pool)),
 	)
 	require.NoError(t, err)
 
@@ -69,6 +70,7 @@ func registerAndLogin(t *testing.T, h *handler.AuthGRPCHandler, logins int) []*a
 	const password = "correct-horse-42"
 	_, err := h.Register(ctx, &authv1.RegisterRequest{
 		Email: email, Username: "u" + uuid.NewString()[:8], Password: password,
+		InvitationToken: testInvitation(t, email),
 	})
 	require.NoError(t, err)
 
@@ -130,6 +132,30 @@ func TestRevokeAllSessions_RejectsUnauthenticatedRequests(t *testing.T) {
 	}
 
 	requireActive(t, h, victim[0], true)
+}
+
+func TestAccessTokensFollowTheLoginFamilyAndAreRevokedImmediately(t *testing.T) {
+	h := newAuthHandler(t)
+	ctx := context.Background()
+	logins := registerAndLogin(t, h, 2)
+	rotated, err := h.RefreshToken(ctx, &authv1.RefreshTokenRequest{RefreshToken: logins[0].RefreshToken})
+	require.NoError(t, err)
+	check := func(token string, valid bool) {
+		t.Helper()
+		resp, err := h.ValidateToken(ctx, &authv1.ValidateTokenRequest{Token: token})
+		require.NoError(t, err)
+		require.Equal(t, valid, resp.Valid)
+	}
+	check(logins[0].AccessToken, true)
+	check(rotated.AccessToken, true)
+	_, err = h.Logout(ctx, &authv1.LogoutRequest{RefreshToken: rotated.RefreshToken})
+	require.NoError(t, err)
+	check(logins[0].AccessToken, false)
+	check(rotated.AccessToken, false)
+	check(logins[1].AccessToken, true)
+	_, err = h.RevokeAllSessions(ctx, &authv1.RevokeAllSessionsRequest{AccessToken: logins[1].AccessToken})
+	require.NoError(t, err)
+	check(logins[1].AccessToken, false)
 }
 
 // forgeAccessToken issues an access token for userID with a key the service
