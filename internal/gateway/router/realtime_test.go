@@ -59,7 +59,7 @@ func TestRouter_WebSocketOutlivesTheRequestBudget(t *testing.T) {
 	limiter.EXPECT().Allow(mock.Anything, "ip:127.0.0.1").Return(ratelimit.Result{Allowed: true, Limit: 30, Remaining: 29}, nil).Once()
 	url, hub, validator := startRealtimeRouter(t, limiter)
 	validator.EXPECT().ValidateToken(mock.Anything, &authv1.ValidateTokenRequest{Token: "tok"}).
-		Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1", ExpiresAt: timestamppb.New(time.Now().Add(time.Hour))}, nil).Once()
+		Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1", ExpiresAt: timestamppb.New(time.Now().Add(time.Hour))}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, url, nil)

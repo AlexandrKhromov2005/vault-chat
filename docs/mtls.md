@@ -1,5 +1,8 @@
 # Внутренний gRPC с mTLS
 
+VPS Compose требует mTLS по умолчанию; `scripts/vps.sh init` создаёт сертификаты.
+Для локального Compose overlay остаётся отдельным выбором.
+
 Публичный HTTPS и внутренний mTLS используют разные CA и ключи. У Auth, Chat,
 Media и Gateway отдельные EC P-256 сертификаты с DNS SAN `<service>.vault.internal`
 и URI SAN `spiffe://vault-chat/service/<service>`. TLS 1.3 проверяет доверенный CA,

@@ -6,16 +6,56 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
+
+func TestScopedS3CredentialsCannotAccessOtherBuckets(t *testing.T) {
+	endpoint := os.Getenv("VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT")
+	if endpoint == "" || os.Getenv("VAULT_CHAT_TEST_SCOPED_S3") != "1" {
+		t.Skip("provisioned scoped S3 fixture required")
+	}
+	ctx := context.Background()
+	owner, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4("minioadmin", "minioadmin", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := "foreign-" + uuid.NewString()
+	if err := owner.MakeBucket(ctx, foreign, minio.MakeBucketOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.RemoveBucket(ctx, foreign) }()
+	c, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4("vaultmedia", "vaultmedia-secret", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := c.BucketExists(ctx, "vault-chat-media"); err != nil || !ok {
+		t.Fatalf("own bucket unavailable: %v", err)
+	}
+	if err := c.MakeBucket(ctx, "forbidden-"+uuid.NewString(), minio.MakeBucketOptions{}); err == nil {
+		t.Fatal("runtime account created an unrelated bucket")
+	}
+	if buckets, err := c.ListBuckets(ctx); err == nil {
+		for _, bucket := range buckets {
+			if bucket.Name != "vault-chat-media" {
+				t.Fatal("runtime account listed a foreign bucket")
+			}
+		}
+	}
+	if _, err := c.PutObject(ctx, foreign, "forbidden", strings.NewReader("secret"), 6, minio.PutObjectOptions{DisableMultipart: true}); err == nil {
+		t.Fatal("runtime account wrote to a foreign bucket")
+	}
+}
 
 func TestMetadataVisibility(t *testing.T) {
 	url := os.Getenv("VAULT_CHAT_TEST_MEDIA_DATABASE_URL")

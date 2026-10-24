@@ -10,14 +10,17 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/events"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/handler"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
@@ -27,7 +30,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
-	"github.com/AlexandrKhromov2005/vault-chat/migrations"
 )
 
 func main() {
@@ -88,10 +90,8 @@ func run() error {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	if err := repository.Migrate(ctx, pool, migrations.AuthFS, "auth"); err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, ContextTimeoutEnabled: true, MaxRetries: -1, DialTimeout: 250 * time.Millisecond, ReadTimeout: 250 * time.Millisecond, WriteTimeout: 250 * time.Millisecond})
+	defer redisClient.Close()
 	svc, err := service.NewService(
 		repository.NewUserRepository(pool),
 		repository.NewSessionRepository(pool),
@@ -104,6 +104,8 @@ func run() error {
 		}),
 		tokenManager,
 		logger,
+		service.WithInvitations(repository.NewUserRepository(pool)),
+		service.WithSessionNotifier(events.Notifier{Client: redisClient}),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to init auth service: %w", err)

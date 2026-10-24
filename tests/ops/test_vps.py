@@ -63,6 +63,16 @@ class BackupFailure(unittest.TestCase):
             bindir = root / 'bin'
             bindir.mkdir()
             trace = root / 'trace'
+            helpers = root / 'scripts/vps'
+            helpers.mkdir(parents=True)
+            for name in ('encrypted_backup.py', 'backup_config.py'):
+                (helpers / name).write_bytes((ROOT / 'scripts/vps' / name).read_bytes())
+            config = root / 'rclone.conf'
+            config.write_text('[backup]\ntype = s3\nendpoint = https://backup.example.com\n')
+            config.chmod(0o600)
+            (root / '.env.vps').write_text(f'BACKUP_AGE_RECIPIENT=fake\nBACKUP_REMOTE=backup:vault\nBACKUP_RCLONE_CONFIG={config}\n')
+            (bindir / 'rclone').write_text('#!/bin/sh\nexit 0\n')
+            (bindir / 'age').write_text('#!/bin/sh\nif [ "$#" = 4 ]; then cat > "$4"; else cat; fi\n')
             (bindir / 'id').write_text('#!/bin/sh\necho 0\n')
             (bindir / 'docker').write_text("""#!/bin/sh
 case "$*" in

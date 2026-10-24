@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 import { Api } from '../static/app/api.mjs';
 import { Backoff } from '../static/app/backoff.mjs';
@@ -52,6 +53,15 @@ function newUser() {
   return { email: `web-${id}@example.com`, username: `web_${id}`, password: 'Password123' };
 }
 
+function invitation(email) {
+  const dsn = process.env.VAULT_CHAT_WEB_INVITE_DATABASE_URL;
+  assert.ok(dsn, 'set VAULT_CHAT_WEB_INVITE_DATABASE_URL to issue operator test invitations');
+  const output = execFileSync('go', ['run', './cmd/invite', email], {
+    env: { ...process.env, AUTH_DATABASE_URL: dsn }, encoding: 'utf8',
+  });
+  return JSON.parse(output).invitation_token;
+}
+
 test('the Gateway serves the client', { skip }, async () => {
   const page = await fetch(new URL('/', base));
   assert.equal(page.status, 200);
@@ -68,7 +78,7 @@ test('a user registers, refreshes and signs out', { skip }, async () => {
   const session = new Session({ fetchFn, storage: memoryStorage() });
   const api = new Api({ fetchFn, session });
 
-  await session.register(user.email, user.username, user.password);
+  await session.register(user.email, user.username, user.password, invitation(user.email));
   assert.equal(session.user.username, user.username);
 
   const me = await api.call('GET', '/api/v1/auth/me');
@@ -86,7 +96,7 @@ test('a user registers, refreshes and signs out', { skip }, async () => {
 test('signing in with a wrong password is rejected', { skip }, async () => {
   const user = newUser();
   const session = new Session({ fetchFn, storage: memoryStorage() });
-  await session.register(user.email, user.username, user.password);
+  await session.register(user.email, user.username, user.password, invitation(user.email));
   await session.logout();
 
   await assert.rejects(session.login(user.email, 'WrongPassword1'), { status: 401, code: 'unauthenticated' });
@@ -97,7 +107,7 @@ test('a refresh token stops working after logout', { skip }, async () => {
   const user = newUser();
   const storage = memoryStorage();
   const session = new Session({ fetchFn, storage });
-  await session.register(user.email, user.username, user.password);
+  await session.register(user.email, user.username, user.password, invitation(user.email));
   const { refreshToken } = JSON.parse(storage.getItem('vault-chat.session'));
 
   await session.logout();
@@ -112,7 +122,7 @@ test('a refresh token stops working after logout', { skip }, async () => {
 async function client() {
   const user = newUser();
   const session = new Session({ fetchFn, storage: memoryStorage() });
-  await session.register(user.email, user.username, user.password);
+  await session.register(user.email, user.username, user.password, invitation(user.email));
   const api = new Api({ fetchFn, session });
   return { user, session, api, profiles: new Profiles(api) };
 }

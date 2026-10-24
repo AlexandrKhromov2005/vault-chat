@@ -30,9 +30,10 @@ type AuthClient interface {
 }
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Email           string `json:"email"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	InvitationToken string `json:"invitation_token"`
 }
 
 type userResponse struct {
@@ -112,9 +113,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.client.Register(r.Context(), &authv1.RegisterRequest{
-		Email:    req.Email,
-		Username: req.Username,
-		Password: req.Password,
+		Email:           req.Email,
+		Username:        req.Username,
+		Password:        req.Password,
+		InvitationToken: req.InvitationToken,
 	})
 	if err != nil {
 		h.backendError(w, r, "register", err)

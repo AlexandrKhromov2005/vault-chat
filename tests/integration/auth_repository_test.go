@@ -46,7 +46,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 
 	require.NoError(t, repository.Migrate(ctx, pool, migrations.AuthFS, "auth"))
 
-	_, err = pool.Exec(ctx, "TRUNCATE users CASCADE")
+	_, err = pool.Exec(ctx, "TRUNCATE users, registration_invitations CASCADE")
 	require.NoError(t, err)
 
 	return pool

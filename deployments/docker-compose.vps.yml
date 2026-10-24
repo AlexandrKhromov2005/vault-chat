@@ -2,6 +2,7 @@
 name: vault-chat
 services:
   postgres:
+    networks: [auth-data]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: auth
@@ -30,6 +31,7 @@ services:
     - -c
     - max_connections=40
   chat-postgres:
+    networks: [chat-data]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: chat
@@ -58,6 +60,7 @@ services:
     - -c
     - max_connections=40
   redis:
+    networks: [events]
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     volumes:
     - redisdata:/data
@@ -83,14 +86,15 @@ services:
     - exec redis-server --requirepass "$$REDIS_PASSWORD" --maxmemory 64mb --maxmemory-policy
       allkeys-lru --appendonly no
   minio:
+    networks: [objects]
     command:
     - server
     - /data
     - --console-address
     - :9001
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?required}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?required}
+      MINIO_ROOT_USER: ${S3_ROOT_ACCESS_KEY:?required}
+      MINIO_ROOT_PASSWORD: ${S3_ROOT_SECRET_KEY:?required}
     volumes:
     - miniodata:/data
     healthcheck:
@@ -113,6 +117,7 @@ services:
         max-file: '3'
     mem_limit: 768m
   auth:
+    networks: [rpc, auth-data, events]
     restart: unless-stopped
     read_only: true
     cap_drop: &id001
@@ -120,13 +125,24 @@ services:
     security_opt: &id002
     - no-new-privileges:true
     environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_SERVICE: auth
+      RPC_TLS_DIR: /run/secrets/rpc
+      AUTH_REDIS_ADDR: redis:6379
+      AUTH_REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
       AUTH_GRPC_ADDR: :50051
-      AUTH_DATABASE_URL: postgres://auth:${AUTH_DB_PASSWORD:?required}@postgres:5432/auth_db?sslmode=disable
+      AUTH_DATABASE_URL: postgres://auth_app:${AUTH_RUNTIME_DB_PASSWORD:?required}@postgres:5432/auth_db?sslmode=disable
       AUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/auth_jwt_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/auth_jwt_public.pem
       AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
       AUTH_LOG_LEVEL: ${AUTH_LOG_LEVEL:-info}
     volumes:
+    - type: bind
+      source: ../secrets/rpc/auth
+      target: /run/secrets/rpc
+      read_only: true
+      bind:
+        create_host_path: false
     - type: bind
       source: ../secrets/auth_jwt_private.pem
       target: /run/secrets/auth_jwt_private.pem
@@ -140,6 +156,8 @@ services:
       bind:
         create_host_path: false
     depends_on:
+      auth-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     healthcheck:
@@ -162,15 +180,19 @@ services:
         max-file: '3'
     mem_limit: 512m
   chat:
+    networks: [rpc, chat-data, events]
     restart: unless-stopped
     read_only: true
     cap_drop: *id001
     security_opt: *id002
     environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_SERVICE: chat
+      RPC_TLS_DIR: /run/secrets/rpc
       CHAT_GRPC_ADDR: :50052
       CHAT_MEDIA_GRPC_ADDR: passthrough:///media:50053
       CHAT_AUTH_GRPC_ADDR: passthrough:///auth:50051
-      CHAT_DATABASE_URL: postgres://chat:${CHAT_DB_PASSWORD:?required}@chat-postgres:5432/chat_db?sslmode=disable
+      CHAT_DATABASE_URL: postgres://chat_app:${CHAT_RUNTIME_DB_PASSWORD:?required}@chat-postgres:5432/chat_db?sslmode=disable
       CHAT_REDIS_ADDR: redis:6379
       CHAT_EVENT_QUEUE_SIZE: '1024'
       CHAT_EVENT_PUBLISH_TIMEOUT: 1s
@@ -178,6 +200,8 @@ services:
       CHAT_LOG_LEVEL: ${CHAT_LOG_LEVEL:-info}
       CHAT_REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
     depends_on:
+      chat-migrate:
+        condition: service_completed_successfully
       chat-postgres:
         condition: service_healthy
       auth:
@@ -204,7 +228,15 @@ services:
         max-size: 10m
         max-file: '3'
     mem_limit: 256m
+    volumes:
+    - type: bind
+      source: ../secrets/rpc/chat
+      target: /run/secrets/rpc
+      read_only: true
+      bind:
+        create_host_path: false
   media-postgres:
+    networks: [media-data]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: media
@@ -233,13 +265,17 @@ services:
     - -c
     - max_connections=40
   media:
+    networks: [rpc, media-data, objects]
     restart: unless-stopped
     read_only: true
     cap_drop: *id001
     security_opt: *id002
     environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_SERVICE: media
+      RPC_TLS_DIR: /run/secrets/rpc
       MEDIA_GRPC_ADDR: :50053
-      MEDIA_DATABASE_URL: postgres://media:${MEDIA_DB_PASSWORD:?required}@media-postgres:5432/media_db?sslmode=disable
+      MEDIA_DATABASE_URL: postgres://media_app:${MEDIA_RUNTIME_DB_PASSWORD:?required}@media-postgres:5432/media_db?sslmode=disable
       MEDIA_AUTH_GRPC_ADDR: passthrough:///auth:50051
       MEDIA_CHAT_GRPC_ADDR: passthrough:///chat:50052
       MEDIA_S3_ENDPOINT: minio:9000
@@ -248,6 +284,10 @@ services:
       MEDIA_S3_BUCKET: vault-chat-media
       MEDIA_S3_SECURE: 'false'
     depends_on:
+      s3-init:
+        condition: service_completed_successfully
+      media-migrate:
+        condition: service_completed_successfully
       media-postgres:
         condition: service_healthy
       minio:
@@ -276,12 +316,23 @@ services:
         max-size: 10m
         max-file: '3'
     mem_limit: 256m
+    volumes:
+    - type: bind
+      source: ../secrets/rpc/media
+      target: /run/secrets/rpc
+      read_only: true
+      bind:
+        create_host_path: false
   gateway:
+    networks: [rpc, events, edge]
     restart: unless-stopped
     read_only: true
     cap_drop: *id001
     security_opt: *id002
     environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_SERVICE: gateway
+      RPC_TLS_DIR: /run/secrets/rpc
       GATEWAY_HTTP_ADDR: :8080
       GATEWAY_AUTH_GRPC_ADDR: passthrough:///auth:50051
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
@@ -289,6 +340,8 @@ services:
       GATEWAY_REDIS_ADDR: redis:6379
       GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-5}
       GATEWAY_AUTH_RATE_LIMIT_BURST: ${GATEWAY_AUTH_RATE_LIMIT_BURST:-5}
+      GATEWAY_RATE_LIMIT_PER_MINUTE: ${GATEWAY_RATE_LIMIT_PER_MINUTE:-120}
+      GATEWAY_RATE_LIMIT_BURST: ${GATEWAY_RATE_LIMIT_BURST:-30}
       GATEWAY_CORS_ALLOWED_ORIGINS: https://${PUBLIC_IP:?set PUBLIC_IP}
       GATEWAY_LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-info}
       GATEWAY_REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
@@ -327,14 +380,135 @@ services:
     - 0.0.0.0:443:8080
     volumes:
     - type: bind
+      source: ../secrets/rpc/gateway
+      target: /run/secrets/rpc
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
       source: ../secrets/tls
       target: /run/secrets/tls
       read_only: true
       bind:
         create_host_path: false
+  auth-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - auth-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: auth
+      MIGRATION_DATABASE_URL: postgres://auth:${AUTH_DB_PASSWORD:?required}@postgres:5432/auth_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${AUTH_RUNTIME_DB_PASSWORD:?required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    image: vault-chat/auth:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  chat-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - chat-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: chat
+      MIGRATION_DATABASE_URL: postgres://chat:${CHAT_DB_PASSWORD:?required}@chat-postgres:5432/chat_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${CHAT_RUNTIME_DB_PASSWORD:?required}
+    depends_on:
+      chat-postgres:
+        condition: service_healthy
+    image: vault-chat/chat:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  media-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    networks:
+    - media-data
+    entrypoint:
+    - /usr/local/bin/migrate
+    environment:
+      MIGRATION_SERVICE: media
+      MIGRATION_DATABASE_URL: postgres://media:${MEDIA_DB_PASSWORD:?required}@media-postgres:5432/media_db?sslmode=disable
+      MIGRATION_RUNTIME_PASSWORD: ${MEDIA_RUNTIME_DB_PASSWORD:?required}
+    depends_on:
+      media-postgres:
+        condition: service_healthy
+    image: vault-chat/media:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  s3-init:
+    restart: 'no'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp
+    networks:
+    - objects
+    entrypoint:
+    - /usr/local/bin/s3-init
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: vault-chat-media
+      S3_ROOT_ACCESS_KEY: ${S3_ROOT_ACCESS_KEY:?required}
+      S3_ROOT_SECRET_KEY: ${S3_ROOT_SECRET_KEY:?required}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?required}
+    depends_on:
+      minio:
+        condition: service_healthy
+    image: vault-chat/minio:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
 volumes:
   pgdata: null
   chat_pgdata: null
   media_pgdata: null
   redisdata: null
   miniodata: null
+
+networks:
+  rpc: {internal: true}
+  events: {internal: true}
+  objects: {internal: true}
+  auth-data: {internal: true}
+  chat-data: {internal: true}
+  media-data: {internal: true}
+  edge: {}

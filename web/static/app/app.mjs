@@ -74,7 +74,7 @@ function submitWith(form, action) {
 }
 
 submitWith($('login-form'), ({ email, password }) => session.login(email, password));
-submitWith($('register-form'), ({ email, username, password }) => session.register(email, username, password));
+submitWith($('register-form'), ({ email, username, password, invitation_token }) => session.register(email, username, password, invitation_token));
 $('show-login').addEventListener('click', () => showAuthTab('login'));
 $('show-register').addEventListener('click', () => showAuthTab('register'));
 $('logout').addEventListener('click', () => session.logout());

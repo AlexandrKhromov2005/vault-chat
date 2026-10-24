@@ -116,6 +116,19 @@ func gatewayDeps(t *testing.T, conn *grpc.ClientConn, redisAddr string, burst ui
 // there is one.
 func call(t *testing.T, method, url, token, body string) (int, map[string]any) {
 	t.Helper()
+	if strings.HasSuffix(url, "/register") {
+		var registration map[string]any
+		if json.Unmarshal([]byte(body), &registration) == nil {
+			if _, explicit := registration["invitation_token"]; !explicit {
+				if email, ok := registration["email"].(string); ok {
+					registration["invitation_token"] = testInvitation(t, email)
+					encoded, err := json.Marshal(registration)
+					require.NoError(t, err)
+					body = string(encoded)
+				}
+			}
+		}
+	}
 	req, err := http.NewRequest(method, url, strings.NewReader(body))
 	require.NoError(t, err)
 	if body != "" {
@@ -172,8 +185,8 @@ func TestGateway_AuthFlow(t *testing.T) {
 
 	code, body = call(t, http.MethodPost, api+"/register", "",
 		`{"email":"ALICE@example.com","username":"alice2","password":"password1"}`)
-	require.Equal(t, http.StatusConflict, code, body)
-	require.Equal(t, "email already registered", body["error"].(map[string]any)["message"])
+	require.Equal(t, http.StatusForbidden, code, body)
+	require.Equal(t, "invalid or expired invitation", body["error"].(map[string]any)["message"])
 
 	code, body = call(t, http.MethodPost, api+"/register", "",
 		`{"email":"not-an-email","username":"bob","password":"password1"}`)

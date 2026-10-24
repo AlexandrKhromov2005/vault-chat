@@ -9,11 +9,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Initialization(unittest.TestCase):
+    def test_upgrade_preserves_final_value_without_trailing_newline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            for name in ('gen-jwt-keys.sh', 'gen-rpc-certs.py'):
+                (root / 'scripts' / name).write_bytes((ROOT / 'scripts' / name).read_bytes())
+            (root / '.env.vps').write_text('PUBLIC_IP=168.113.171.56\nVAULT_IMAGE_TAG=v0.4.0\nAUTH_DB_PASSWORD=keep-existing')
+            subprocess.run(['python3', str(ROOT / 'scripts/vps/init.py'), '168.113.171.56', 'v0.4.0'],
+                           env=dict(os.environ, VAULT_ROOT=directory), check=True, capture_output=True)
+            values = dict(line.split('=', 1) for line in (root / '.env.vps').read_text().splitlines() if '=' in line)
+            self.assertEqual(values['AUTH_DB_PASSWORD'], 'keep-existing')
+            self.assertTrue(values['AUTH_RUNTIME_DB_PASSWORD'])
+            self.assertTrue(values['S3_ROOT_SECRET_KEY'])
+
     def test_repeat_preserves_credentials_and_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
             (root / 'scripts/gen-jwt-keys.sh').write_bytes((ROOT / 'scripts/gen-jwt-keys.sh').read_bytes())
+            (root / 'scripts/gen-rpc-certs.py').write_bytes((ROOT / 'scripts/gen-rpc-certs.py').read_bytes())
             command = ['python3', str(ROOT / 'scripts/vps/init.py'), '168.113.171.56', 'v0.2.0']
             env = dict(os.environ, VAULT_ROOT=directory)
             subprocess.run(command, env=env, check=True, capture_output=True)

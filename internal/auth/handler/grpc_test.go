@@ -27,7 +27,7 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 		h := handler.NewAuthGRPCHandler(svc)
 
 		svc.EXPECT().
-			Register(mock.Anything, "user@example.com", "username1", "password1").
+			RegisterInvited(mock.Anything, "user@example.com", "username1", "password1", "").
 			Return(&domain.User{ID: "user-1", Email: "user@example.com", Username: "username1"}, nil)
 
 		resp, err := h.Register(context.Background(), &authv1.RegisterRequest{
@@ -45,7 +45,7 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		svc.EXPECT().RegisterInvited(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, fmt.Errorf("register: %w", validator.ErrInvalidEmail))
 
 		_, err := h.Register(context.Background(), &authv1.RegisterRequest{})
@@ -58,7 +58,7 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		svc.EXPECT().RegisterInvited(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, service.ErrEmailTaken)
 
 		_, err := h.Register(context.Background(), &authv1.RegisterRequest{})
@@ -69,7 +69,7 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		svc.EXPECT().RegisterInvited(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, service.ErrUsernameTaken)
 
 		_, err := h.Register(context.Background(), &authv1.RegisterRequest{})
@@ -80,7 +80,7 @@ func TestAuthGRPCHandler_Register(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)
 		h := handler.NewAuthGRPCHandler(svc)
 
-		svc.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		svc.EXPECT().RegisterInvited(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("db down"))
 
 		_, err := h.Register(context.Background(), &authv1.RegisterRequest{})

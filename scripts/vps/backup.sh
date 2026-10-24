@@ -4,6 +4,13 @@ umask 077
 . "$(dirname -- "$0")/common.sh"
 root_only
 lock_operations
+command -v age >/dev/null
+command -v rclone >/dev/null
+recipient=$(value BACKUP_AGE_RECIPIENT 2>/dev/null) || { echo 'Set BACKUP_AGE_RECIPIENT in .env.vps' >&2; exit 1; }
+remote=$(value BACKUP_REMOTE 2>/dev/null) || { echo 'Set BACKUP_REMOTE in .env.vps' >&2; exit 1; }
+rclone_config=$(value BACKUP_RCLONE_CONFIG 2>/dev/null) || rclone_config=/etc/vault-chat/rclone.conf
+python3 "$VAULT_ROOT/scripts/vps/backup_config.py" "$remote" "$rclone_config"
+printf '' | age --recipient "$recipient" >/dev/null
 backup_root=${VAULT_BACKUP_ROOT:-/var/backups/vault-chat}
 mkdir -p "$backup_root"
 chmod 700 "$backup_root"
@@ -20,23 +27,26 @@ paused_ids=$(compose ps --status running -q auth chat media gateway minio)
 if [ -n "$paused_ids" ]; then docker pause $paused_ids >/dev/null; fi
 for user in auth chat media; do
     case "$user" in auth) service=postgres;; *) service="$user-postgres";; esac
-    compose exec -T "$service" pg_dump -U "$user" -Fc "${user}_db" > "$backup_dir/$user.dump"
+    python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/$user.dump.age" \
+        docker compose -p "$VAULT_PROJECT" --env-file "$VAULT_ROOT/.env.vps" -f "$VAULT_ROOT/deployments/docker-compose.vps.yml" \
+        exec -T "$service" pg_dump -U "$user" -Fc "${user}_db"
 done
 media_path=$(docker volume inspect "${VAULT_PROJECT}_miniodata" --format '{{.Mountpoint}}')
-tar -C "$media_path" -czf "$backup_dir/media-objects.tar.gz" .
+python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/media-objects.tar.gz.age" tar -C "$media_path" -czf - .
 set -- .env.vps secrets deployments/docker-compose.vps.yml
 if [ -f "$VAULT_ROOT/.env.monitoring" ]; then set -- "$@" .env.monitoring deployments/monitoring/app.yml; fi
 if [ -f "$VAULT_ROOT/.env.rpc" ]; then set -- "$@" .env.rpc deployments/docker-compose.mtls.yml; fi
-tar -C "$VAULT_ROOT" -czf "$backup_dir/config.tar.gz" "$@"
+python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/config.tar.gz.age" tar -C "$VAULT_ROOT" -czf - "$@"
 compose config --images > "$backup_dir/images.txt"
 cleanup
 paused_ids=''
-for user in auth chat media; do
-    compose exec -T postgres pg_restore --list < "$backup_dir/$user.dump" >/dev/null
-done
-tar -tzf "$backup_dir/media-objects.tar.gz" >/dev/null
-(cd "$backup_dir" && sha256sum auth.dump chat.dump media.dump config.tar.gz media-objects.tar.gz images.txt > SHA256SUMS)
-printf '1\n' > "$backup_dir/COMPLETE"
+(cd "$backup_dir" && sha256sum auth.dump.age chat.dump.age media.dump.age config.tar.gz.age media-objects.tar.gz.age images.txt > SHA256SUMS)
+destination="${remote%/}/${backup_dir##*/}"
+rclone --config "$rclone_config" copy --immutable --checksum "$backup_dir" "$destination"
+rclone --config "$rclone_config" check --download --one-way "$backup_dir" "$destination"
+printf '2\n' > "$backup_dir/.COMPLETE.next"
+rclone --config "$rclone_config" copyto --immutable "$backup_dir/.COMPLETE.next" "$destination/COMPLETE"
+mv "$backup_dir/.COMPLETE.next" "$backup_dir/COMPLETE"
 # Retain successful copies only; failed copies need operator inspection.
 find "$backup_root" -mindepth 2 -maxdepth 2 -type f -name COMPLETE -mtime +6 -exec sh -c 'rm -rf -- "$(dirname -- "$1")"' sh {} \;
-echo "Backup completed: $backup_dir"
+echo "Encrypted backup verified off-host: $backup_dir"

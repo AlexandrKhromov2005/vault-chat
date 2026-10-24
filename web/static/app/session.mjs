@@ -57,9 +57,9 @@ export class Session extends EventTarget {
     return this.#state?.accessExpiresAt ?? 0;
   }
 
-  async register(email, username, password) {
+  async register(email, username, password, invitationToken) {
     await requestJSON(this.#fetchFn, 'POST', '/api/v1/auth/register', {
-      body: { email, username, password },
+      body: { email, username, password, invitation_token: invitationToken },
     });
     await this.login(email, password);
   }

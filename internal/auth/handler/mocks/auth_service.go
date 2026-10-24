@@ -253,29 +253,29 @@ func (_c *MockAuthService_RefreshToken_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// Register provides a mock function with given fields: ctx, email, username, password
-func (_m *MockAuthService) Register(ctx context.Context, email string, username string, password string) (*domain.User, error) {
-	ret := _m.Called(ctx, email, username, password)
+// RegisterInvited provides a mock function with given fields: ctx, email, username, password, invitationToken
+func (_m *MockAuthService) RegisterInvited(ctx context.Context, email string, username string, password string, invitationToken string) (*domain.User, error) {
+	ret := _m.Called(ctx, email, username, password, invitationToken)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Register")
+		panic("no return value specified for RegisterInvited")
 	}
 
 	var r0 *domain.User
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) (*domain.User, error)); ok {
-		return rf(ctx, email, username, password)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string) (*domain.User, error)); ok {
+		return rf(ctx, email, username, password, invitationToken)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) *domain.User); ok {
-		r0 = rf(ctx, email, username, password)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string) *domain.User); ok {
+		r0 = rf(ctx, email, username, password, invitationToken)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*domain.User)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
-		r1 = rf(ctx, email, username, password)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, string, string) error); ok {
+		r1 = rf(ctx, email, username, password, invitationToken)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -283,33 +283,34 @@ func (_m *MockAuthService) Register(ctx context.Context, email string, username 
 	return r0, r1
 }
 
-// MockAuthService_Register_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Register'
-type MockAuthService_Register_Call struct {
+// MockAuthService_RegisterInvited_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterInvited'
+type MockAuthService_RegisterInvited_Call struct {
 	*mock.Call
 }
 
-// Register is a helper method to define mock.On call
+// RegisterInvited is a helper method to define mock.On call
 //   - ctx context.Context
 //   - email string
 //   - username string
 //   - password string
-func (_e *MockAuthService_Expecter) Register(ctx interface{}, email interface{}, username interface{}, password interface{}) *MockAuthService_Register_Call {
-	return &MockAuthService_Register_Call{Call: _e.mock.On("Register", ctx, email, username, password)}
+//   - invitationToken string
+func (_e *MockAuthService_Expecter) RegisterInvited(ctx interface{}, email interface{}, username interface{}, password interface{}, invitationToken interface{}) *MockAuthService_RegisterInvited_Call {
+	return &MockAuthService_RegisterInvited_Call{Call: _e.mock.On("RegisterInvited", ctx, email, username, password, invitationToken)}
 }
 
-func (_c *MockAuthService_Register_Call) Run(run func(ctx context.Context, email string, username string, password string)) *MockAuthService_Register_Call {
+func (_c *MockAuthService_RegisterInvited_Call) Run(run func(ctx context.Context, email string, username string, password string, invitationToken string)) *MockAuthService_RegisterInvited_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(string))
 	})
 	return _c
 }
 
-func (_c *MockAuthService_Register_Call) Return(_a0 *domain.User, _a1 error) *MockAuthService_Register_Call {
+func (_c *MockAuthService_RegisterInvited_Call) Return(_a0 *domain.User, _a1 error) *MockAuthService_RegisterInvited_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAuthService_Register_Call) RunAndReturn(run func(context.Context, string, string, string) (*domain.User, error)) *MockAuthService_Register_Call {
+func (_c *MockAuthService_RegisterInvited_Call) RunAndReturn(run func(context.Context, string, string, string, string) (*domain.User, error)) *MockAuthService_RegisterInvited_Call {
 	_c.Call.Return(run)
 	return _c
 }

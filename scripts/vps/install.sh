@@ -19,7 +19,7 @@ for site in /etc/nginx/sites-enabled/*; do
  done
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y docker.io docker-compose-v2 nginx python3-venv ufw
+apt-get install -y docker.io docker-compose-v2 nginx python3-venv ufw age rclone
 systemctl enable --now docker nginx
 systemctl enable ssh
 mkdir -p /var/www/letsencrypt/.well-known/acme-challenge

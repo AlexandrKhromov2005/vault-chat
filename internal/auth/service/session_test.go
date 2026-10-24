@@ -20,7 +20,7 @@ import (
 const sessionID = "8d4c5e7a-1b2f-4c3d-9e8f-0a1b2c3d4e5f"
 
 func refreshClaims() *jwt.Claims {
-	return &jwt.Claims{
+	return &jwt.Claims{SessionID: "11111111-1111-4111-8111-111111111111",
 		ID:        sessionID,
 		UserID:    "user-1",
 		Email:     "user@example.com",

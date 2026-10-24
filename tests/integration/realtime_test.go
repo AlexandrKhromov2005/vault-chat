@@ -60,6 +60,7 @@ func startRealtimeStack(t *testing.T) (string, string) {
 	websockets := handler.NewRealtime(hub, authv1.NewAuthServiceClient(authConn), handler.RealtimeOptions{
 		AuthTimeout: 5 * time.Second, ReauthInterval: time.Second, PingInterval: time.Minute, WriteTimeout: 5 * time.Second,
 		MaxConnections: 100, MaxUnauthenticated: 10,
+		SessionCheckInterval: 10 * time.Millisecond,
 	}, logger)
 	deps.Realtime = websockets
 	gateway := httptest.NewServer(router.New(deps))

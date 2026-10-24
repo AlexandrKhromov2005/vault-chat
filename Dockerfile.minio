@@ -2,24 +2,32 @@
 # Community MinIO is unmaintained; replace this fixture for production.
 FROM golang:1.27.3-alpine3.24 AS build
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+ARG MC_VERSION=v0.0.0-20251106162529-77f82e18b540
 ARG MINIO_VERSION=v0.0.0-20260212201848-7aac2a2c5b7c
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOBIN=/out go install github.com/minio/minio@${MINIO_VERSION} && \
-    cp /go/pkg/mod/github.com/minio/minio@${MINIO_VERSION}/LICENSE /out/LICENSE
+    GOBIN=/out go install github.com/minio/mc@${MC_VERSION} && \
+    cp /go/pkg/mod/github.com/minio/minio@${MINIO_VERSION}/LICENSE /out/LICENSE && \
+    cp /go/pkg/mod/github.com/minio/mc@${MC_VERSION}/LICENSE /out/MC-LICENSE
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/healthcheck ./cmd/healthcheck
+COPY cmd/s3-init ./cmd/s3-init
 COPY internal/shared/probe ./internal/shared/probe
 COPY internal/shared/rpctls ./internal/shared/rpctls
 COPY internal/shared/requestid ./internal/shared/requestid
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck && mkdir /data
+    go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck && \
+    go build -trimpath -ldflags="-s -w" -o /out/s3-init ./cmd/s3-init && mkdir /data
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /out/mc /usr/local/bin/mc
+COPY --from=build /out/s3-init /usr/local/bin/s3-init
 COPY --from=build /out/healthcheck /usr/local/bin/healthcheck
 COPY --from=build /out/LICENSE /usr/share/licenses/minio/LICENSE
+COPY --from=build /out/MC-LICENSE /usr/share/licenses/mc/LICENSE
 COPY --from=build --chown=nonroot:nonroot /data /data
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/minio"]

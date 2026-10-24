@@ -130,11 +130,12 @@ func run() error {
 	health := handler.NewHealth(checks, logger)
 
 	websockets := handler.NewRealtime(hub, authClient, handler.RealtimeOptions{
-		AllowedOrigins: cfg.CORSAllowedOrigins,
-		AuthTimeout:    cfg.WebSocket.AuthTimeout,
-		ReauthInterval: reauthInterval,
-		PingInterval:   cfg.WebSocket.PingInterval,
-		WriteTimeout:   cfg.WebSocket.WriteTimeout,
+		AllowedOrigins:       cfg.CORSAllowedOrigins,
+		AuthTimeout:          cfg.WebSocket.AuthTimeout,
+		ReauthInterval:       reauthInterval,
+		PingInterval:         cfg.WebSocket.PingInterval,
+		WriteTimeout:         cfg.WebSocket.WriteTimeout,
+		SessionCheckInterval: time.Second,
 		// The rate limiter fails open without Redis; these limits do not.
 		MaxConnections:     int(cfg.WebSocket.MaxConnections),
 		MaxUnauthenticated: int(cfg.WebSocket.MaxUnauthenticatedConnections),

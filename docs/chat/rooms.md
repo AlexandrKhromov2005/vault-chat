@@ -26,12 +26,13 @@ Chat does not call it; the chosen ID is still resolved with `GetUser`.
 Chat owns its own database. User IDs are opaque external references, with no
 foreign keys or queries to Auth's tables. Database credentials must restrict each
 service to its own database. Apply `migrations.ChatFS` with directory `chat` to the
-Chat database, never to the Auth database. `cmd/chat` applies these migrations on
-startup. Compose provides a separate `chat-postgres` instance on port 5433. Chat
+Chat database, never to the Auth database. `cmd/migrate` applies these migrations in
+a separate job. Runtime services have no schema/role
+creation privileges. Compose provides a separate `chat-postgres` instance on port 5433. Chat
 uses `CHAT_DATABASE_URL`; its unary requests are bounded by
 `CHAT_REQUEST_TIMEOUT` (10 seconds by default), including Auth and PostgreSQL.
-An earlier caller deadline takes precedence. Internal RPC supports the optional
-[mTLS overlay](../mtls.md); without it, RPC uses plaintext.
+An earlier caller deadline takes precedence. Local development RPC supports the optional
+[mTLS overlay](../mtls.md); VPS requires mTLS by default.
 
 ## Room rules
 

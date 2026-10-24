@@ -46,6 +46,7 @@ type UserRepository interface {
 
 // SessionRepository is the session storage contract required by the service.
 type SessionRepository interface {
+	IsActive(ctx context.Context, userID, sessionID string) (bool, error)
 	Create(ctx context.Context, session *domain.Session) error
 	Rotate(ctx context.Context, currentID string, next *domain.Session) error
 	RevokeFamily(ctx context.Context, userID, sessionID string) error
@@ -61,7 +62,7 @@ type Hasher interface {
 // TokenManager is the token issuance/validation contract required by the
 // service.
 type TokenManager interface {
-	IssueAccessToken(userID, email, username string) (string, time.Time, error)
+	IssueAccessToken(userID, email, username string, sessionID ...string) (string, time.Time, error)
 	IssueRefreshToken(sessionID, userID, email, username string) (string, time.Time, error)
 	Validate(token string) (*jwt.Claims, error)
 }
@@ -86,6 +87,8 @@ type Service struct {
 	dummyHash     string
 	passwordSlots chan struct{}
 	loginLimiter  *ratelimit.MemoryLimiter
+	invitations   InvitationRepository
+	notifier      SessionNotifier
 }
 
 // NewService wires a Service. A dummy hash is precomputed so that login
@@ -96,13 +99,14 @@ func NewService(
 	hasher Hasher,
 	tokens TokenManager,
 	logger *slog.Logger,
+	options ...Option,
 ) (*Service, error) {
 	dummyHash, err := hasher.Hash("timing-equalization-dummy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to precompute dummy hash: %w", err)
 	}
 
-	return &Service{
+	s := &Service{
 		repo:      repo,
 		sessions:  sessions,
 		hasher:    hasher,
@@ -113,11 +117,19 @@ func NewService(
 		// the 512 MiB Auth container. Admission never queues extra hash work.
 		passwordSlots: make(chan struct{}, 2),
 		loginLimiter:  ratelimit.NewMemoryLimiter(time.Minute, 5, 4096),
-	}, nil
+	}
+	for _, option := range options {
+		option(s)
+	}
+	return s, nil
 }
 
 // Register validates the input, hashes the password, and stores the user.
 func (s *Service) Register(ctx context.Context, email, username, password string) (*domain.User, error) {
+	return s.register(ctx, email, username, password, s.repo.Create)
+}
+
+func (s *Service) register(ctx context.Context, email, username, password string, create func(context.Context, *domain.User) error) (*domain.User, error) {
 	if err := validator.ValidateEmail(email); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
@@ -140,7 +152,7 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 		PasswordHash: hash,
 	}
 
-	if err := s.repo.Create(ctx, user); err != nil {
+	if err := create(ctx, user); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrEmailTaken):
 			return nil, ErrEmailTaken
@@ -224,6 +236,18 @@ func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenTy
 	if claims.TokenType != want {
 		return nil, ErrInvalidToken
 	}
+	if want == jwt.AccessToken {
+		if id, err := uuid.Parse(claims.SessionID); err != nil || id == uuid.Nil {
+			return nil, ErrInvalidToken
+		}
+		active, err := s.sessions.IsActive(ctx, claims.UserID, claims.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("check access session: %w", err)
+		}
+		if !active {
+			return nil, ErrInvalidToken
+		}
+	}
 	// The id of a refresh token is the id of its session.
 	if want == jwt.RefreshToken {
 		if _, err := uuid.Parse(claims.ID); err != nil {
@@ -236,12 +260,12 @@ func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenTy
 // issueTokenPair mints an access/refresh token pair for user together with
 // the new session the refresh token is bound to. The session is not stored.
 func (s *Service) issueTokenPair(user *domain.User) (*TokenPair, *domain.Session, error) {
-	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username)
+	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID}
+	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username, session.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to issue access token: %w", err)
 	}
 
-	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID}
 	refreshToken, refreshExpiresAt, err := s.tokens.IssueRefreshToken(session.ID, user.ID, user.Email, user.Username)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to issue refresh token: %w", err)

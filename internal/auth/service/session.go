@@ -58,6 +58,7 @@ func (s *Service) handleTokenReuse(ctx context.Context, userID string) error {
 	}
 	s.logger.WarnContext(ctx, "rotated refresh token reused; all sessions revoked",
 		"user_id", userID, "revoked_sessions", revoked)
+	s.notifyRevocation(ctx, userID)
 	return ErrInvalidToken
 }
 
@@ -75,6 +76,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	}
 
 	s.logger.InfoContext(ctx, "user logged out", "user_id", claims.UserID)
+	s.notifyRevocation(ctx, claims.UserID)
 	return nil
 }
 
@@ -93,5 +95,6 @@ func (s *Service) RevokeAllSessions(ctx context.Context, accessToken string) (in
 	}
 
 	s.logger.InfoContext(ctx, "all sessions revoked", "user_id", claims.UserID, "revoked_sessions", revoked)
+	s.notifyRevocation(ctx, claims.UserID)
 	return revoked, nil
 }

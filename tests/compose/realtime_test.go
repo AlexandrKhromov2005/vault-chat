@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -77,8 +78,17 @@ func post(t *testing.T, url, token, body string) (int, map[string]any) {
 func signUp(t *testing.T, api, username string) (string, string) {
 	t.Helper()
 	email := username + "@example.com"
+	dsn := os.Getenv("VAULT_CHAT_COMPOSE_AUTH_DATABASE_URL")
+	require.NotEmpty(t, dsn, "set the operator Auth DB URL to issue test invitations")
+	invite := exec.Command("go", "run", "./cmd/invite", email)
+	invite.Dir = "../.."
+	invite.Env = append(os.Environ(), "AUTH_DATABASE_URL="+dsn)
+	output, err := invite.Output()
+	require.NoError(t, err)
+	var invitation map[string]string
+	require.NoError(t, json.Unmarshal(output, &invitation))
 	code, user := post(t, api+"/auth/register", "",
-		`{"email":"`+email+`","username":"`+username+`","password":"password1"}`)
+		`{"email":"`+email+`","username":"`+username+`","password":"password1","invitation_token":"`+invitation["invitation_token"]+`"}`)
 	require.Equal(t, http.StatusCreated, code, user)
 	code, session := post(t, api+"/auth/login", "", `{"email":"`+email+`","password":"password1"}`)
 	require.Equal(t, http.StatusOK, code, session)

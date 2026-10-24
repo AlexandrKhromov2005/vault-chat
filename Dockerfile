@@ -33,11 +33,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test -n "$SERVICE" || { echo "build arg SERVICE is required" >&2; exit 1; }; \
     test -d "./cmd/$SERVICE" || { echo "unknown service: $SERVICE" >&2; exit 1; }; \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/service "./cmd/$SERVICE" && \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck && \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/invite ./cmd/invite && \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 # Static, shell-less runtime that runs as uid/gid 65532 by default.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/service /usr/local/bin/service
 COPY --from=build /out/healthcheck /usr/local/bin/healthcheck
+COPY --from=build /out/invite /usr/local/bin/invite
+COPY --from=build /out/migrate /usr/local/bin/migrate
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/service"]

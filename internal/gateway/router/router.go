@@ -11,6 +11,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/ratelimit"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/transfer"
 )
 
 // Deps are the collaborators and settings the routes are built from.
@@ -96,7 +97,6 @@ func New(d Deps) http.Handler {
 	}
 	if d.Media != nil {
 		api.Handle("GET /api/v1/files/{file_id}", protected(d.Media.File))
-		api.Handle("GET /api/v1/files/{file_id}/content", protected(d.Media.Download))
 	}
 	api.HandleFunc("/", notFound)
 
@@ -117,7 +117,10 @@ func New(d Deps) http.Handler {
 	// included, runs within one budget.
 	if d.Media != nil {
 		root.Handle("POST /api/v1/rooms/{room_id}/files", middleware.Chain(protected(d.Media.Upload),
-			middleware.Timeout(d.RequestTimeout), middleware.CORS(d.CORSAllowedOrigins),
+			middleware.FileTransfer(transfer.MaxDuration, transfer.IdleTimeout), middleware.CORS(d.CORSAllowedOrigins),
+			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger)))
+		root.Handle("GET /api/v1/files/{file_id}/content", middleware.Chain(protected(d.Media.Download),
+			middleware.FileTransfer(transfer.MaxDuration, transfer.IdleTimeout), middleware.CORS(d.CORSAllowedOrigins),
 			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger)))
 	}
 	root.Handle("/api/", middleware.Chain(api,
