@@ -46,11 +46,146 @@ function setup({ hash = '', responses = [], user = null } = {}) {
   const fetchFn = fakeFetch(responses);
   const api = scriptedApi();
   const storage = memoryStorage();
-  window.sessionStorage = storage;
-  window.localStorage = storage;
+  const browser = Object.assign(new EventTarget(), window, {
+    location, history, sessionStorage: storage, localStorage: storage,
+  });
+  globalThis.window = browser;
+  const navigate = (nextHash) => {
+    location.hash = nextHash;
+    browser.dispatchEvent(new Event('hashchange'));
+  };
   const security = new AccountSecurity({ api, session, fetchFn, location, history });
-  return { $: (id) => document.getElementById(id), document, security, session, fetchFn, api, location, replaced, storage };
+  return { $: (id) => document.getElementById(id), document, security, session, fetchFn, api, location, replaced, storage, navigate };
 }
+
+test('same-document email navigation clears the new fragment synchronously and waits for explicit confirmation', async () => {
+  const { $, document, fetchFn, location, replaced, storage, session, navigate } = setup({
+    responses: [{ status: 200, body: { user_id: 'u-1' } }],
+  });
+  navigate('#verify-email=' + TOKEN);
+  assert.equal(location.hash, '');
+  assert.deepEqual(replaced, [[null, '', '/?view=chat']]);
+  assert.equal($('email-action').hidden, false);
+  assert.equal($('email-action-form').hidden, false);
+  assert.equal(fetchFn.calls.length, 0);
+  assert.equal(document.body.textContent.includes(TOKEN), false);
+  assert.equal(storage.size, 0);
+  assert.equal(session.generation, 0, 'proof changes must not change the signed-in session generation');
+  await submit($('email-action-form'));
+  assert.deepEqual(fetchFn.calls[0].body, { token: TOKEN });
+});
+
+test('new valid and invalid links replace completed proof UI without retaining old passwords or notices', async () => {
+  const { $, fetchFn, location, navigate } = setup({
+    hash: '#verify-email=' + TOKEN, responses: [{ status: 200, body: { user_id: 'u-1' } }],
+  });
+  await submit($('email-action-form'));
+  assert.ok($('email-action-notice').textContent);
+  $('email-action-form').elements.password.value = 'OldPassword12';
+  navigate('#reset-password=' + 'b'.repeat(64));
+  assert.equal(location.hash, '');
+  assert.equal($('email-action-form').hidden, false);
+  assert.equal($('email-action-form').elements.password.value, '');
+  assert.equal($('email-action-form').elements.password.required, true);
+  assert.equal($('reset-password-field').hidden, false);
+  assert.equal($('email-action-notice').textContent, '');
+  assert.equal($('email-action-error').textContent, '');
+  $('email-action-form').elements.password.value = 'DraftPassword12';
+  navigate('#verify-email=');
+  assert.equal(location.hash, '');
+  assert.equal($('email-action-form').hidden, true);
+  assert.equal($('email-action-form').elements.password.value, '');
+  assert.equal($('email-action-form').elements.password.required, false);
+  assert.equal($('reset-password-field').hidden, true);
+  assert.match($('email-action-error').textContent, /Ссылка недействительна/);
+  assert.equal($('email-action-description').textContent, '');
+  navigate('#confirm-email-change=' + 'c'.repeat(64));
+  assert.equal($('email-action-form').hidden, false);
+  assert.equal($('email-action-submit').disabled, false);
+  assert.equal($('email-action-error').textContent, '');
+  assert.match($('email-action-title').textContent, /смену email/);
+  assert.equal(fetchFn.calls.length, 1, 'navigating to each proof must not submit it');
+});
+
+test('late success and error of an old proof cannot consume or unlock a newer pending proof', async () => {
+  for (const [oldPurpose, fail] of [
+    ['confirm-email-change', false], ['confirm-email-change', true],
+    ['reset-password', false], ['reset-password', true],
+  ]) {
+    const old = deferred();
+    const next = deferred();
+    const { $, session, fetchFn, navigate } = setup({
+      hash: '#' + oldPurpose + '=' + TOKEN, user: { id: 'u-1', username: 'alice' },
+      responses: [() => old.promise, () => next.promise],
+    });
+    const form = $('email-action-form');
+    if (oldPurpose === 'reset-password') form.elements.password.value = 'OldPassword12';
+    await submit(form);
+    assert.equal($('email-action-submit').disabled, true);
+    navigate('#reset-password=' + 'b'.repeat(64));
+    assert.equal($('email-action-submit').disabled, false, 'a replacement proof must get its own submit lifecycle');
+    form.elements.password.value = 'NewPassword12';
+    await submit(form);
+    assert.equal($('email-action-submit').disabled, true);
+    form.elements.password.value = 'NewDraftPassword12';
+    old.resolve(fail ? apiError(400, 'invalid_email_action', 'old proof rejected') : { status: 200, body: { user_id: 'u-1' } });
+    await settle();
+    await settle();
+    assert.equal(session.forgotten, 0, 'an obsolete proof result must not end the current session');
+    assert.equal(session.generation, 0);
+    assert.equal(form.hidden, false);
+    assert.equal(form.elements.password.value, 'NewDraftPassword12', 'old finally must not clear the new form');
+    assert.equal($('email-action-submit').disabled, true, 'old finally must not unlock the pending new request');
+    assert.equal($('email-action-error').textContent, '');
+    assert.equal($('email-action-notice').textContent, '');
+    assert.deepEqual(fetchFn.calls[1].body, { token: 'b'.repeat(64), password: 'NewPassword12' });
+    next.resolve({ status: 200, body: { user_id: 'u-2' } });
+    await settle();
+    await settle();
+    assert.equal(form.hidden, true);
+    assert.match($('email-action-notice').textContent, /Пароль изменён/);
+  }
+});
+
+test('invalid replacement keeps its own error when the previous proof completes', async () => {
+  const old = deferred();
+  const { $, navigate, location } = setup({
+    hash: '#verify-email=' + TOKEN, responses: [() => old.promise],
+  });
+  await submit($('email-action-form'));
+  navigate('#reset-password=');
+  old.resolve({ status: 200, body: { user_id: 'u-1' } });
+  await settle();
+  await settle();
+  assert.equal(location.hash, '');
+  assert.equal($('email-action-form').hidden, true);
+  assert.match($('email-action-error').textContent, /Ссылка недействительна/);
+  assert.equal($('email-action-notice').textContent, '');
+});
+
+test('proof navigation does not invalidate an unrelated pending account-settings request', async () => {
+  const pending = deferred();
+  const { $, session, api, navigate } = setup({ user: { id: 'u-1', username: 'alice' } });
+  api.on('GET /api/v1/auth/account', { ...account, email_verified: true })
+    .on('POST /api/v1/auth/email/change/request', () => pending.promise);
+  await click($('account-settings-toggle'));
+  const form = $('email-change-form');
+  form.elements.password.value = 'CurrentPassword12';
+  form.elements.new_email.value = 'new@example.invalid';
+  await submit(form);
+  navigate('#verify-email=' + TOKEN);
+  assert.equal(session.generation, 0);
+  assert.equal($('account-settings').hidden, false);
+  assert.equal(form.querySelector('button[type="submit"]').disabled, true);
+  pending.resolve({ message: 'generic' });
+  await settle();
+  await settle();
+  assert.match($('settings-notice').textContent, /Если данные подходят/);
+  assert.equal(form.querySelector('button[type="submit"]').disabled, false);
+  assert.equal(form.elements.password.value, '');
+  assert.equal($('email-action-form').hidden, false);
+  assert.equal($('email-action-notice').textContent, '');
+});
 
 test('a verification link clears the fragment and requires explicit submit before POST', async () => {
   const { $, document, fetchFn, location, replaced, storage } = setup({ hash: `#verify-email=${TOKEN}`,

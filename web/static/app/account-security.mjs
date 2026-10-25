@@ -53,6 +53,7 @@ export class AccountSecurity {
   #session;
   #fetchFn;
   #link;
+  #proofGeneration = 0;
   #scope = 0;
   #load = 0;
   #account = null;
@@ -61,8 +62,8 @@ export class AccountSecurity {
     this.#api = api;
     this.#session = session;
     this.#fetchFn = fetchFn;
-    this.#link = consumeEmailLink(location, history);
-    this.#showLink();
+    this.#readLink(location, history);
+    window.addEventListener('hashchange', () => this.#readLink(location, history));
     this.#bind($('login-form'), (form) => session.login(form.elements.email.value, form.elements.password.value));
     this.#bind($('register-form'), (form) => session.register(
       form.elements.email.value, form.elements.username.value, form.elements.password.value, form.elements.invitation_token.value,
@@ -117,7 +118,9 @@ export class AccountSecurity {
       if (button.disabled) return;
       const scope = this.#scope;
       const generation = this.#session.generation;
-      const current = () => this.#scope === scope && this.#session.generation === generation;
+      const proofGeneration = this.#proofGeneration;
+      const current = () => this.#scope === scope && this.#session.generation === generation &&
+        (area !== 'email-action' || this.#proofGeneration === proofGeneration);
       button.disabled = true;
       $(`${area}-error`).textContent = '';
       $(`${area}-notice`).textContent = '';
@@ -154,9 +157,24 @@ export class AccountSecurity {
     $('auth-notice').textContent = '';
   }
 
+  #readLink(location, history) {
+    const link = consumeEmailLink(location, history);
+    if (!link) return;
+    this.#proofGeneration++;
+    this.#link = link;
+    this.#showLink();
+  }
+
   #showLink() {
     if (!this.#link) return;
     $('email-action').hidden = false;
+    const form = $('email-action-form');
+    form.reset();
+    form.hidden = false;
+    form.elements.password.required = false;
+    $('email-action-submit').disabled = false;
+    $('reset-password-field').hidden = true;
+    for (const id of ['email-action-description', 'email-action-notice', 'email-action-error']) $(id).textContent = '';
     if (this.#link.invalid) {
       $('email-action-title').textContent = 'Ссылка недействительна';
       $('email-action-error').textContent = BAD_LINK;
