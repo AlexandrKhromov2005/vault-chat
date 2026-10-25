@@ -2,14 +2,16 @@
 // signed-in workspace.
 
 import { Api } from './api.mjs';
-import { describeError } from './errors.mjs';
+import { AccountSecurity } from './account-security.mjs';
 import { Realtime } from './realtime.mjs';
 import { Session } from './session.mjs';
 import { Workspace } from './workspace.mjs';
 
 const fetchFn = window.fetch.bind(window);
 const session = new Session({ fetchFn, storage: window.sessionStorage });
-const workspace = new Workspace({ api: new Api({ fetchFn, session }), session });
+const api = new Api({ fetchFn, session });
+new AccountSecurity({ api, session, fetchFn });
+const workspace = new Workspace({ api, session });
 // Same origin as the page, which the Gateway's WebSocket origin check allows.
 const realtime = new Realtime({
   session,
@@ -43,40 +45,6 @@ function render() {
   $('account-name').textContent = user ? user.username : '';
 }
 
-function showAuthTab(tab) {
-  const login = tab === 'login';
-  $('login-form').hidden = !login;
-  $('register-form').hidden = login;
-  $('show-login').setAttribute('aria-selected', String(login));
-  $('show-register').setAttribute('aria-selected', String(!login));
-  $('auth-error').textContent = '';
-}
-
-// submitWith runs action for a form, disabling it while the request runs and
-// reporting failures in the auth error line.
-function submitWith(form, action) {
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const fields = Object.fromEntries(new FormData(form));
-    const button = form.querySelector('button[type="submit"]');
-    button.disabled = true;
-    $('auth-error').textContent = '';
-    try {
-      await action(fields);
-      form.reset();
-    } catch (err) {
-      $('auth-error').textContent =
-        err.code === 'unauthenticated' ? 'Неверный email или пароль.' : describeError(err);
-    } finally {
-      button.disabled = false;
-    }
-  });
-}
-
-submitWith($('login-form'), ({ email, password }) => session.login(email, password));
-submitWith($('register-form'), ({ email, username, password, invitation_token }) => session.register(email, username, password, invitation_token));
-$('show-login').addEventListener('click', () => showAuthTab('login'));
-$('show-register').addEventListener('click', () => showAuthTab('register'));
 $('logout').addEventListener('click', () => session.logout());
 
 session.addEventListener('signedin', () => {

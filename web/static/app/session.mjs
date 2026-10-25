@@ -58,10 +58,13 @@ export class Session extends EventTarget {
   }
 
   async register(email, username, password, invitationToken) {
-    await requestJSON(this.#fetchFn, 'POST', '/api/v1/auth/register', {
+    const generation = this.#generation;
+    const registered = await requestJSON(this.#fetchFn, 'POST', '/api/v1/auth/register', {
       body: { email, username, password, invitation_token: invitationToken },
     });
-    await this.login(email, password);
+    if (generation !== this.#generation) throw sessionEnded();
+    if (registered?.verification_required !== true) await this.login(email, password);
+    return registered;
   }
 
   async login(email, password) {
@@ -132,6 +135,12 @@ export class Session extends EventTarget {
       // An unreachable server only means the refresh token stays valid until
       // it expires.
     }
+  }
+
+  // forget removes this tab's revoked session without logging out an unrelated
+  // server session after a password reset or email change.
+  forget() {
+    this.#signOut('security');
   }
 
   #save(state) {

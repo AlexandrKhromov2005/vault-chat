@@ -69,6 +69,30 @@ test('register creates the account and signs in', async () => {
   assert.equal(session.user.username, 'alice');
 });
 
+test('registration requiring email verification returns pending without login or stored tokens', async () => {
+  const registered = { user_id: 'u-1', email: 'alice@example.com', username: 'alice', verification_required: true };
+  const { session, fetchFn, storage } = newSession([{ status: 201, body: registered }]);
+
+  const result = await session.register('alice@example.com', 'alice', 'password1', 'invite-token');
+
+  assert.deepEqual(result, registered);
+  assert.equal(session.user, null);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(fetchFn.calls.map((call) => call.url), ['/api/v1/auth/register']);
+});
+
+test('registration answered after another login does not sign in the previous account', async () => {
+  const late = deferred();
+  const { session, fetchFn } = newSession([() => late.promise, bobPair, bobMe]);
+  const registration = session.register('alice@example.com', 'alice', 'password1', 'invite-token');
+  await session.login('bob@example.com', 'password1');
+  late.resolve({ status: 201, body: { user_id: 'u-1' } });
+
+  await assert.rejects(registration, { code: 'unauthenticated' });
+  assert.equal(session.user.id, 'u-2');
+  assert.equal(fetchFn.calls.filter((call) => call.url === '/api/v1/auth/login').length, 1);
+});
+
 test('refresh rotates the tokens', async () => {
   const { session, fetchFn } = newSession([tokenPair(1), me, tokenPair(2)]);
   await session.login('alice@example.com', 'password1');
@@ -146,6 +170,20 @@ test('logout signs out locally even when the server is unreachable', async () =>
   await session.logout();
 
   assert.equal(session.user, null);
+});
+
+test('forget clears a revoked session and drops a late refresh without server logout', async () => {
+  const late = deferred();
+  const { session, fetchFn, storage } = newSession([tokenPair(1), me, () => late.promise]);
+  await session.login('alice@example.com', 'password1');
+  const refreshing = session.refresh();
+  session.forget();
+  late.resolve(tokenPair(2));
+
+  await assert.rejects(refreshing, { code: 'unauthenticated' });
+  assert.equal(session.user, null);
+  assert.equal(storage.size, 0);
+  assert.equal(fetchFn.calls.filter((call) => call.url === '/api/v1/auth/logout').length, 0);
 });
 
 test('ignores a corrupted stored session', () => {
