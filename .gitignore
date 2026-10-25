@@ -31,3 +31,6 @@ __pycache__/
 deployments/monitoring/runtime/
 
 .env.rpc
+
+# Pinned local developer tools
+.tools/

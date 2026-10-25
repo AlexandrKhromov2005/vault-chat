@@ -32,6 +32,7 @@ local function check(name, description, commands)
     task(name)
         set_menu({usage = "xmake " .. name, description = description, options = {}})
         on_run(function ()
+            os.addenv("PATH", path.absolute(".tools/bin"))
             for _, command in ipairs(commands) do
                 os.execv(command[1], table.slice(command, 2))
             end
@@ -45,13 +46,20 @@ check("lint", "Run golangci-lint.", {{"golangci-lint", "run"}})
 check("deployment", "Check VPS scripts, backup safety and Compose policy.", {{"sh", "scripts/check-deployment.sh"}})
 check("monitoring", "Validate monitoring exposure and Prometheus alert rules.", {{"sh", "scripts/check-monitoring.sh"}})
 check("vuln", "Check reachable vulnerabilities with govulncheck.", {{"govulncheck", "./..."}})
+check("doctor", "Check security tools before running CI.", {{"python3", "scripts/dev/security.py", "doctor"}})
+check("secret-scan", "Scan tracked Git blobs for secrets.", {{"python3", "scripts/dev/security.py", "scan"}})
+check("dev-test", "Test the verification gates.", {{"python3", "-m", "unittest", "discover", "-s", "tests/dev", "-v"}})
+check("proto", "Lint protobuf API definitions.", {{"buf", "lint", "api/proto"}})
+check("ci", "Verify a committed snapshot with disposable infrastructure.", {{"python3", "scripts/dev/verification.py", "run"}})
 
 task("setup")
-    set_menu({usage = "xmake setup", description = "Download modules and install the pre-commit hook.", options = {}})
+    set_menu({usage = "xmake setup", description = "Download modules and install commit/push security hooks.", options = {}})
     on_run(function ()
         os.execv("go", {"mod", "download"})
         os.execv("git", {"config", "core.hooksPath", ".githooks"})
-        print("pre-commit hook installed: fmt-check, vet and lint run before every commit")
+        os.execv("git", {"config", "--get", "core.hooksPath"})
+        assert(os.isfile(".githooks/pre-commit") and os.isfile(".githooks/pre-push"), "security hooks missing")
+        print("pre-commit and pre-push hooks installed; run xmake doctor before CI")
     end)
 
 -- Unit tests. Web client tests run when web/test has any; they need
@@ -99,11 +107,12 @@ task("fuzz-extended")
         import("scripts.xmake.tests").fuzz("10m")
     end)
 
-task("ci")
-    set_menu({usage = "xmake ci", description = "Run every check; stop at the first failure.", options = {}})
+task("ci-checks")
+    set_menu({usage = "xmake ci-checks", description = "Internal checks; use xmake ci for verified evidence.", options = {}})
     on_run(function ()
         import("core.project.task")
         local steps = {
+            {"doctor"}, {"secret-scan"}, {"dev-test"}, {"proto"},
             {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"test-integration"},
             {"test-coverage"}, {"deployment"}, {"monitoring"}, {"fuzz", {time = "10s"}}, {"vuln"},
         }

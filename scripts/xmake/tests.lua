@@ -2,20 +2,8 @@
 
 import("lib.detect.find_tool")
 
-local COMPOSE = {"compose", "-f", "deployments/docker-compose.yml"}
-
-local function compose(...)
-    local args = table.join(COMPOSE, {...})
-    os.execv("docker", args)
-end
-
-local function compose_output(...)
-    return os.iorunv("docker", table.join(COMPOSE, {...}))
-end
-
--- prepare_integration points the integration tests at test databases and S3
--- storage. Variables that are already set are kept; otherwise PostgreSQL
--- and MinIO are started from Compose and the test databases created.
+-- Certified CI owns disposable infrastructure. Manual integration runs must
+-- explicitly select all test endpoints; never reuse the development stack.
 local function prepare_integration(integration)
     local missing = {}
     for variable, _ in pairs(integration.databases) do
@@ -28,22 +16,7 @@ local function prepare_integration(integration)
         return
     end
 
-    print("starting PostgreSQL and MinIO from Compose")
-    compose("up", "-d", "--wait", "postgres", "minio")
-    local port = os.getenv("POSTGRES_HOST_PORT") or "5432"
-    for variable, database in pairs(integration.databases) do
-        if not os.getenv(variable) then
-            local exists = compose_output("exec", "-T", "postgres", "psql", "-U", "auth", "-d", "postgres", "-tAc",
-                "SELECT 1 FROM pg_database WHERE datname = '" .. database .. "'")
-            if exists:trim() ~= "1" then
-                compose("exec", "-T", "postgres", "createdb", "-U", "auth", database)
-            end
-            os.setenv(variable, "postgres://auth:auth@127.0.0.1:" .. port .. "/" .. database .. "?sslmode=disable")
-        end
-    end
-    if not os.getenv(integration.s3) then
-        os.setenv(integration.s3, "127.0.0.1:" .. (os.getenv("MINIO_HOST_PORT") or "9000"))
-    end
+    raise("integration endpoints are incomplete; run xmake ci for disposable fixtures, or explicitly set all four VAULT_CHAT_TEST_* endpoints")
 end
 
 -- web_tests runs the web client's tests, if there are any.
