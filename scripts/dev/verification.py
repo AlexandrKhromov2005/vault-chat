@@ -1,6 +1,7 @@
 """Commit-bound local CI evidence; not a sandbox or a trusted attestation service."""
 import hashlib
 import fcntl
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -51,12 +52,33 @@ def require_receipt(root, sha, tools):
     return receipt
 
 
-def check_environment():
+def check_environment(tools=None):
     # Do not inherit API tokens, production configuration, test URLs, or Go overrides.
-    allowed = {'PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TMPDIR', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR', 'DOCKER_CONTEXT', 'TERM'}
+    allowed = {'PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TMPDIR', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR', 'DOCKER_CONFIG', 'TERM'}
     env = {key: value for key, value in os.environ.items() if key in allowed}
+    if env.get('DOCKER_CONFIG'):
+        env['DOCKER_CONFIG'] = str(Path(env['DOCKER_CONFIG']).resolve())
+    if tools is not None:
+        endpoint = tools.get('docker_endpoint', '')
+        if not endpoint.startswith('unix:///'):
+            raise ValueError('validated local Docker endpoint required before creating fixtures')
+        env['DOCKER_HOST'] = endpoint
     env.update({'GOENV': 'off', 'GOWORK': 'off', 'GOTOOLCHAIN': 'go1.27.3', 'VAULT_CI_BUILD_NETWORK': build_network()})
     return env
+
+
+@contextmanager
+def termination_cleanup():
+    previous = signal.getsignal(signal.SIGTERM)
+    def terminate(_number, _frame):
+        # A second termination request must not interrupt owned-resource cleanup.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise InterruptedError('verification terminated; cleaning up owned resources')
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def run_process(args, *, timeout=900, check=False, **kwargs):
@@ -97,7 +119,7 @@ def execute_checks(snapshot, environment, log):
         if run(['docker', kind, 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project], True):
             raise ValueError('CI Docker namespace already exists')
     try:
-        run(compose + ['build', 'minio'])
+        run(compose + ['build', '--builder', 'default', 'minio'])
         run(compose + ['up', '-d', '--wait', '--wait-timeout', '180', 'postgres', 'minio'])
         run(compose + ['run', '--rm', '--no-deps', 's3-init'])
         run(compose + ['images', '--format', 'json'])
@@ -120,7 +142,8 @@ def verify(root):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError('verification already running in this repository') from error
-        return verify_locked(root)
+        with termination_cleanup():
+            return verify_locked(root)
 
 
 def verify_locked(root):
@@ -137,7 +160,7 @@ def verify_locked(root):
     git(root, 'worktree', 'add', '--quiet', '--detach', str(snapshot), sha)
     try:
         with log_path.open('w') as log:
-            if execute_checks(snapshot, check_environment(), log) != 0:
+            if execute_checks(snapshot, check_environment(tools), log) != 0:
                 raise ValueError(f'checks failed; inspect {log_path}')
         clean(snapshot)
         if git(snapshot, 'rev-parse', 'HEAD') != sha:

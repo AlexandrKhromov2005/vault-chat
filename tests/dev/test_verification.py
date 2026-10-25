@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location('verification', ROOT / 'scripts/dev/verification.py')
+TOOLS = {'tools': 'pinned', 'docker_endpoint': 'unix:///tmp/vault-fixture.sock'}
 verification = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verification)
 
@@ -46,7 +47,7 @@ class Verification(unittest.TestCase):
                 action(snapshot)
             return code
         with patch.dict(os.environ, {'GH_TOKEN': 'do-not-copy'}), \
-                patch.object(verification, 'inventory', return_value={'tools': 'pinned'}), \
+                patch.object(verification, 'inventory', return_value=TOOLS), \
                 patch.object(verification.tempfile, 'mkdtemp', side_effect=lambda **kw: make_directory(dir=self.logs.name, **kw)), \
                 patch.object(verification, 'execute_checks', side_effect=check):
             return verification.verify(self.root)
@@ -57,7 +58,7 @@ class Verification(unittest.TestCase):
         (self.root / '.env').write_text('private configuration')
         receipt = self.run_checks()
         self.assertEqual(receipt['commit'], self.git('rev-parse', 'HEAD'))
-        verification.require_receipt(self.root, receipt['commit'], {'tools': 'pinned'})
+        verification.require_receipt(self.root, receipt['commit'], TOOLS)
 
     def test_source_change_during_checks_cannot_receive_a_green_receipt(self):
         def edit(_):
@@ -77,7 +78,7 @@ class Verification(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'failed'):
             self.run_checks(code=1)
         with self.assertRaisesRegex(ValueError, 'verification'):
-            verification.require_receipt(self.root, receipt['commit'], {'tools': 'pinned'})
+            verification.require_receipt(self.root, receipt['commit'], TOOLS)
 
     def test_another_commit_or_tool_change_is_not_covered(self):
         receipt = self.run_checks()
@@ -86,20 +87,20 @@ class Verification(unittest.TestCase):
         (self.root / 'source').write_text('next\n')
         self.commit()
         with self.assertRaisesRegex(ValueError, 'verification'):
-            verification.require_receipt(self.root, self.git('rev-parse', 'HEAD'), {'tools': 'pinned'})
+            verification.require_receipt(self.root, self.git('rev-parse', 'HEAD'), TOOLS)
 
     def test_expired_receipts_are_rejected(self):
         receipt = self.run_checks()
         receipt['completed_at'] = 0
         verification.receipt_path(self.root, receipt['commit']).write_text(json.dumps(receipt))
         with self.assertRaisesRegex(ValueError, 'expired'):
-            verification.require_receipt(self.root, receipt['commit'], {'tools': 'pinned'})
+            verification.require_receipt(self.root, receipt['commit'], TOOLS)
 
     def test_changed_log_cannot_be_published_as_evidence(self):
         receipt = self.run_checks()
         Path(receipt['log']).write_text('replaced evidence')
         with self.assertRaisesRegex(ValueError, 'log'):
-            verification.require_receipt(self.root, receipt['commit'], {'tools': 'pinned'})
+            verification.require_receipt(self.root, receipt['commit'], TOOLS)
 
     def test_dirty_checkout_is_rejected_before_checks(self):
         (self.root / 'source').write_text('uncommitted')
@@ -118,7 +119,7 @@ class Verification(unittest.TestCase):
         receipt = self.run_checks()
         sha = receipt['commit']
         line = f'refs/heads/test {sha} refs/heads/test {"0"*40}\n'
-        verification.verify_push(self.root, [line], {'tools': 'pinned'})
+        verification.verify_push(self.root, [line], TOOLS)
         with self.assertRaisesRegex(ValueError, 'tools'):
             verification.verify_push(self.root, [line], {'tools': 'changed'})
         verification.verify_push(self.root, [f'delete {"0"*40} refs/heads/test {sha}\n'], {})

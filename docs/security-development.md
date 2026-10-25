@@ -13,6 +13,8 @@ also exposed process failures. Passing the existing pipeline was insufficient.
 | Code could change while CI was running and an earlier green result could be mistaken for verification of the new code. | Run committed source in a separate detached checkout; check both checkouts and tool fingerprints afterward. | Receipt binds commit, tree, tools, log hash and time; new SHA, dirty source, changed tools/log or failed rerun invalidates it. Concurrent runs are rejected. |
 | Old Go analyzer builds and Node 20 failed partway through validation; tool updates were improvised. | Preflight compatible pinned analyzers, Node 22.23.4, protobuf tooling and required crypto tools before starting fixtures. | `xmake doctor`; no `@latest` installation instructions. Receipts expire locally after 24 hours. |
 | Integration tests could reuse the default developer Docker project. | A unique owned CI project, loopback ephemeral ports and disposable storage; cleanup only that project. | `deployments/docker-compose.ci.yml`; inherited test URLs are discarded. Fixed public fixture credentials are never production credentials. |
+| Independent agent review found that filtering `DOCKER_CONFIG` could select a different daemon after preflight, and a stored Buildx builder could send builds elsewhere. | Resolve the effective endpoint through the Docker CLI, accept only an absolute Unix endpoint, pin it for all child commands and explicitly select the default builder. | Real isolated context/config regressions cover remote defaults, context changes and builder selection; the endpoint is part of the receipt. |
+| Independent agent review found that SIGTERM bypassed Python cleanup and left detached checks running. | Convert SIGTERM to controlled cancellation, stop the check process group and finish owned-resource cleanup. | Subprocess regressions send real SIGTERM and check child exit, cleanup and absence of a successful receipt. |
 | Some manual fixtures copied existing development keys and needed a later permission correction. | Generate synthetic secrets when needed; private temporary directories; never copy ignored working secrets. | CI checkout contains tracked source only; API/production environment variables are not forwarded. No JWT keys are needed by its infrastructure fixtures. |
 | Live integration and full encrypted backup/restore acceptance relied partly on commands kept in `/tmp`. | Commit repeatable scenarios and setup for future changes at these boundaries. | Core local CI does **not** claim full live deployment or remote restore acceptance; those are separate required evidence for relevant changes. |
 | Source changes, a successful isolated drill and actual production setup could be confused. | Report each state separately, with real evidence. | Production external backup destination and public age recipient still require operator configuration; a code merge cannot establish them. |
@@ -52,6 +54,11 @@ bridge network and loopback ports. This option grants the build access to host
 listeners, so it is opt-in, not an automatic retry. Its value is recorded in the
 tool inventory; use the same setting for publish/push/merge evidence checks.
 Individual fixture commands have a 15-minute deadline and core checks 30 minutes.
+The validated Unix Docker endpoint is recorded in the tool inventory and pinned
+for build, run and cleanup. `DOCKER_CONFIG` is preserved as an absolute path to
+the existing client configuration; its contents are not copied. Image builds
+explicitly use the default builder on that daemon, regardless of the stored
+Buildx selection. Switching the current Docker context cannot retarget fixtures.
 
 ## Trust and recovery
 
@@ -74,7 +81,9 @@ them, or use a separately provisioned machine without personal credentials.
 
 On failure no new receipt is produced, and a previous receipt for that SHA is
 removed. Disposable containers/volumes are stopped in cleanup. Modified snapshots
-are retained rather than force-deleted; inspect the printed path. A power loss or
+are retained rather than force-deleted; inspect the printed path. SIGTERM initiates
+cleanup; repeated SIGTERM is ignored until cleanup finishes, then the previous
+handler is restored. A power loss or
 SIGKILL can leave a project behind: inspect its exact `vault-ci-*` labels and clean
 only that owned project. Do not run global Docker cleanup.
 

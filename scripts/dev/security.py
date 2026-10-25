@@ -10,8 +10,16 @@ import sys
 GO_TOOLS = {'golangci-lint': 'v2.14.0', 'govulncheck': 'v1.9.0'}
 
 
-def output(args, cwd=None):
-    return subprocess.check_output(args, cwd=cwd, text=True, stderr=subprocess.STDOUT).strip()
+def output(args, cwd=None, env=None):
+    return subprocess.check_output(args, cwd=cwd, env=env, text=True, stderr=subprocess.STDOUT, timeout=30).strip()
+
+
+def docker_endpoint(environment=None):
+    # Ask this Docker CLI to resolve its actual config/context/HOST precedence.
+    endpoint = output(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], env=environment)
+    if not endpoint.startswith('unix:///'):
+        raise ValueError('verified CI requires an absolute local Unix Docker endpoint; remote daemons are forbidden')
+    return endpoint
 
 
 def version(value):
@@ -81,7 +89,7 @@ def inventory(root):
     if version(go) != version(target):
         raise ValueError(f'Go {target} required; found {go}')
     programs = ['go', 'node', 'python3', 'xmake', 'docker', 'buf', 'openssl', 'age', 'age-keygen', 'cc', *GO_TOOLS]
-    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v1', 'build_network': build_network()}
+    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v2', 'build_network': build_network()}
     for program in programs:
         binary = shutil.which(program)
         if not binary:
@@ -101,9 +109,7 @@ def inventory(root):
     if output(['buf', '--version']) != '1.47.2':
         raise ValueError('buf 1.47.2 required')
     result['compose'] = output(['docker', 'compose', 'version', '--short'])
-    endpoint = output(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])
-    if os.environ.get('DOCKER_HOST') or not endpoint.startswith('unix://'):
-        raise ValueError('certified CI requires a local Unix Docker context; remote daemons are forbidden')
+    result['docker_endpoint'] = docker_endpoint()
     output(['docker', 'info', '--format', '{{.ServerVersion}}'])
     for program, flag in [('age', '--version'), ('age-keygen', '--version'), ('openssl', 'version')]:
         result[program] = output([program, flag])
@@ -120,6 +126,6 @@ if __name__ == '__main__':
         else:
             scan(root, '--staged' in sys.argv)
             print('Tracked-secret scan passed (heuristic; review is still required).')
-    except (ValueError, subprocess.CalledProcessError, OSError) as error:
+    except (ValueError, subprocess.SubprocessError, OSError) as error:
         print(str(error), file=sys.stderr)
         sys.exit(1)
