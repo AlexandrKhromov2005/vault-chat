@@ -33,11 +33,18 @@ func run(args []string, stderr io.Writer) int {
 	flags := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	checkTLS := flags.Bool("check-rpc-tls", false, "validate local RPC TLS configuration without connecting")
+	checkEmail := flags.Bool("check-account-email", false, "check account-email binary support without secrets or network")
 	httpURL := flags.String("http", "", "URL whose GET must answer 2xx")
 	grpcAddr := flags.String("grpc", "", "host:port of a gRPC server with the standard health service")
 	timeout := flags.Duration("timeout", 3*time.Second, "overall probe deadline")
 	if err := flags.Parse(args); err != nil {
 		return exitUsage
+	}
+	if *checkEmail {
+		if flags.NArg() > 0 || *checkTLS || *httpURL != "" || *grpcAddr != "" {
+			return exitUsage
+		}
+		return exitHealthy
 	}
 	if *checkTLS {
 		if flags.NArg() > 0 || *httpURL != "" || *grpcAddr != "" || os.Getenv("RPC_TLS_MODE") != "mtls" {

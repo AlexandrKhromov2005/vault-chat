@@ -6,7 +6,8 @@ import "time"
 // exactly one session via its jti claim; revoking the session invalidates the
 // token.
 type Session struct {
-	ID        string
-	UserID    string
-	ExpiresAt time.Time
+	CredentialVersion int64
+	ID                string
+	UserID            string
+	ExpiresAt         time.Time
 }

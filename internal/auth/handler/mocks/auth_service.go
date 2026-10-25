@@ -27,6 +27,237 @@ func (_m *MockAuthService) EXPECT() *MockAuthService_Expecter {
 	return &MockAuthService_Expecter{mock: &_m.Mock}
 }
 
+// ConfirmEmailChange provides a mock function with given fields: ctx, token
+func (_m *MockAuthService) ConfirmEmailChange(ctx context.Context, token string) (string, error) {
+	ret := _m.Called(ctx, token)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmEmailChange")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, token)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, token)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, token)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_ConfirmEmailChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmEmailChange'
+type MockAuthService_ConfirmEmailChange_Call struct {
+	*mock.Call
+}
+
+// ConfirmEmailChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - token string
+func (_e *MockAuthService_Expecter) ConfirmEmailChange(ctx interface{}, token interface{}) *MockAuthService_ConfirmEmailChange_Call {
+	return &MockAuthService_ConfirmEmailChange_Call{Call: _e.mock.On("ConfirmEmailChange", ctx, token)}
+}
+
+func (_c *MockAuthService_ConfirmEmailChange_Call) Run(run func(ctx context.Context, token string)) *MockAuthService_ConfirmEmailChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmEmailChange_Call) Return(_a0 string, _a1 error) *MockAuthService_ConfirmEmailChange_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmEmailChange_Call) RunAndReturn(run func(context.Context, string) (string, error)) *MockAuthService_ConfirmEmailChange_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ConfirmEmailVerification provides a mock function with given fields: ctx, token
+func (_m *MockAuthService) ConfirmEmailVerification(ctx context.Context, token string) (string, error) {
+	ret := _m.Called(ctx, token)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmEmailVerification")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, token)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, token)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, token)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_ConfirmEmailVerification_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmEmailVerification'
+type MockAuthService_ConfirmEmailVerification_Call struct {
+	*mock.Call
+}
+
+// ConfirmEmailVerification is a helper method to define mock.On call
+//   - ctx context.Context
+//   - token string
+func (_e *MockAuthService_Expecter) ConfirmEmailVerification(ctx interface{}, token interface{}) *MockAuthService_ConfirmEmailVerification_Call {
+	return &MockAuthService_ConfirmEmailVerification_Call{Call: _e.mock.On("ConfirmEmailVerification", ctx, token)}
+}
+
+func (_c *MockAuthService_ConfirmEmailVerification_Call) Run(run func(ctx context.Context, token string)) *MockAuthService_ConfirmEmailVerification_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmEmailVerification_Call) Return(_a0 string, _a1 error) *MockAuthService_ConfirmEmailVerification_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmEmailVerification_Call) RunAndReturn(run func(context.Context, string) (string, error)) *MockAuthService_ConfirmEmailVerification_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ConfirmPasswordReset provides a mock function with given fields: ctx, token, password
+func (_m *MockAuthService) ConfirmPasswordReset(ctx context.Context, token string, password string) (string, error) {
+	ret := _m.Called(ctx, token, password)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmPasswordReset")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return rf(ctx, token, password)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = rf(ctx, token, password)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, token, password)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_ConfirmPasswordReset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmPasswordReset'
+type MockAuthService_ConfirmPasswordReset_Call struct {
+	*mock.Call
+}
+
+// ConfirmPasswordReset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - token string
+//   - password string
+func (_e *MockAuthService_Expecter) ConfirmPasswordReset(ctx interface{}, token interface{}, password interface{}) *MockAuthService_ConfirmPasswordReset_Call {
+	return &MockAuthService_ConfirmPasswordReset_Call{Call: _e.mock.On("ConfirmPasswordReset", ctx, token, password)}
+}
+
+func (_c *MockAuthService_ConfirmPasswordReset_Call) Run(run func(ctx context.Context, token string, password string)) *MockAuthService_ConfirmPasswordReset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmPasswordReset_Call) Return(_a0 string, _a1 error) *MockAuthService_ConfirmPasswordReset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_ConfirmPasswordReset_Call) RunAndReturn(run func(context.Context, string, string) (string, error)) *MockAuthService_ConfirmPasswordReset_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAccount provides a mock function with given fields: ctx, accessToken
+func (_m *MockAuthService) GetAccount(ctx context.Context, accessToken string) (*service.AccountInfo, error) {
+	ret := _m.Called(ctx, accessToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAccount")
+	}
+
+	var r0 *service.AccountInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*service.AccountInfo, error)); ok {
+		return rf(ctx, accessToken)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *service.AccountInfo); ok {
+		r0 = rf(ctx, accessToken)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*service.AccountInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, accessToken)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthService_GetAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAccount'
+type MockAuthService_GetAccount_Call struct {
+	*mock.Call
+}
+
+// GetAccount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+func (_e *MockAuthService_Expecter) GetAccount(ctx interface{}, accessToken interface{}) *MockAuthService_GetAccount_Call {
+	return &MockAuthService_GetAccount_Call{Call: _e.mock.On("GetAccount", ctx, accessToken)}
+}
+
+func (_c *MockAuthService_GetAccount_Call) Run(run func(ctx context.Context, accessToken string)) *MockAuthService_GetAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_GetAccount_Call) Return(_a0 *service.AccountInfo, _a1 error) *MockAuthService_GetAccount_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_GetAccount_Call) RunAndReturn(run func(context.Context, string) (*service.AccountInfo, error)) *MockAuthService_GetAccount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetUser provides a mock function with given fields: ctx, accessToken, userID
 func (_m *MockAuthService) GetUser(ctx context.Context, accessToken string, userID string) (*domain.User, error) {
 	ret := _m.Called(ctx, accessToken, userID)
@@ -311,6 +542,150 @@ func (_c *MockAuthService_RegisterInvited_Call) Return(_a0 *domain.User, _a1 err
 }
 
 func (_c *MockAuthService_RegisterInvited_Call) RunAndReturn(run func(context.Context, string, string, string, string) (*domain.User, error)) *MockAuthService_RegisterInvited_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestEmailChange provides a mock function with given fields: ctx, accessToken, password, newEmail
+func (_m *MockAuthService) RequestEmailChange(ctx context.Context, accessToken string, password string, newEmail string) error {
+	ret := _m.Called(ctx, accessToken, password, newEmail)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestEmailChange")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, accessToken, password, newEmail)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_RequestEmailChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestEmailChange'
+type MockAuthService_RequestEmailChange_Call struct {
+	*mock.Call
+}
+
+// RequestEmailChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+//   - password string
+//   - newEmail string
+func (_e *MockAuthService_Expecter) RequestEmailChange(ctx interface{}, accessToken interface{}, password interface{}, newEmail interface{}) *MockAuthService_RequestEmailChange_Call {
+	return &MockAuthService_RequestEmailChange_Call{Call: _e.mock.On("RequestEmailChange", ctx, accessToken, password, newEmail)}
+}
+
+func (_c *MockAuthService_RequestEmailChange_Call) Run(run func(ctx context.Context, accessToken string, password string, newEmail string)) *MockAuthService_RequestEmailChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RequestEmailChange_Call) Return(_a0 error) *MockAuthService_RequestEmailChange_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_RequestEmailChange_Call) RunAndReturn(run func(context.Context, string, string, string) error) *MockAuthService_RequestEmailChange_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestEmailVerification provides a mock function with given fields: ctx, email, password
+func (_m *MockAuthService) RequestEmailVerification(ctx context.Context, email string, password string) error {
+	ret := _m.Called(ctx, email, password)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestEmailVerification")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, email, password)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_RequestEmailVerification_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestEmailVerification'
+type MockAuthService_RequestEmailVerification_Call struct {
+	*mock.Call
+}
+
+// RequestEmailVerification is a helper method to define mock.On call
+//   - ctx context.Context
+//   - email string
+//   - password string
+func (_e *MockAuthService_Expecter) RequestEmailVerification(ctx interface{}, email interface{}, password interface{}) *MockAuthService_RequestEmailVerification_Call {
+	return &MockAuthService_RequestEmailVerification_Call{Call: _e.mock.On("RequestEmailVerification", ctx, email, password)}
+}
+
+func (_c *MockAuthService_RequestEmailVerification_Call) Run(run func(ctx context.Context, email string, password string)) *MockAuthService_RequestEmailVerification_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RequestEmailVerification_Call) Return(_a0 error) *MockAuthService_RequestEmailVerification_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_RequestEmailVerification_Call) RunAndReturn(run func(context.Context, string, string) error) *MockAuthService_RequestEmailVerification_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestPasswordReset provides a mock function with given fields: ctx, email
+func (_m *MockAuthService) RequestPasswordReset(ctx context.Context, email string) error {
+	ret := _m.Called(ctx, email)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestPasswordReset")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, email)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_RequestPasswordReset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestPasswordReset'
+type MockAuthService_RequestPasswordReset_Call struct {
+	*mock.Call
+}
+
+// RequestPasswordReset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - email string
+func (_e *MockAuthService_Expecter) RequestPasswordReset(ctx interface{}, email interface{}) *MockAuthService_RequestPasswordReset_Call {
+	return &MockAuthService_RequestPasswordReset_Call{Call: _e.mock.On("RequestPasswordReset", ctx, email)}
+}
+
+func (_c *MockAuthService_RequestPasswordReset_Call) Run(run func(ctx context.Context, email string)) *MockAuthService_RequestPasswordReset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RequestPasswordReset_Call) Return(_a0 error) *MockAuthService_RequestPasswordReset_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_RequestPasswordReset_Call) RunAndReturn(run func(context.Context, string) error) *MockAuthService_RequestPasswordReset_Call {
 	_c.Call.Return(run)
 	return _c
 }

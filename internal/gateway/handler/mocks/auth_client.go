@@ -25,6 +25,302 @@ func (_m *MockAuthClient) EXPECT() *MockAuthClient_Expecter {
 	return &MockAuthClient_Expecter{mock: &_m.Mock}
 }
 
+// ConfirmEmailChange provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) ConfirmEmailChange(ctx context.Context, in *authv1.ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmEmailChange")
+	}
+
+	var r0 *authv1.ConfirmEmailChangeResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmEmailChangeRequest, ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmEmailChangeRequest, ...grpc.CallOption) *authv1.ConfirmEmailChangeResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.ConfirmEmailChangeResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.ConfirmEmailChangeRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_ConfirmEmailChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmEmailChange'
+type MockAuthClient_ConfirmEmailChange_Call struct {
+	*mock.Call
+}
+
+// ConfirmEmailChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.ConfirmEmailChangeRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) ConfirmEmailChange(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_ConfirmEmailChange_Call {
+	return &MockAuthClient_ConfirmEmailChange_Call{Call: _e.mock.On("ConfirmEmailChange",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_ConfirmEmailChange_Call) Run(run func(ctx context.Context, in *authv1.ConfirmEmailChangeRequest, opts ...grpc.CallOption)) *MockAuthClient_ConfirmEmailChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.ConfirmEmailChangeRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmEmailChange_Call) Return(_a0 *authv1.ConfirmEmailChangeResponse, _a1 error) *MockAuthClient_ConfirmEmailChange_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmEmailChange_Call) RunAndReturn(run func(context.Context, *authv1.ConfirmEmailChangeRequest, ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error)) *MockAuthClient_ConfirmEmailChange_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ConfirmEmailVerification provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) ConfirmEmailVerification(ctx context.Context, in *authv1.ConfirmEmailVerificationRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailVerificationResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmEmailVerification")
+	}
+
+	var r0 *authv1.ConfirmEmailVerificationResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmEmailVerificationRequest, ...grpc.CallOption) (*authv1.ConfirmEmailVerificationResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmEmailVerificationRequest, ...grpc.CallOption) *authv1.ConfirmEmailVerificationResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.ConfirmEmailVerificationResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.ConfirmEmailVerificationRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_ConfirmEmailVerification_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmEmailVerification'
+type MockAuthClient_ConfirmEmailVerification_Call struct {
+	*mock.Call
+}
+
+// ConfirmEmailVerification is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.ConfirmEmailVerificationRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) ConfirmEmailVerification(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_ConfirmEmailVerification_Call {
+	return &MockAuthClient_ConfirmEmailVerification_Call{Call: _e.mock.On("ConfirmEmailVerification",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_ConfirmEmailVerification_Call) Run(run func(ctx context.Context, in *authv1.ConfirmEmailVerificationRequest, opts ...grpc.CallOption)) *MockAuthClient_ConfirmEmailVerification_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.ConfirmEmailVerificationRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmEmailVerification_Call) Return(_a0 *authv1.ConfirmEmailVerificationResponse, _a1 error) *MockAuthClient_ConfirmEmailVerification_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmEmailVerification_Call) RunAndReturn(run func(context.Context, *authv1.ConfirmEmailVerificationRequest, ...grpc.CallOption) (*authv1.ConfirmEmailVerificationResponse, error)) *MockAuthClient_ConfirmEmailVerification_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ConfirmPasswordReset provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) ConfirmPasswordReset(ctx context.Context, in *authv1.ConfirmPasswordResetRequest, opts ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmPasswordReset")
+	}
+
+	var r0 *authv1.ConfirmPasswordResetResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmPasswordResetRequest, ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.ConfirmPasswordResetRequest, ...grpc.CallOption) *authv1.ConfirmPasswordResetResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.ConfirmPasswordResetResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.ConfirmPasswordResetRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_ConfirmPasswordReset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmPasswordReset'
+type MockAuthClient_ConfirmPasswordReset_Call struct {
+	*mock.Call
+}
+
+// ConfirmPasswordReset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.ConfirmPasswordResetRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) ConfirmPasswordReset(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_ConfirmPasswordReset_Call {
+	return &MockAuthClient_ConfirmPasswordReset_Call{Call: _e.mock.On("ConfirmPasswordReset",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_ConfirmPasswordReset_Call) Run(run func(ctx context.Context, in *authv1.ConfirmPasswordResetRequest, opts ...grpc.CallOption)) *MockAuthClient_ConfirmPasswordReset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.ConfirmPasswordResetRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmPasswordReset_Call) Return(_a0 *authv1.ConfirmPasswordResetResponse, _a1 error) *MockAuthClient_ConfirmPasswordReset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_ConfirmPasswordReset_Call) RunAndReturn(run func(context.Context, *authv1.ConfirmPasswordResetRequest, ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error)) *MockAuthClient_ConfirmPasswordReset_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAccount provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) GetAccount(ctx context.Context, in *authv1.GetAccountRequest, opts ...grpc.CallOption) (*authv1.GetAccountResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAccount")
+	}
+
+	var r0 *authv1.GetAccountResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.GetAccountRequest, ...grpc.CallOption) (*authv1.GetAccountResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.GetAccountRequest, ...grpc.CallOption) *authv1.GetAccountResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.GetAccountResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.GetAccountRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_GetAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAccount'
+type MockAuthClient_GetAccount_Call struct {
+	*mock.Call
+}
+
+// GetAccount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.GetAccountRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) GetAccount(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_GetAccount_Call {
+	return &MockAuthClient_GetAccount_Call{Call: _e.mock.On("GetAccount",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_GetAccount_Call) Run(run func(ctx context.Context, in *authv1.GetAccountRequest, opts ...grpc.CallOption)) *MockAuthClient_GetAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.GetAccountRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_GetAccount_Call) Return(_a0 *authv1.GetAccountResponse, _a1 error) *MockAuthClient_GetAccount_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_GetAccount_Call) RunAndReturn(run func(context.Context, *authv1.GetAccountRequest, ...grpc.CallOption) (*authv1.GetAccountResponse, error)) *MockAuthClient_GetAccount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetUser provides a mock function with given fields: ctx, in, opts
 func (_m *MockAuthClient) GetUser(ctx context.Context, in *authv1.GetUserRequest, opts ...grpc.CallOption) (*authv1.GetUserResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -391,6 +687,228 @@ func (_c *MockAuthClient_Register_Call) Return(_a0 *authv1.RegisterResponse, _a1
 }
 
 func (_c *MockAuthClient_Register_Call) RunAndReturn(run func(context.Context, *authv1.RegisterRequest, ...grpc.CallOption) (*authv1.RegisterResponse, error)) *MockAuthClient_Register_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestEmailChange provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) RequestEmailChange(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestEmailChange")
+	}
+
+	var r0 *authv1.RequestEmailChangeResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestEmailChangeRequest, ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestEmailChangeRequest, ...grpc.CallOption) *authv1.RequestEmailChangeResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.RequestEmailChangeResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.RequestEmailChangeRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_RequestEmailChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestEmailChange'
+type MockAuthClient_RequestEmailChange_Call struct {
+	*mock.Call
+}
+
+// RequestEmailChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.RequestEmailChangeRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) RequestEmailChange(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_RequestEmailChange_Call {
+	return &MockAuthClient_RequestEmailChange_Call{Call: _e.mock.On("RequestEmailChange",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_RequestEmailChange_Call) Run(run func(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption)) *MockAuthClient_RequestEmailChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.RequestEmailChangeRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_RequestEmailChange_Call) Return(_a0 *authv1.RequestEmailChangeResponse, _a1 error) *MockAuthClient_RequestEmailChange_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_RequestEmailChange_Call) RunAndReturn(run func(context.Context, *authv1.RequestEmailChangeRequest, ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error)) *MockAuthClient_RequestEmailChange_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestEmailVerification provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) RequestEmailVerification(ctx context.Context, in *authv1.RequestEmailVerificationRequest, opts ...grpc.CallOption) (*authv1.RequestEmailVerificationResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestEmailVerification")
+	}
+
+	var r0 *authv1.RequestEmailVerificationResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestEmailVerificationRequest, ...grpc.CallOption) (*authv1.RequestEmailVerificationResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestEmailVerificationRequest, ...grpc.CallOption) *authv1.RequestEmailVerificationResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.RequestEmailVerificationResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.RequestEmailVerificationRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_RequestEmailVerification_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestEmailVerification'
+type MockAuthClient_RequestEmailVerification_Call struct {
+	*mock.Call
+}
+
+// RequestEmailVerification is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.RequestEmailVerificationRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) RequestEmailVerification(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_RequestEmailVerification_Call {
+	return &MockAuthClient_RequestEmailVerification_Call{Call: _e.mock.On("RequestEmailVerification",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_RequestEmailVerification_Call) Run(run func(ctx context.Context, in *authv1.RequestEmailVerificationRequest, opts ...grpc.CallOption)) *MockAuthClient_RequestEmailVerification_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.RequestEmailVerificationRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_RequestEmailVerification_Call) Return(_a0 *authv1.RequestEmailVerificationResponse, _a1 error) *MockAuthClient_RequestEmailVerification_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_RequestEmailVerification_Call) RunAndReturn(run func(context.Context, *authv1.RequestEmailVerificationRequest, ...grpc.CallOption) (*authv1.RequestEmailVerificationResponse, error)) *MockAuthClient_RequestEmailVerification_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RequestPasswordReset provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) RequestPasswordReset(ctx context.Context, in *authv1.RequestPasswordResetRequest, opts ...grpc.CallOption) (*authv1.RequestPasswordResetResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestPasswordReset")
+	}
+
+	var r0 *authv1.RequestPasswordResetResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestPasswordResetRequest, ...grpc.CallOption) (*authv1.RequestPasswordResetResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RequestPasswordResetRequest, ...grpc.CallOption) *authv1.RequestPasswordResetResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.RequestPasswordResetResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.RequestPasswordResetRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_RequestPasswordReset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequestPasswordReset'
+type MockAuthClient_RequestPasswordReset_Call struct {
+	*mock.Call
+}
+
+// RequestPasswordReset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.RequestPasswordResetRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) RequestPasswordReset(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_RequestPasswordReset_Call {
+	return &MockAuthClient_RequestPasswordReset_Call{Call: _e.mock.On("RequestPasswordReset",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_RequestPasswordReset_Call) Run(run func(ctx context.Context, in *authv1.RequestPasswordResetRequest, opts ...grpc.CallOption)) *MockAuthClient_RequestPasswordReset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.RequestPasswordResetRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_RequestPasswordReset_Call) Return(_a0 *authv1.RequestPasswordResetResponse, _a1 error) *MockAuthClient_RequestPasswordReset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_RequestPasswordReset_Call) RunAndReturn(run func(context.Context, *authv1.RequestPasswordResetRequest, ...grpc.CallOption) (*authv1.RequestPasswordResetResponse, error)) *MockAuthClient_RequestPasswordReset_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -28,6 +28,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	if err != nil {
 		return nil, fmt.Errorf("refresh: failed to load user: %w", err)
 	}
+	if s.emailRequired(user) {
+		return nil, ErrInvalidToken
+	}
 
 	pair, next, err := s.issueTokenPair(user)
 	if err != nil {

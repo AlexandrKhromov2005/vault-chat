@@ -11,18 +11,21 @@ import (
 // Config holds the auth service configuration. Secrets are only ever read
 // from the environment; see .env.example for the full list.
 type Config struct {
-	GRPCAddr          string
-	DatabaseURL       string
-	JWTPrivateKeyPath string
-	JWTPublicKeyPath  string
-	JWTAccessTTL      time.Duration
-	JWTRefreshTTL     time.Duration
-	Argon2MemoryKiB   uint32
-	Argon2Time        uint32
-	Argon2Parallelism uint8
-	LogLevel          string
-	RedisAddr         string
-	RedisPassword     string
+	GRPCAddr                                                                                               string
+	DatabaseURL                                                                                            string
+	JWTPrivateKeyPath                                                                                      string
+	JWTPublicKeyPath                                                                                       string
+	JWTAccessTTL                                                                                           time.Duration
+	JWTRefreshTTL                                                                                          time.Duration
+	Argon2MemoryKiB                                                                                        uint32
+	Argon2Time                                                                                             uint32
+	Argon2Parallelism                                                                                      uint8
+	LogLevel                                                                                               string
+	RedisAddr                                                                                              string
+	RedisPassword                                                                                          string
+	MailEnabled                                                                                            bool
+	PublicURL, MailKeyFile, SMTPAddress, SMTPFrom, SMTPUsername, SMTPPasswordFile, SMTPTLSMode, SMTPCAFile string
+	EmailLegacyDeadline                                                                                    *time.Time
 }
 
 // Load reads configuration from AUTH_* environment variables. DatabaseURL
@@ -68,6 +71,9 @@ func Load() (*Config, error) {
 	}
 	cfg.Argon2Parallelism = uint8(parallelism)
 
+	if err := cfg.loadEmail(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
