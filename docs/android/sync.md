@@ -53,9 +53,16 @@ one contiguous block of them, `oldest..newest`:
 A live message with `sequence = newest + 1` extends the block; a lower one is
 a duplicate; a higher one is a gap: it is not stored, and the room catches up
 after `newest`, which returns it too. A latest page that does not reach the
-block replaces it. Unread counts are local: messages of others after the
-last one shown on this device; history present when a room is first loaded
-counts as read.
+block replaces it. Times are stored in microseconds, the server's precision:
+two messages can share a millisecond.
+
+Unread counts are local: messages of others after the newest one seen on
+this device, which is when the newest message is on screen. History present
+when a room is first loaded by a sync or by opening it counts as read; a room
+loaded because of a live message shows that message as unread, and a room
+the user has just joined shows all of its loaded messages. When unread
+messages lie before the stored block, the count is shown as a lower bound
+("10+").
 
 ## Synchronisation
 
@@ -77,13 +84,22 @@ sync at a time, and a request during a sync runs one more after it.
 
 Membership changes of the room list (step 1 and `member.*` events for the
 user) are serialised, so that a room added by an event during a listing that
-started before it is not deleted as unlisted.
+started before it is not deleted as unlisted. Re-reading the first page
+covers up to one page of rooms that moved during the listing; if more did,
+some are deleted as unlisted, and a room the user was removed from during
+the listing may be stored again from an earlier page. The next sync or event
+corrects both.
+
+Live events that need a room refreshed (a gap, a room not loaded yet) are
+coalesced per room: events during a refresh add one more refresh after it.
 
 ## Resource budgets
 
 | Budget | Value | Why |
 |---|---|---|
 | Gateway rate limit per user and IP | 120/min, burst 30 (server default) | Sync must stay well inside it |
+| Background requests (listing, preload, catch-up, profiles) | 60/min, burst 15 (token bucket) | Half of the Gateway's limit stays for the user |
+| Requests the user waits for (opening a room, older history) | Not delayed; they draw on the same bucket, at most 15 into debt | Background work waits them out |
 | Concurrent sync requests | 2 | Leaves room for the user's own requests |
 | Room list | 100 per page, at most 50 pages | 5000 rooms; beyond that the list is stored but nothing is deleted |
 | Rooms preloaded per sync | 10 | Bounds the first sync of a new device |
@@ -94,7 +110,8 @@ started before it is not deleted as unlisted.
 | WebSocket reconnect | 0.5 s doubling to 30 s, with jitter; `Retry-After` honoured | |
 
 A `429` pauses all sync requests until its `Retry-After` has passed, then
-the sync runs again.
+the sync runs again. On the first sync of an account with many dialogs the
+names of their peers arrive over a minute or more, at the background rate.
 
 ## Failure behaviour
 
@@ -105,7 +122,8 @@ the sync runs again.
 | Request fails (network, 5xx, timeout) | The sync stops and is shown; the next trigger retries. Stored data stays visible |
 | `401` | The access token is renewed once (SessionManager); a rejected refresh signs out |
 | `404` for a room | The user lost access: the room and its messages are deleted |
-| WebSocket 4001 | Renew the token, reconnect at once |
+| WebSocket 4001 | Renew the token, reconnect at once; a second 4001 in a row reconnects after the backoff |
+| Re-authentication | Before the token has 60 s left, and at least 11 s after the last `ready` (the Gateway requires 10 s since it sent `ready`) |
 | WebSocket 1001, 1013, 4002, lost connection | Reconnect with backoff, then sync |
 | WebSocket 1003, 1008, 1009 | Client bug: stop reconnecting until the next foreground or network change |
 | No `ready` within 15 s of opening | Treated as a lost connection |

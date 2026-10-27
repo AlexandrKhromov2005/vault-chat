@@ -235,7 +235,7 @@ private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
                 )
                 if (item.unread > 0) {
                     Spacer(Modifier.size(8.dp))
-                    UnreadBadge(item.unread)
+                    UnreadBadge(item.unread, more = item.unreadMore)
                 }
             }
         }
@@ -268,8 +268,12 @@ fun Avatar(name: String, size: Int = 48) {
 }
 
 @Composable
-private fun UnreadBadge(count: Int) {
-    val label = if (count > 99) "99+" else count.toString()
+private fun UnreadBadge(count: Int, more: Boolean) {
+    val label = when {
+        count > 99 -> "99+"
+        more -> "$count+"
+        else -> count.toString()
+    }
     val description = stringResource(R.string.unread_description, count)
     Box(
         Modifier

@@ -20,6 +20,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.flow.first
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.util.concurrent.atomic.AtomicBoolean
@@ -287,5 +288,122 @@ class ChatSyncTest {
         // The latest page itself is not consecutive and is rejected too: the
         // stored block stays as it was.
         assertEquals(listOf(1L, 2L, 3L), stored(room))
+    }
+
+    private suspend fun unread(roomId: String) = dao.roomList(me).first().single { it.room.roomId == roomId }.unread
+
+    // Review of 4fba109: a room loaded because of a live message counted that
+    // very message as read.
+    @Test
+    fun aLiveMessageInARoomThatWasNotPreloadedIsUnread() = runBlocking {
+        val notPreloaded = server.addChannel(1)
+        server.postMany(notPreloaded, 2, sender = peer)
+        (2..11).forEach { server.addChannel(it) }
+        val sync = sync()
+        assertNull(sync.syncNow())
+        assertNull(dao.timeline(notPreloaded))
+
+        sync.onEvent(Frame.MessageCreated(notPreloaded, server.post(notPreloaded, sender = peer)))
+        eventually { dao.storedMessages(notPreloaded).size == 3 }
+
+        // Older history counts as read; the new message does not.
+        assertEquals(1, unread(notPreloaded))
+    }
+
+    @Test
+    fun theFirstMessageOfANewDialogIsUnread() = runBlocking {
+        val sync = sync()
+        assertNull(sync.syncNow())
+
+        val dialog = server.addDialog(1, peer, "bob")
+        val message = server.post(dialog, sender = peer)
+        sync.onEvent(Frame.MemberAdded(dialog, me))
+        sync.onEvent(Frame.MessageCreated(dialog, message))
+        eventually { dao.storedMessages(dialog).isNotEmpty() }
+
+        assertEquals(1, unread(dialog))
+    }
+
+    // Review of 4fba109: times were compared in milliseconds, but the server
+    // sends microseconds.
+    @Test
+    fun aMissedMessageInTheSameMillisecondIsCaughtUp() = runBlocking {
+        val room = server.addChannel(1)
+        fun put(sequence: Long, at: String) = synchronized(server) {
+            server.messages.getValue(room) += io.github.alexandrkhromov2005.vaultchat.core.net.MessageDto(
+                messageId = server.id(2, sequence.toInt()),
+                roomId = room,
+                senderId = peer,
+                clientMessageId = server.id(3, sequence.toInt()),
+                text = "text $sequence",
+                sequence = sequence,
+                createdAt = at,
+            )
+            val index = server.rooms.indexOfFirst { it.roomId == room }
+            server.rooms[index] = server.rooms[index].copy(lastMessageAt = at)
+        }
+        put(1, "2026-10-27T12:00:00.1234Z")
+        val sync = sync()
+        assertNull(sync.syncNow())
+
+        // The live event of the second message was lost.
+        put(2, "2026-10-27T12:00:00.123901Z")
+        assertNull(sync.syncNow())
+
+        assertEquals(listOf(1L, 2L), stored(room))
+    }
+
+    // Review of 4fba109: profiles and catch-ups were sent as fast as two
+    // connections allowed, far over the Gateway's burst.
+    @Test
+    fun backgroundRequestsStayWithinTheBudget() = runBlocking {
+        (1..100).forEach { n -> server.addDialog(n, server.id(4, n), "user$n") }
+        val sync = sync()
+        val started = System.currentTimeMillis()
+        assertNull(sync.syncNow())
+        delay(2_000)
+
+        val seconds = (System.currentTimeMillis() - started) / 1000.0
+        // Half of the Gateway's limit (120/min, burst 30) is left for the user.
+        val allowed = 15 + seconds * 60 / 60.0
+        assertTrue("${server.calls().size} requests in $seconds s", server.calls().size <= allowed + 1)
+        assertTrue(dao.knownProfiles((1..100).map { server.id(4, it) }).isNotEmpty())
+    }
+
+    @Test
+    fun aRoomOpenedByTheUserDoesNotWaitForBackgroundRequests() = runBlocking {
+        (1..100).forEach { n -> server.addDialog(n, server.id(4, n), "user$n") }
+        val room = server.addChannel(200)
+        val sync = sync(ChatSync.Limits(preloadedRooms = 0))
+        sync.syncNow()
+        delay(200)
+
+        val started = System.currentTimeMillis()
+        sync.openRoom(room)
+        assertTrue(System.currentTimeMillis() - started < 1_000)
+        assertNotNull(dao.timeline(room))
+    }
+
+    // Review of 4fba109: each live message of a room that was loading started
+    // a refresh of its own.
+    @Test
+    fun liveMessagesDuringALoadCoalesce() = runBlocking {
+        val room = server.addChannel(1)
+        (2..11).forEach { server.addChannel(it) }
+        val sync = sync()
+        assertNull(sync.syncNow())
+        assertNull(dao.timeline(room))
+
+        val slow = AtomicBoolean(true)
+        server.intercept = { call ->
+            if (call == "messages $room" && slow.getAndSet(false)) Thread.sleep(500)
+            null
+        }
+        repeat(20) { sync.onEvent(Frame.MessageCreated(room, server.post(room, sender = peer))) }
+        eventually { dao.timeline(room)?.newest == 20L }
+        delay(1_000)
+
+        val reads = server.calls().count { it.startsWith("messages $room") }
+        assertTrue("$reads history requests for one room", reads <= 2)
     }
 }

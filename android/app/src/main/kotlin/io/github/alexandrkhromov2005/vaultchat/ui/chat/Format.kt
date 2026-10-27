@@ -15,24 +15,27 @@ import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 
-// Times are shown in the phone's zone and in the locale of the composition,
-// which follows a change of the system language.
+// Times are microseconds since the epoch, as stored. They are shown in the
+// phone's zone and in the locale of the composition, which follows a change
+// of the system language.
 
-private fun zoned(epochMillis: Long) = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
+private fun zoned(epochMicros: Long) =
+    Instant.ofEpochSecond(Math.floorDiv(epochMicros, 1_000_000L), Math.floorMod(epochMicros, 1_000_000L) * 1_000L)
+        .atZone(ZoneId.systemDefault())
 
-fun epochDay(epochMillis: Long): Long = zoned(epochMillis).toLocalDate().toEpochDay()
+fun epochDay(epochMicros: Long): Long = zoned(epochMicros).toLocalDate().toEpochDay()
 
 /** A message's time of day. */
-fun formatTime(epochMillis: Long, locale: Locale): String =
-    zoned(epochMillis).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
+fun formatTime(epochMicros: Long, locale: Locale): String =
+    zoned(epochMicros).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
 
 /** The time in the room list: today's time, a weekday within a week, otherwise the date. */
-fun formatListTime(epochMillis: Long, locale: Locale, today: LocalDate = LocalDate.now()): String {
-    val time = zoned(epochMillis)
+fun formatListTime(epochMicros: Long, locale: Locale, today: LocalDate = LocalDate.now()): String {
+    val time = zoned(epochMicros)
     val date = time.toLocalDate()
     val days = ChronoUnit.DAYS.between(date, today)
     val pattern = when {
-        days <= 0L -> return formatTime(epochMillis, locale)
+        days <= 0L -> return formatTime(epochMicros, locale)
         days < 7 -> "EE"
         date.year == today.year -> "d MMM"
         else -> "dd.MM.yy"

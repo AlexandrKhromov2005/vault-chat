@@ -144,4 +144,19 @@ class ChatDaoTest {
         dao.markRead("room-1", 5)
         assertEquals(0, dao.roomList(me).first().first().unread)
     }
+
+    @Test
+    fun unreadMessagesBeyondTheStoredBlockAreFlagged() = runBlocking {
+        dao.storeRoomList(listOf(room(1)), complete = true)
+        dao.applyLatest("room-1", newestFirst("room-1", 10L downTo 1L))
+        assertEquals(false, dao.roomList(me).first().single().unreadMore)
+
+        // The room fell far behind and was reset: messages 11..90 are unread
+        // but not stored.
+        dao.applyLatest("room-1", newestFirst("room-1", 100L downTo 91L))
+
+        val item = dao.roomList(me).first().single()
+        assertEquals(10, item.unread)
+        assertEquals(true, item.unreadMore)
+    }
 }

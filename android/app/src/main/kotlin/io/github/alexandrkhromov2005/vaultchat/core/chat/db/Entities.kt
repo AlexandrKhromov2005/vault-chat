@@ -10,8 +10,8 @@ import androidx.room.PrimaryKey
 /**
  * A room the user is a member of. [activity] orders the room list: rooms
  * keep the order of the latest listing, and a room with a new message moves
- * above all others. Times are milliseconds since the epoch, as sent by the
- * server.
+ * above all others. Times here and in the other tables are microseconds
+ * since the epoch, the precision of the server.
  */
 @Entity(tableName = "rooms")
 data class RoomEntity(
@@ -87,6 +87,8 @@ data class RoomListItem(
     @ColumnInfo(name = "last_attachments") val lastAttachments: String?,
     @ColumnInfo(name = "last_created_at") val lastCreatedAt: Long?,
     val unread: Int,
+    /** Whether unread messages older than the stored block exist, so that [unread] is a lower bound. */
+    @ColumnInfo(name = "unread_more") val unreadMore: Boolean,
 )
 
 /** A message with its sender's name. */

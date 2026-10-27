@@ -11,6 +11,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.TimelineEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
@@ -128,6 +129,8 @@ class ChatSession(
     val rooms: Flow<List<RoomListItem>> get() = dao.roomList(me)
 
     fun room(roomId: String): Flow<RoomListItem?> = dao.roomItem(me, roomId)
+
+    fun timeline(roomId: String): Flow<TimelineEntity?> = dao.timelineFlow(roomId)
 
     /** Messages of a room, newest first, read from the database and loaded on demand. */
     @OptIn(ExperimentalPagingApi::class)

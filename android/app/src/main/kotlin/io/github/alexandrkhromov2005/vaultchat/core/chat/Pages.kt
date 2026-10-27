@@ -26,14 +26,21 @@ internal fun invalid(reason: String): ApiException = ApiException(200, ApiExcept
 
 private fun uuid(value: String, field: String): String = value.takeIf(::isUuid) ?: throw invalid("$field is not a UUID")
 
-/** Milliseconds since the epoch of an RFC 3339 time. */
-fun parseTime(value: String): Long? = try {
-    OffsetDateTime.parse(value).toInstant().toEpochMilli()
+/**
+ * Microseconds since the epoch of an RFC 3339 time. The server's times have
+ * microseconds, and two messages may fall in the same millisecond, so a
+ * coarser unit would make them look equally new.
+ */
+fun parseMicros(value: String): Long? = try {
+    val instant = OffsetDateTime.parse(value).toInstant()
+    Math.addExact(Math.multiplyExact(instant.epochSecond, 1_000_000L), instant.nano / 1_000L)
 } catch (e: DateTimeParseException) {
+    null
+} catch (e: ArithmeticException) {
     null
 }
 
-private fun time(value: String, field: String): Long = parseTime(value) ?: throw invalid("$field is not a time")
+private fun time(value: String, field: String): Long = parseMicros(value) ?: throw invalid("$field is not a time")
 
 internal fun MessageDto.toEntity(expectedRoomId: String): MessageEntity {
     if (roomId != expectedRoomId) throw invalid("message of another room")

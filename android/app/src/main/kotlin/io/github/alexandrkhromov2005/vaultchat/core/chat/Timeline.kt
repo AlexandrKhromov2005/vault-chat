@@ -23,10 +23,10 @@ object Timeline {
     /**
      * Applies the latest history page, newest first. A page that reaches the
      * block extends it; one that does not replaces it, because the messages
-     * between them are unknown. History that is present when a room is
-     * first loaded counts as read.
+     * between them are unknown. When a room is first loaded, messages up to
+     * [readThrough] count as read; without it, all of its history does.
      */
-    fun latest(roomId: String, block: TimelineEntity?, page: List<MessageEntity>): Update? {
+    fun latest(roomId: String, block: TimelineEntity?, page: List<MessageEntity>, readThrough: Long? = null): Update? {
         if (page.isEmpty()) {
             // An empty room. A loaded block cannot become empty: messages are
             // never deleted, so such an answer is ignored.
@@ -35,8 +35,10 @@ object Timeline {
         val top = page.first().sequence
         val bottom = page.last().sequence
         return when {
-            block == null ->
-                Update(TimelineEntity(roomId, newest = top, oldest = bottom, lastRead = top), page, replace = true)
+            block == null -> {
+                val lastRead = readThrough?.coerceIn(0, top) ?: top
+                Update(TimelineEntity(roomId, newest = top, oldest = bottom, lastRead = lastRead), page, replace = true)
+            }
             top <= block.newest -> null
             bottom <= block.newest + 1 ->
                 Update(block.copy(newest = top), page.filter { it.sequence > block.newest })

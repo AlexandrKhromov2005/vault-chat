@@ -94,13 +94,21 @@ class Realtime(
         data object WrongUser : End
     }
 
+    // 4001 closes since the last connection that stayed up. Only the first is
+    // answered by reconnecting at once: a Gateway that keeps rejecting fresh
+    // tokens would otherwise be met with a refresh and an upgrade in a loop.
+    private var rejectionsInARow = 0
+
     /** Runs the connection until cancelled; the socket is closed on the way out. */
     suspend fun run() {
         backoff.reset()
+        rejectionsInARow = 0
         try {
             while (true) {
                 if (mutableState.value != RealtimeState.WAITING) mutableState.value = RealtimeState.CONNECTING
-                val delayMs = when (val end = connection()) {
+                val end = connection()
+                if (end !is End.Closed || end.code != UNAUTHORIZED) rejectionsInARow = 0
+                val delayMs = when (end) {
                     End.SignedOut -> return
                     End.WrongUser -> {
                         mutableState.value = RealtimeState.FAILED
@@ -112,7 +120,7 @@ class Realtime(
                             mutableState.value = RealtimeState.FAILED
                             return
                         }
-                        UNAUTHORIZED -> renewAfterRejection(end.token) ?: return
+                        UNAUTHORIZED -> renewAfterRejection(end.token, immediate = ++rejectionsInARow == 1) ?: return
                         else -> backoff.next()
                     }
                 }
@@ -126,14 +134,14 @@ class Realtime(
 
     /**
      * After 4001, renews the token and returns the delay before reconnecting:
-     * none after a renewal, the backoff after a network failure, null when
-     * the session has ended.
+     * none after a first renewal, the backoff after a repeated rejection or a
+     * network failure, null when the session has ended.
      */
-    private suspend fun renewAfterRejection(token: String?): Long? {
+    private suspend fun renewAfterRejection(token: String?, immediate: Boolean): Long? {
         if (token == null) return backoff.next()
         return try {
             tokens.renew(token)
-            0
+            if (immediate) 0 else backoff.next()
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
@@ -168,7 +176,6 @@ class Realtime(
         var live = false
         var liveSince = 0L
         var sent: AccessGrant? = null
-        var lastAuthAt = Long.MIN_VALUE
         var timer: Job? = null
 
         fun schedule(event: Event, delayMs: Long) {
@@ -189,7 +196,6 @@ class Realtime(
                 return if (e.isUnauthenticated) End.SignedOut else End.Lost(null)
             }
             sent = grant
-            lastAuthAt = elapsed()
             socket.send(buildJsonObject { put("type", "auth"); put("token", grant.token) }.toString())
             return null
         }
@@ -213,9 +219,13 @@ class Realtime(
                                     onReady()
                                 }
                                 // Renew before the token runs out, but never sooner than
-                                // the Gateway allows.
+                                // the Gateway allows. It counts from when it sent ready,
+                                // which is before ready arrives here.
                                 val validUntil = sent?.validUntil ?: elapsed()
-                                val at = maxOf(validUntil - REAUTH_BEFORE_MS, lastAuthAt + MIN_REAUTH_INTERVAL_MS)
+                                val at = maxOf(
+                                    validUntil - REAUTH_BEFORE_MS,
+                                    elapsed() + MIN_REAUTH_INTERVAL_MS + REAUTH_MARGIN_MS,
+                                )
                                 schedule(Event.ReauthDue, maxOf(0, at - elapsed()))
                                 null
                             }
@@ -246,7 +256,10 @@ class Realtime(
         }
         // A connection that stayed up for a while starts the backoff over;
         // one that drops right after ready keeps growing it.
-        if (live && elapsed() - liveSince >= STABLE_MS) backoff.reset()
+        if (live && elapsed() - liveSince >= STABLE_MS) {
+            backoff.reset()
+            rejectionsInARow = 0
+        }
         end
     }
 
@@ -254,8 +267,14 @@ class Realtime(
         /** The token is renewed this long before it expires on the connection. */
         const val REAUTH_BEFORE_MS = 60_000L
 
-        /** The Gateway closes connections whose auth frames come closer together. */
+        /**
+         * The Gateway closes connections whose auth frames come closer together,
+         * counting from its previous ready frame.
+         */
         const val MIN_REAUTH_INTERVAL_MS = 10_000L
+
+        /** Slack for timer and clock granularity on both sides. */
+        const val REAUTH_MARGIN_MS = 1_000L
 
         /**
          * A token sent on the connection must stay valid past the renewal point,

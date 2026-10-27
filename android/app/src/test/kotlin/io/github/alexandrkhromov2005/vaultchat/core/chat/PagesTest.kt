@@ -44,7 +44,8 @@ class PagesTest {
         val messages = historyPage(room, cursor = 11, limit = 50, page(10, 9, 8))
 
         assertEquals(listOf(10L, 9L, 8L), messages.map { it.sequence })
-        assertEquals(1793102400123L, messages.first().createdAt)
+        // Microseconds: the server's precision.
+        assertEquals(1793102400123456L, messages.first().createdAt)
     }
 
     @Test

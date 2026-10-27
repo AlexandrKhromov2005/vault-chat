@@ -116,4 +116,14 @@ class TimelineTest {
         assertNull(Timeline.older(block(oldest = 151, newest = 200), newestFirst(50L downTo 1L)))
         assertNull(Timeline.older(null, newestFirst(50L downTo 1L)))
     }
+
+    @Test
+    fun aRoomLoadedForALiveMessageKeepsThatMessageUnread() {
+        val update = Timeline.latest(room, null, newestFirst(10L downTo 8L), readThrough = 9)!!
+        assertEquals(9L, update.timeline.lastRead)
+
+        // Nothing is read in a room just joined; a position past the page is capped.
+        assertEquals(0L, Timeline.latest(room, null, newestFirst(10L downTo 8L), readThrough = 0)!!.timeline.lastRead)
+        assertEquals(10L, Timeline.latest(room, null, newestFirst(10L downTo 8L), readThrough = 50)!!.timeline.lastRead)
+    }
 }

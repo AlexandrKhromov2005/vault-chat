@@ -177,7 +177,7 @@ class RealtimeTest {
         val socket = h.sockets.single()
         socket.goLive(this)
 
-        advanceTimeBy(Realtime.MIN_REAUTH_INTERVAL_MS - 1)
+        advanceTimeBy(Realtime.MIN_REAUTH_INTERVAL_MS + Realtime.REAUTH_MARGIN_MS - 1)
         runCurrent()
         assertEquals(1, socket.sent.size)
 
@@ -352,5 +352,51 @@ class RealtimeTest {
 
         assertEquals(1000, h.sockets[0].closedWith)
         assertEquals(RealtimeState.STOPPED, h.realtime.state.value)
+    }
+
+    // Review of 4fba109: a Gateway that keeps rejecting fresh tokens made the
+    // client refresh and reconnect in a tight loop.
+    @Test
+    fun aRepeatedRejectionIsBackedOff() = runTest {
+        val tokens = Tokens(this)
+        val h = start(tokens)
+
+        h.sockets[0].open()
+        runCurrent()
+        h.sockets[0].closeFromServer(4001)
+        runCurrent()
+        h.sockets[1].open()
+        runCurrent()
+        h.sockets[1].closeFromServer(4001)
+        runCurrent()
+
+        assertEquals(2, h.sockets.size)
+        assertEquals(2, tokens.renewedAfter.size)
+        advanceTimeBy(500)
+        runCurrent()
+        assertEquals(3, h.sockets.size)
+    }
+
+    // Review of 4fba109: the Gateway counts the 10 s from its ready frame, not
+    // from the client's auth frame.
+    @Test
+    fun reauthenticationWaitsTenSecondsAfterReady() = runTest {
+        // Just over 70 s left when the connection opens.
+        val tokens = Tokens(this, lifetimeMs = 70_500L)
+        val h = start(tokens)
+        val socket = h.sockets.single()
+        socket.open()
+        runCurrent()
+        advanceTimeBy(1_000)
+        socket.receive(ready())
+        runCurrent()
+
+        // Ten seconds after ready, and a second of margin for the network.
+        advanceTimeBy(11_000 - 1)
+        runCurrent()
+        assertEquals(1, socket.sent.size)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(2, socket.sent.size)
     }
 }

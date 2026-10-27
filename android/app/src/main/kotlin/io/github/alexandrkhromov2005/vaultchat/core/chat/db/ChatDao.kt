@@ -120,11 +120,14 @@ abstract class ChatDao {
         roomIds.chunked(500).forEach { deleteRoomBatch(it) }
     }
 
-    /** Applies the latest history page; false if the room is not stored. */
+    /**
+     * Applies the latest history page; false if the room is not stored.
+     * [readThrough] is what counts as read on a first load (see Timeline.latest).
+     */
     @Transaction
-    open suspend fun applyLatest(roomId: String, page: List<MessageEntity>): Boolean {
+    open suspend fun applyLatest(roomId: String, page: List<MessageEntity>, readThrough: Long? = null): Boolean {
         if (room(roomId) == null) return false
-        Timeline.latest(roomId, timeline(roomId), page)?.let { write(roomId, it) }
+        Timeline.latest(roomId, timeline(roomId), page, readThrough)?.let { write(roomId, it) }
         return true
     }
 
@@ -164,7 +167,8 @@ abstract class ChatDao {
         const val ROOM_LIST = "SELECT r.*, p.username AS peer_name, m.text AS last_text, m.sender_id AS last_sender_id, " +
             "m.attachments AS last_attachments, m.created_at AS last_created_at, " +
             "(SELECT COUNT(*) FROM messages u WHERE u.room_id = r.room_id AND u.sequence > t.last_read " +
-            "AND u.sender_id != :me) AS unread " +
+            "AND u.sender_id != :me) AS unread, " +
+            "COALESCE(t.oldest > t.last_read + 1, 0) AS unread_more " +
             "FROM rooms r LEFT JOIN timelines t ON t.room_id = r.room_id " +
             "LEFT JOIN messages m ON m.room_id = r.room_id AND m.sequence = t.newest " +
             "LEFT JOIN profiles p ON p.user_id = r.peer_id"

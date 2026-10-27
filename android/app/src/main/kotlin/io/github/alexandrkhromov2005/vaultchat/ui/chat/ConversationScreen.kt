@@ -27,6 +27,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,7 +129,11 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
 
     val connection: StateFlow<ConnectionStatus> = chat.connection
 
-    /** Marks what is shown as read while the screen is in front. */
+    /** The oldest stored message; it grows when the room was reset to its latest page. */
+    val oldest: StateFlow<Long?> = chat.timeline(roomId).map { it?.oldest }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    /** Marks the room read up to its newest message, which the reader sees. */
     fun markRead() {
         viewModelScope.launch {
             try {
@@ -148,11 +156,15 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit) {
     LaunchedEffect(room) {
         if (room == RoomView.Gone) onBack()
     }
-    // Opening the room, and every new message while it is in front, marks it read.
-    val newest = if (rows.itemCount > 0) rows.peek(0)?.key else null
-    LifecycleResumeEffect(newest) {
-        model.markRead()
-        onPauseOrDispose { }
+    // A reset drops the older history the pager has already seen to its end;
+    // it must start over to page through it again.
+    val oldest by model.oldest.collectAsStateWithLifecycle()
+    var seenOldest by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(oldest) {
+        val previous = seenOldest
+        val current = oldest
+        seenOldest = current
+        if (previous != null && current != null && current > previous) rows.refresh()
     }
 
     val present = (room as? RoomView.Present)?.item
@@ -176,13 +188,13 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit) {
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Messages(rows, me = chat.me, channel = present?.room?.kind == RoomEntity.CHANNEL)
+            Messages(rows, me = chat.me, channel = present?.room?.kind == RoomEntity.CHANNEL, onNewestSeen = model::markRead)
         }
     }
 }
 
 @Composable
-private fun Messages(rows: LazyPagingItems<ChatRow>, me: String, channel: Boolean) {
+private fun Messages(rows: LazyPagingItems<ChatRow>, me: String, channel: Boolean, onNewestSeen: () -> Unit) {
     val listState = rememberLazyListState()
     val refresh = rows.loadState.refresh
 
@@ -190,6 +202,13 @@ private fun Messages(rows: LazyPagingItems<ChatRow>, me: String, channel: Boolea
     val newest = if (rows.itemCount > 0) rows.peek(0)?.key else null
     LaunchedEffect(newest) {
         if (listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
+    }
+    // The room is read once its newest message is on screen, not while the
+    // reader is scrolled up in the history.
+    val atNewest by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    LifecycleResumeEffect(newest, atNewest) {
+        if (newest != null && atNewest) onNewestSeen()
+        onPauseOrDispose { }
     }
 
     if (rows.itemCount == 0) {
@@ -234,7 +253,7 @@ private fun MessageList(rows: LazyPagingItems<ChatRow>, listState: LazyListState
                     val message = row.item.message
                     // A sender's name heads each run of their messages in channels.
                     val continues = older is ChatRow.Message && older.item.message.senderId == message.senderId &&
-                        message.createdAt - older.item.message.createdAt < GROUP_WINDOW_MS
+                        message.createdAt - older.item.message.createdAt < GROUP_WINDOW_MICROS
                     Bubble(
                         row.item,
                         own = message.senderId == me,
@@ -258,7 +277,7 @@ private fun MessageList(rows: LazyPagingItems<ChatRow>, listState: LazyListState
     }
 }
 
-private const val GROUP_WINDOW_MS = 5 * 60 * 1000L
+private const val GROUP_WINDOW_MICROS = 5 * 60 * 1_000_000L
 
 @Composable
 private fun Centered(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
