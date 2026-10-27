@@ -137,16 +137,43 @@ internal fun SubmitButton(@StringRes label: Int, busy: Boolean, enabled: Boolean
 internal fun ErrorMessage(error: AuthError?, registering: Boolean) {
     if (error == null) return
     Text(
-        text = describe(error, registering),
+        text = describe(error, registering).text(),
         color = MaterialTheme.colorScheme.error,
         style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
     )
 }
 
+/** What the last attempt achieved, announced by TalkBack when it appears. */
 @Composable
-private fun describe(error: AuthError, registering: Boolean): String = when (error) {
-    is AuthError.Server -> stringResource(
+internal fun NoticeMessage(notice: AuthNotice?) {
+    if (notice == null) return
+    Text(
+        text = stringResource(
+            when (notice) {
+                AuthNotice.CONFIRM_EMAIL -> R.string.notice_confirm_email
+                AuthNotice.CONFIRMATION_REQUESTED -> R.string.notice_confirmation_requested
+            },
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+}
+
+/** Whether login was refused until the account's email is confirmed. */
+internal val AuthError?.awaitsConfirmation: Boolean
+    get() = this is AuthError.Api && error.code == EMAIL_VERIFICATION_REQUIRED
+
+private const val EMAIL_VERIFICATION_REQUIRED = "email_verification_required"
+
+/** A string resource with its format arguments, which may be messages too. */
+internal data class Message(@StringRes val id: Int, val args: List<Any> = emptyList())
+
+@Composable
+internal fun Message.text(): String = stringResource(id, *args.map { if (it is Message) it.text() else it }.toTypedArray())
+
+internal fun describe(error: AuthError, registering: Boolean): Message = when (error) {
+    is AuthError.Server -> Message(
         when (error.problem) {
             ServerAddress.Problem.EMPTY -> R.string.server_empty
             ServerAddress.Problem.MALFORMED -> R.string.server_malformed
@@ -156,26 +183,26 @@ private fun describe(error: AuthError, registering: Boolean): String = when (err
         },
     )
     is AuthError.Api -> describe(error.error, registering)
-    is AuthError.Registered -> stringResource(R.string.error_registered, describe(error.error, registering = false))
+    is AuthError.Registered -> Message(R.string.error_registered, listOf(describe(error.error, registering = false)))
 }
 
-@Composable
-private fun describe(error: ApiException, registering: Boolean): String = when (error.code) {
-    ApiException.NETWORK -> stringResource(R.string.error_network)
-    ApiException.INVALID_RESPONSE -> stringResource(R.string.error_invalid_response)
-    ApiException.STORAGE -> stringResource(R.string.error_storage)
+private fun describe(error: ApiException, registering: Boolean): Message = when (error.code) {
+    ApiException.NETWORK -> Message(R.string.error_network)
+    ApiException.INVALID_RESPONSE -> Message(R.string.error_invalid_response)
+    ApiException.STORAGE -> Message(R.string.error_storage)
     "rate_limited" -> error.retryAfterSeconds
-        ?.let { stringResource(R.string.error_rate_limited_for, it) }
-        ?: stringResource(R.string.error_rate_limited)
-    "unavailable", "timeout", "request_timeout" -> stringResource(R.string.error_unavailable)
-    "unauthenticated" -> stringResource(R.string.error_credentials)
-    "permission_denied" -> stringResource(if (registering) R.string.error_invitation else R.string.error_forbidden)
-    "already_exists" -> stringResource(R.string.error_username_taken)
+        ?.let { Message(R.string.error_rate_limited_for, listOf(it)) }
+        ?: Message(R.string.error_rate_limited)
+    "unavailable", "timeout", "request_timeout" -> Message(R.string.error_unavailable)
+    "unauthenticated" -> Message(R.string.error_credentials)
+    EMAIL_VERIFICATION_REQUIRED -> Message(R.string.error_email_unconfirmed)
+    "permission_denied" -> Message(if (registering) R.string.error_invitation else R.string.error_forbidden)
+    "already_exists" -> Message(R.string.error_username_taken)
     "invalid_argument" -> when (error.message) {
-        "invalid email address" -> stringResource(R.string.error_invalid_email)
-        "invalid username" -> stringResource(R.string.error_invalid_username)
-        "invalid password" -> stringResource(R.string.error_invalid_password)
-        else -> stringResource(R.string.error_invalid_input)
+        "invalid email address" -> Message(R.string.error_invalid_email)
+        "invalid username" -> Message(R.string.error_invalid_username)
+        "invalid password" -> Message(R.string.error_invalid_password)
+        else -> Message(R.string.error_invalid_input)
     }
-    else -> stringResource(R.string.error_unexpected, error.status)
+    else -> Message(R.string.error_unexpected, listOf(error.status))
 }

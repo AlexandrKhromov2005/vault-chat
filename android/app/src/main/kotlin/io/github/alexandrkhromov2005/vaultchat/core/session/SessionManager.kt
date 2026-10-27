@@ -1,6 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.core.session
 
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import io.github.alexandrkhromov2005.vaultchat.core.net.EmailVerificationRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.Gateway
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.LoginRequest
@@ -144,9 +145,16 @@ class SessionManager(
         }
     }
 
-    /** Creates an account; it does not sign in. */
-    suspend fun register(server: ServerAddress, email: String, username: String, password: String, invitationToken: String) {
-        call { gateway.api(server).register(RegisterRequest(email, username, password, invitationToken)) }
+    /**
+     * Creates an account; it does not sign in. Returns whether the email must
+     * be confirmed first, in which case login fails until it is.
+     */
+    suspend fun register(server: ServerAddress, email: String, username: String, password: String, invitationToken: String): Boolean =
+        call { gateway.api(server).register(RegisterRequest(email, username, password, invitationToken)) }.body.verificationRequired
+
+    /** Asks for another confirmation email; the answer does not tell whether one is sent. */
+    suspend fun requestEmailVerification(server: ServerAddress, email: String, password: String) {
+        call { gateway.api(server).requestEmailVerification(EmailVerificationRequest(email, password)) }
     }
 
     suspend fun login(server: ServerAddress, email: String, password: String) {

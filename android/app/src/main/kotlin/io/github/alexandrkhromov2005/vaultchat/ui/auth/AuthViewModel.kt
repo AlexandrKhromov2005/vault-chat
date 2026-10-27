@@ -22,6 +22,15 @@ sealed interface AuthError {
     data class Registered(val error: ApiException) : AuthError
 }
 
+/** What happened to an attempt that did not sign in, when it is not an error. */
+enum class AuthNotice {
+    /** The account was created; the email has to be confirmed before login. */
+    CONFIRM_EMAIL,
+
+    /** Another confirmation email was asked for. */
+    CONFIRMATION_REQUESTED,
+}
+
 /**
  * State shared by the sign-in and registration screens. A successful attempt
  * changes the session state, which replaces these screens.
@@ -41,12 +50,23 @@ class AuthViewModel(
     var error by mutableStateOf<AuthError?>(null)
         private set
 
+    var notice by mutableStateOf<AuthNotice?>(null)
+        private set
+
+    /** The email of an account created to be confirmed, for the sign-in screen to take over. */
+    var createdEmail by mutableStateOf<String?>(null)
+
     fun login(email: String, password: String) = submit { address ->
         session.login(address, email.trim(), password)
     }
 
     fun register(email: String, username: String, password: String, invitationToken: String) = submit { address ->
-        session.register(address, email.trim(), username.trim(), password, invitationToken.trim())
+        if (session.register(address, email.trim(), username.trim(), password, invitationToken.trim())) {
+            // Login is refused until the link in the email is opened.
+            createdEmail = email.trim()
+            notice = AuthNotice.CONFIRM_EMAIL
+            return@submit
+        }
         // A repeated registration would be rejected, so a failure from here on
         // is reported as such.
         try {
@@ -56,8 +76,14 @@ class AuthViewModel(
         }
     }
 
+    fun requestConfirmation(email: String, password: String) = submit { address ->
+        session.requestEmailVerification(address, email.trim(), password)
+        notice = AuthNotice.CONFIRMATION_REQUESTED
+    }
+
     fun dismissError() {
         error = null
+        notice = null
     }
 
     private fun submit(attempt: suspend (ServerAddress) -> Unit) {
@@ -72,6 +98,7 @@ class AuthViewModel(
         settings.lastServer = server
         busy = true
         error = null
+        notice = null
         viewModelScope.launch {
             try {
                 attempt(address)

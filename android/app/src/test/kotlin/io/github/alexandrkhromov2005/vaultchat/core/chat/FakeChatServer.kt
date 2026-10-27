@@ -1,5 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.core.chat
 
+import io.github.alexandrkhromov2005.vaultchat.core.net.EmailAcknowledgement
+import io.github.alexandrkhromov2005.vaultchat.core.net.EmailVerificationRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.LoginRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.MessageDto
@@ -7,6 +9,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.MessagePage
 import io.github.alexandrkhromov2005.vaultchat.core.net.PublicProfile
 import io.github.alexandrkhromov2005.vaultchat.core.net.RefreshTokenRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.RegisterRequest
+import io.github.alexandrkhromov2005.vaultchat.core.net.Registration
 import io.github.alexandrkhromov2005.vaultchat.core.net.RequestProgress
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomPage
@@ -161,9 +164,12 @@ class FakeChatServer(val me: String) : GatewayApi {
             call { this@FakeChatServer.request("Bearer test") }.body
     }
 
-    override suspend fun register(body: RegisterRequest): Response<User> = throw UnsupportedOperationException()
+    override suspend fun register(body: RegisterRequest): Response<Registration> = throw UnsupportedOperationException()
 
     override suspend fun login(body: LoginRequest): Response<TokenPair> = throw UnsupportedOperationException()
+
+    override suspend fun requestEmailVerification(body: EmailVerificationRequest): Response<EmailAcknowledgement> =
+        throw UnsupportedOperationException()
 
     override suspend fun refresh(body: RefreshTokenRequest, progress: RequestProgress): Response<TokenPair> =
         throw UnsupportedOperationException()

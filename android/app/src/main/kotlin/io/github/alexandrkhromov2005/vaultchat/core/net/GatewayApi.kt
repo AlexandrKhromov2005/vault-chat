@@ -16,10 +16,13 @@ import retrofit2.http.Tag
  */
 interface GatewayApi {
     @POST("api/v1/auth/register")
-    suspend fun register(@Body body: RegisterRequest): Response<User>
+    suspend fun register(@Body body: RegisterRequest): Response<Registration>
 
     @POST("api/v1/auth/login")
     suspend fun login(@Body body: LoginRequest): Response<TokenPair>
+
+    @POST("api/v1/auth/email/verification/request")
+    suspend fun requestEmailVerification(@Body body: EmailVerificationRequest): Response<EmailAcknowledgement>
 
     @POST("api/v1/auth/refresh")
     suspend fun refresh(@Body body: RefreshTokenRequest, @Tag progress: RequestProgress): Response<TokenPair>

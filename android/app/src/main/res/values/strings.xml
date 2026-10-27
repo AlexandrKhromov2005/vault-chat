@@ -6,6 +6,9 @@
     <string name="login_submit">Войти</string>
     <string name="login_to_register">Регистрация по приглашению</string>
     <string name="session_expired">Сессия завершена. Войдите снова.</string>
+    <string name="login_request_confirmation">Отправить письмо ещё раз</string>
+    <string name="notice_confirm_email">Аккаунт создан. Подтвердите email по ссылке из письма, затем войдите.</string>
+    <string name="notice_confirmation_requested">Если данные подходят, письмо со ссылкой придёт на указанный email.</string>
 
     <string name="register_title">Регистрация</string>
     <string name="register_subtitle">Нужно приглашение от администратора сервера.</string>
@@ -35,6 +38,7 @@
     <string name="error_rate_limited_for">Слишком много попыток. Повторите через %1$d с.</string>
     <string name="error_unavailable">Сервис временно недоступен. Повторите позже.</string>
     <string name="error_credentials">Неверный email или пароль.</string>
+    <string name="error_email_unconfirmed">Подтвердите email по ссылке из письма, затем войдите. Если письма нет, его можно отправить ещё раз.</string>
     <string name="error_invitation">Приглашение недействительно, истекло или выдано на другой email.</string>
     <string name="error_forbidden">Недостаточно прав.</string>
     <string name="error_username_taken">Это имя пользователя уже занято.</string>

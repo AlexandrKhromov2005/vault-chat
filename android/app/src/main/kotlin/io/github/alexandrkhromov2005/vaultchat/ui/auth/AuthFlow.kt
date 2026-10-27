@@ -1,6 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.auth
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -35,6 +36,10 @@ fun AuthFlow(container: AppContainer, reason: SessionState.Reason) {
             )
         }
         composable<RegisterRoute> {
+            // The account awaits confirmation: the sign-in screen says so.
+            LaunchedEffect(model.createdEmail) {
+                if (model.createdEmail != null) navController.popBackStack()
+            }
             RegisterScreen(
                 model = model,
                 onBack = {

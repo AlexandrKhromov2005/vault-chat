@@ -35,6 +35,22 @@ data class User(
     val email: String? = null,
 )
 
+/** A created account; the server may require the email to be confirmed before login. */
+@Serializable
+data class Registration(
+    @SerialName("user_id") val userId: String,
+    val username: String,
+    val email: String? = null,
+    @SerialName("verification_required") val verificationRequired: Boolean = false,
+)
+
+@Serializable
+data class EmailVerificationRequest(val email: String, val password: String)
+
+/** The same answer whether or not an email is sent. */
+@Serializable
+data class EmailAcknowledgement(val message: String? = null)
+
 @Serializable
 internal data class ErrorEnvelope(val error: ErrorBody? = null)
 

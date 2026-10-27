@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +30,14 @@ internal fun LoginScreen(model: AuthViewModel, sessionExpired: Boolean, onRegist
     var password by remember { mutableStateOf("") }
     val canSubmit = email.isNotBlank() && password.isNotEmpty()
     val submit = { if (canSubmit) model.login(email, password) }
+
+    // An account was just created and has to be confirmed before login.
+    LaunchedEffect(model.createdEmail) {
+        model.createdEmail?.let {
+            email = it
+            model.createdEmail = null
+        }
+    }
 
     AuthLayout {
         Text(
@@ -53,8 +62,18 @@ internal fun LoginScreen(model: AuthViewModel, sessionExpired: Boolean, onRegist
         FormField(model.server, { model.server = it }, R.string.field_server, KeyboardType.Uri)
         FormField(email, { email = it }, R.string.field_email, KeyboardType.Email)
         PasswordField(password, { password = it }, ImeAction.Done, onDone = submit)
+        NoticeMessage(model.notice)
         ErrorMessage(model.error, registering = false)
         SubmitButton(R.string.login_submit, model.busy, canSubmit, submit)
+        if (model.error.awaitsConfirmation || model.notice == AuthNotice.CONFIRM_EMAIL) {
+            TextButton(
+                onClick = { model.requestConfirmation(email, password) },
+                enabled = canSubmit && !model.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.login_request_confirmation))
+            }
+        }
         TextButton(onClick = onRegister, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.login_to_register))
         }
