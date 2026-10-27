@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Vault Chat</string>
+
+    <string name="login_subtitle">Вход в аккаунт</string>
+    <string name="login_submit">Войти</string>
+    <string name="login_to_register">Регистрация по приглашению</string>
+    <string name="session_expired">Сессия завершена. Войдите снова.</string>
+
+    <string name="register_title">Регистрация</string>
+    <string name="register_subtitle">Нужно приглашение от администратора сервера.</string>
+    <string name="register_submit">Создать аккаунт</string>
+    <string name="register_to_login">Уже есть аккаунт</string>
+
+    <string name="field_server">Сервер</string>
+    <string name="field_email">Email</string>
+    <string name="field_password">Пароль</string>
+    <string name="field_username">Имя пользователя</string>
+    <string name="field_invitation">Код приглашения</string>
+    <string name="hint_invitation">64 символа из приглашения</string>
+    <string name="hint_username">3–32 символа: латиница, цифры, _ и -, первая — буква</string>
+    <string name="hint_password">8–128 символов, хотя бы одна буква и одна цифра</string>
+    <string name="password_show">Показать</string>
+    <string name="password_hide">Скрыть</string>
+
+    <string name="server_empty">Укажите адрес сервера.</string>
+    <string name="server_malformed">Не похоже на адрес сервера.</string>
+    <string name="server_cleartext">Нужен адрес с https://.</string>
+    <string name="server_credentials">Адрес не должен содержать имя пользователя и пароль.</string>
+    <string name="server_path">Укажите только адрес сервера, без пути и параметров.</string>
+
+    <string name="error_network">Нет связи с сервером. Проверьте адрес и подключение.</string>
+    <string name="error_invalid_response">Сервер ответил не так, как ожидалось. Проверьте адрес сервера.</string>
+    <string name="error_rate_limited">Слишком много попыток. Подождите немного и повторите.</string>
+    <string name="error_rate_limited_for">Слишком много попыток. Повторите через %1$d с.</string>
+    <string name="error_unavailable">Сервис временно недоступен. Повторите позже.</string>
+    <string name="error_credentials">Неверный email или пароль.</string>
+    <string name="error_invitation">Приглашение недействительно, истекло или выдано на другой email.</string>
+    <string name="error_forbidden">Недостаточно прав.</string>
+    <string name="error_username_taken">Это имя пользователя уже занято.</string>
+    <string name="error_invalid_email">Некорректный email.</string>
+    <string name="error_invalid_username">Имя пользователя: 3–32 символа, латиница, цифры, _ и -, первая — буква.</string>
+    <string name="error_invalid_password">Пароль: 8–128 символов, хотя бы одна буква и одна цифра.</string>
+    <string name="error_invalid_input">Проверьте введённые данные.</string>
+    <string name="error_registered">Аккаунт создан, но войти не удалось: %1$s Войдите на экране входа.</string>
+    <string name="error_storage">Не удалось сохранить вход на этом устройстве. Освободите место и повторите.</string>
+    <string name="error_unexpected">Что-то пошло не так (HTTP %1$d).</string>
+
+    <string name="logout">Выйти</string>
+    <string name="retry">Повторить</string>
+    <string name="connection_checking">Проверяем соединение…</string>
+    <string name="connection_online">Сервер на связи.</string>
+    <string name="connection_offline">Нет связи с сервером.</string>
+    <string name="connection_failed">Сервер не принял запрос.</string>
+    <string name="home_placeholder">Комнаты и сообщения появятся в следующей версии.</string>
+</resources>
