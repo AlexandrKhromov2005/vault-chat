@@ -69,7 +69,8 @@ func (r *SessionRepository) Create(ctx context.Context, session *domain.Session)
 func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *domain.Session, retryWindow time.Duration) (*domain.Session, error) {
 	active := next
 	err := r.withUserLock(ctx, next.UserID, func(tx pgx.Tx) error {
-		const revoke = `UPDATE sessions SET revoked_at = now(), replaced_by = $3::uuid
+		// Waiting for the user lock must not consume the new retry window.
+		const revoke = `UPDATE sessions SET revoked_at = clock_timestamp(), replaced_by = $3::uuid
 			WHERE id = $1::uuid AND user_id = $2::uuid AND revoked_at IS NULL AND expires_at > now()
 			RETURNING family_id`
 		var familyID string
@@ -165,13 +166,15 @@ func retriedRotation(ctx context.Context, tx pgx.Tx, id, userID string, retryWin
 	// A rotated session keeps the time of its rotation in revoked_at: later
 	// revocations only touch sessions that are still active. A successor
 	// that is not revoked has not been rotated either.
+	// now() is fixed at transaction start, before a potentially long lock wait;
+	// evaluate both deadlines against the wall clock after taking the lock.
 	const query = `SELECT current.revoked_at IS NOT NULL, current.replaced_by IS NOT NULL,
 			successor.id::text, successor.expires_at
 		FROM sessions current
 		LEFT JOIN sessions successor ON successor.id = current.replaced_by
 			AND successor.user_id = current.user_id
-			AND current.revoked_at > now() - make_interval(secs => $3)
-			AND successor.revoked_at IS NULL AND successor.expires_at > now()
+			AND current.revoked_at > clock_timestamp() - make_interval(secs => $3)
+			AND successor.revoked_at IS NULL AND successor.expires_at > clock_timestamp()
 		WHERE current.id = $1::uuid AND current.user_id = $2::uuid`
 	var (
 		revoked, rotated bool
