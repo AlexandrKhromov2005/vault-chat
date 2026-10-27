@@ -48,9 +48,36 @@
 
     <string name="logout">Выйти</string>
     <string name="retry">Повторить</string>
-    <string name="connection_checking">Проверяем соединение…</string>
-    <string name="connection_online">Сервер на связи.</string>
-    <string name="connection_offline">Нет связи с сервером.</string>
-    <string name="connection_failed">Сервер не принял запрос.</string>
-    <string name="home_placeholder">Комнаты и сообщения появятся в следующей версии.</string>
+    <string name="menu">Меню</string>
+    <string name="back">Назад</string>
+
+    <string name="connection_updating">Обновление…</string>
+    <string name="connection_connecting">Подключение…</string>
+    <string name="connection_no_network">Нет сети</string>
+    <string name="connection_unreachable">Нет связи с сервером</string>
+
+    <string name="rooms_title">Чаты</string>
+    <string name="rooms_empty">Здесь появятся ваши диалоги и каналы.</string>
+    <string name="room_kind_direct">Личный диалог</string>
+    <string name="room_kind_channel">Канал</string>
+    <string name="room_kind_private_channel">Закрытый канал</string>
+    <string name="room_kind_other">Комната</string>
+    <string name="preview_own">Вы: %1$s</string>
+    <string name="preview_attachment">Вложение</string>
+    <string name="unread_description">Непрочитанных: %1$d</string>
+
+    <string name="conversation_empty">Сообщений пока нет.</string>
+    <string name="history_offline">Не удалось загрузить сообщения: нет связи с сервером.</string>
+    <string name="history_failed">Не удалось загрузить сообщения.</string>
+    <string name="sender_you">Вы</string>
+    <string name="sender_deleted">Удалённый пользователь</string>
+    <string name="sender_unknown">Участник</string>
+    <string name="day_today">Сегодня</string>
+    <string name="day_yesterday">Вчера</string>
+    <plurals name="attachments">
+        <item quantity="one">%1$d вложение</item>
+        <item quantity="few">%1$d вложения</item>
+        <item quantity="many">%1$d вложений</item>
+        <item quantity="other">%1$d вложения</item>
+    </plurals>
 </resources>

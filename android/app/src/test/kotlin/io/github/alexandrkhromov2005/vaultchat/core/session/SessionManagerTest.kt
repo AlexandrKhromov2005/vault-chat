@@ -192,6 +192,55 @@ class SessionManagerTest {
     }
 
     @Test
+    fun aRequestForAnEndedSessionIsNotSentWithTheNextSessionsToken() = runBlocking {
+        restoreSignedIn()
+        val first = manager.state.value as SessionState.SignedIn
+        manager.logout()
+        handlers["/api/v1/auth/login"] = { tokenPair(5) }
+        handlers["/api/v1/auth/me"] = { user() }
+        manager.login(address, "alice@example.org", "password1")
+        requests.clear()
+
+        // The same user signed in again, but in a new session: work started
+        // for the old one must not go on with the new token.
+        assertEquals(401, failure { manager.authorized(first) { me(it) } }.status)
+        assertEquals(401, failure { manager.accessGrant(first, 0) }.status)
+        assertEquals(401, failure { manager.renewAccess(first, "access-5") }.status)
+        assertTrue(requests.isEmpty())
+
+        val current = manager.state.value as SessionState.SignedIn
+        assertEquals("alice", manager.authorized(current) { me(it) }.body.username)
+    }
+
+    @Test
+    fun aGrantIsRenewedWhenItWouldNotLastLongEnough() = runBlocking {
+        restoreSignedIn()
+        val session = manager.state.value as SessionState.SignedIn
+
+        val first = manager.accessGrant(session, 70_000)
+        assertEquals("access-1", first.token)
+        assertEquals(deviceElapsed + 15 * 60_000, first.validUntil)
+
+        advance(15 * 60_000 - 71_000)
+        assertEquals("access-1", manager.accessGrant(session, 70_000).token)
+        advance(1_000)
+        assertEquals("access-2", manager.accessGrant(session, 70_000).token)
+        assertEquals(2, refreshes.get())
+    }
+
+    @Test
+    fun aRejectedGrantIsRenewedOnlyOnce() = runBlocking {
+        restoreSignedIn()
+        val session = manager.state.value as SessionState.SignedIn
+        val first = manager.accessGrant(session, 0)
+
+        assertEquals("access-2", manager.renewAccess(session, first.token).token)
+        // A late rejection of the old token does not rotate again.
+        assertEquals("access-2", manager.renewAccess(session, first.token).token)
+        assertEquals(2, refreshes.get())
+    }
+
+    @Test
     fun loginStoresTheSession() = runBlocking {
         manager.restore()
         handlers["/api/v1/auth/login"] = { tokenPair(0) }

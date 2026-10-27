@@ -5,6 +5,8 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.http.Tag
 
 /**
@@ -27,6 +29,32 @@ interface GatewayApi {
 
     @GET("api/v1/auth/me")
     suspend fun me(@Header("Authorization") authorization: String): Response<User>
+
+    // Gateway rejects empty cursors and unknown parameters; Retrofit leaves
+    // out null queries.
+
+    @GET("api/v1/rooms")
+    suspend fun rooms(
+        @Header("Authorization") authorization: String,
+        @Query("cursor") cursor: String?,
+        @Query("limit") limit: Int,
+    ): Response<RoomPage>
+
+    @GET("api/v1/rooms/{room_id}")
+    suspend fun room(@Header("Authorization") authorization: String, @Path("room_id") roomId: String): Response<RoomDto>
+
+    /** History newest first with [cursor], or catch-up oldest first with [after]; never both. */
+    @GET("api/v1/rooms/{room_id}/messages")
+    suspend fun messages(
+        @Header("Authorization") authorization: String,
+        @Path("room_id") roomId: String,
+        @Query("cursor") cursor: String?,
+        @Query("after") after: String?,
+        @Query("limit") limit: Int,
+    ): Response<MessagePage>
+
+    @GET("api/v1/users/{user_id}")
+    suspend fun user(@Header("Authorization") authorization: String, @Path("user_id") userId: String): Response<PublicProfile>
 }
 
 /**

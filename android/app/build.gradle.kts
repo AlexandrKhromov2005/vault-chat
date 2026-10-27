@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 // Release signing material lives outside the repository: in
@@ -77,10 +78,20 @@ android {
         includeInBundle = false
     }
 
+    testOptions {
+        // Robolectric runs the Room tests on the JVM with Android resources.
+        unitTests.isIncludeAndroidResources = true
+    }
+
     lint {
         abortOnError = true
         checkReleaseBuilds = true
     }
+}
+
+// The schema of every database version is kept for migration tests.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -89,6 +100,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
@@ -98,9 +110,16 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.room.runtime)
+    implementation(libs.room.paging)
+    implementation(libs.paging.runtime)
+    implementation(libs.paging.compose)
+    ksp(libs.room.compiler)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

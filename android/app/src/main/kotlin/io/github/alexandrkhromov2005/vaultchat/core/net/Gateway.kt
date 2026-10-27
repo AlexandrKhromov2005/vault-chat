@@ -7,8 +7,11 @@ import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.asResponseBody
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okio.Buffer
 import okio.ForwardingSource
 import okio.buffer
@@ -29,6 +32,13 @@ import java.util.concurrent.TimeUnit
  * server's retry window (see SessionManager).
  */
 class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
+    // A WebSocket has no read deadline: the server pings every 30 s, and our
+    // own pings drop a connection whose pong does not come back in time.
+    private val webSocketHttp = http.newBuilder()
+        .readTimeout(0, TimeUnit.SECONDS)
+        .pingInterval(WEBSOCKET_PING_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     private val apiHttp = http.newBuilder().addInterceptor(ResponseSizeLimit(MAX_RESPONSE_BYTES)).build()
     private val refreshHttp = apiHttp.newBuilder()
         .retryOnConnectionFailure(false)
@@ -47,6 +57,10 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
 
     fun refreshApi(server: ServerAddress): GatewayApi = refreshApis.getOrPut(server) { create(server, refreshHttp) }
 
+    /** Opens the event stream; the token is sent in the first frame, never in the URL. */
+    fun webSocket(server: ServerAddress, listener: WebSocketListener): WebSocket =
+        webSocketHttp.newWebSocket(Request.Builder().url(server.url.resolve("api/v1/ws")!!).build(), listener)
+
     private fun create(server: ServerAddress, client: OkHttpClient): GatewayApi = Retrofit.Builder()
         .baseUrl(server.url)
         .client(client)
@@ -60,6 +74,9 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
 
         /** Gateway's own budget is 10 s; a refresh that takes longer is retried. */
         const val REFRESH_TIMEOUT_SECONDS = 10L
+
+        /** Our pings; the Gateway drops connections that miss its own pings within 10 s. */
+        const val WEBSOCKET_PING_SECONDS = 30L
 
         // Leaves time for an immediate repeat within the call deadline.
         private const val REFRESH_CONNECT_TIMEOUT_SECONDS = 5L

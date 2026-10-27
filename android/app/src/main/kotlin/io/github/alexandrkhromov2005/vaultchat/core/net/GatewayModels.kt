@@ -40,3 +40,37 @@ internal data class ErrorEnvelope(val error: ErrorBody? = null)
 
 @Serializable
 internal data class ErrorBody(val code: String? = null, val message: String? = null)
+
+/** A room as listed by `GET /api/v1/rooms` or read by `GET /api/v1/rooms/{room_id}`. */
+@Serializable
+data class RoomDto(
+    @SerialName("room_id") val roomId: String,
+    val kind: String,
+    val name: String? = null,
+    @SerialName("owner_id") val ownerId: String? = null,
+    val private: Boolean = false,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("participant_ids") val participantIds: List<String>? = null,
+    @SerialName("last_message_at") val lastMessageAt: String? = null,
+)
+
+@Serializable
+data class RoomPage(val rooms: List<RoomDto>, @SerialName("next_cursor") val nextCursor: String)
+
+@Serializable
+data class MessageDto(
+    @SerialName("message_id") val messageId: String,
+    @SerialName("room_id") val roomId: String,
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("client_message_id") val clientMessageId: String,
+    val text: String,
+    @SerialName("attachment_ids") val attachmentIds: List<String>? = null,
+    val sequence: Long,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class MessagePage(val messages: List<MessageDto>, @SerialName("next_cursor") val nextCursor: String)
+
+@Serializable
+data class PublicProfile(@SerialName("user_id") val userId: String, val username: String)

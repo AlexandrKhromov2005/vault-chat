@@ -22,7 +22,7 @@ The Gradle wrapper checks the SHA-256 of the distribution it downloads
 From `android/`:
 
 ```sh
-./gradlew :app:testDebugUnitTest   # JVM tests: session, storage, API errors
+./gradlew :app:testDebugUnitTest   # JVM and Robolectric tests
 ./gradlew :app:lintRelease         # lint; warnings and errors fail the build
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -60,6 +60,21 @@ or the environment:
 
 Publish the SHA-256 of the APK and of the signing certificate with each
 release (`apksigner verify --print-certs app-release.apk`).
+
+Robolectric runs the database and sync tests on the JVM with Android 15
+(`src/test/resources/robolectric.properties`); its first run downloads that
+Android image from Maven Central.
+
+## Chat data
+
+Rooms, messages and public profiles live in a Room database, one file per
+server and user (`chat-<hash>.db`), which the screens read through Flow and
+Paging. `ChatSync` fills it from REST and the WebSocket; `Realtime` keeps the
+WebSocket open while the app is visible. The design, request budgets and
+failure behaviour are in [docs/android/sync.md](../docs/android/sync.md).
+The schema of each database version is exported to `app/schemas` for
+migration tests; there is no migration yet because no version has been
+released.
 
 ## Server requirement
 

@@ -38,6 +38,12 @@ sealed interface SessionState {
     enum class Reason { NONE, LOGOUT, EXPIRED }
 }
 
+/**
+ * An access token and when it stops being valid, on the clock SessionManager
+ * was given as `elapsed`.
+ */
+class AccessGrant(val token: String, val validUntil: Long)
+
 /** The session could not be written to this device. */
 class SessionStorageException(cause: Throwable) :
     ApiException(0, STORAGE, "session storage failed", cause = cause)
@@ -71,7 +77,9 @@ class SessionStorageException(cause: Throwable) :
  * Each session has a generation. It changes whenever a session starts or
  * ends, so that the answer to a request made for an earlier session is
  * dropped instead of restoring or ending the current one, and a request is
- * never repeated with the token of a later session.
+ * never repeated with the token of a later session. Callers that work for
+ * one signed-in user pass its [SessionState.SignedIn]: their requests fail
+ * once that session has ended instead of using the next user's token.
  */
 class SessionManager(
     private val store: SessionStore,
@@ -92,6 +100,7 @@ class SessionManager(
     /** [pendingSince] and [accessValidUntil] are on the [elapsed] clock. */
     private class Active(
         val generation: Long,
+        val signedIn: SessionState.SignedIn,
         val server: ServerAddress,
         val stored: StoredSession,
         val pendingSince: Long?,
@@ -129,8 +138,9 @@ class SessionManager(
             // A mark from before the restart is aged on the wall clock; one from
             // the future fails mayRepeat and is abandoned.
             val pendingSince = stored.refreshPendingSince?.let { elapsed() - (now() - it) }
-            active = Active(generation, server, stored, pendingSince, accessToken = null, accessValidUntil = 0)
-            mutableState.value = SessionState.SignedIn(server, stored.userId, stored.username)
+            val signedIn = SessionState.SignedIn(server, stored.userId, stored.username)
+            active = Active(generation, signedIn, server, stored, pendingSince, accessToken = null, accessValidUntil = 0)
+            mutableState.value = signedIn
         }
     }
 
@@ -164,8 +174,9 @@ class SessionManager(
                 return@withLock SessionStorageException(e)
             }
             generation++
-            active = Active(generation, server, stored, null, pair.body.accessToken, accessValidUntil(pair))
-            mutableState.value = SessionState.SignedIn(server, stored.userId, stored.username)
+            val signedIn = SessionState.SignedIn(server, stored.userId, stored.username)
+            active = Active(generation, signedIn, server, stored, null, pair.body.accessToken, accessValidUntil(pair))
+            mutableState.value = signedIn
             null
         }
         if (failure != null) {
@@ -179,32 +190,60 @@ class SessionManager(
      * and repeats the request, within the same session only; a second 401 is
      * returned to the caller.
      */
-    suspend fun <T : Any> authorized(request: suspend GatewayApi.(authorization: String) -> Response<T>): Success<T> {
-        val (session, token) = credentials()
-        val api = gateway.api(session.server)
+    suspend fun <T : Any> authorized(request: suspend GatewayApi.(authorization: String) -> Response<T>): Success<T> =
+        authorized(null, request)
+
+    /** Like [authorized], but only while [session] is the signed-in session. */
+    suspend fun <T : Any> authorized(
+        session: SessionState.SignedIn?,
+        request: suspend GatewayApi.(authorization: String) -> Response<T>,
+    ): Success<T> {
+        val (current, token) = credentials(session, RENEW_BEFORE_MS)
+        val api = gateway.api(current.server)
         return try {
             call { api.request(bearer(token)) }
         } catch (e: ApiException) {
             if (!e.isUnauthenticated) throw e
-            val (_, renewed) = refresh(rejected = token, from = session)
+            val (_, renewed) = refresh(rejected = token, from = current, minValidityMs = RENEW_BEFORE_MS)
             call { api.request(bearer(renewed)) }
         }
     }
 
     /** An access token that stays valid for more than [RENEW_BEFORE_MS]. */
-    suspend fun accessToken(): String = credentials().second
+    suspend fun accessToken(): String = credentials(null, RENEW_BEFORE_MS).second
 
-    private suspend fun credentials(): Pair<Active, String> {
-        val current = active ?: throw signedOut()
-        current.freshToken()?.let { return current to it }
-        return refresh(rejected = null, from = current)
+    /**
+     * An access token of [session] that stays valid for more than
+     * [minValidityMs], for connections that hold a token, such as the
+     * WebSocket. A token valid for less is renewed first.
+     */
+    suspend fun accessGrant(session: SessionState.SignedIn, minValidityMs: Long): AccessGrant {
+        val (current, token) = credentials(session, minValidityMs)
+        return current.grant(token)
     }
 
-    private suspend fun refresh(rejected: String?, from: Active): Pair<Active, String> = refreshLock.withLock {
+    /** Renews the access token of [session] after the server rejected [rejected]. */
+    suspend fun renewAccess(session: SessionState.SignedIn, rejected: String): AccessGrant {
+        val current = active?.takeIf { it.signedIn === session } ?: throw sessionEnded()
+        val (renewed, token) = refresh(rejected = rejected, from = current, minValidityMs = RENEW_BEFORE_MS)
+        return renewed.grant(token)
+    }
+
+    private fun Active.grant(token: String): AccessGrant =
+        AccessGrant(token, if (token == accessToken) accessValidUntil else elapsed())
+
+    private suspend fun credentials(session: SessionState.SignedIn?, minValidityMs: Long): Pair<Active, String> {
+        val current = active ?: throw signedOut()
+        if (session != null && current.signedIn !== session) throw sessionEnded()
+        current.freshToken(minValidityMs)?.let { return current to it }
+        return refresh(rejected = null, from = current, minValidityMs = minValidityMs)
+    }
+
+    private suspend fun refresh(rejected: String?, from: Active, minValidityMs: Long): Pair<Active, String> = refreshLock.withLock {
         val current = stateLock.withLock { active }
         if (current == null || current.generation != from.generation) throw sessionEnded()
         // Another caller may have refreshed while this one waited for the lock.
-        current.freshToken()?.takeIf { it != rejected }?.let { return current to it }
+        current.freshToken(minValidityMs)?.takeIf { it != rejected }?.let { return current to it }
         // The outcome of a sent refresh must be handled even if the caller has
         // gone away meanwhile.
         withContext(NonCancellable) { rotate(current) }
@@ -247,7 +286,7 @@ class SessionManager(
                 // If this write fails, the disk keeps the retired token marked as
                 // pending, so after a restart it is not presented again.
                 runCatching { store.save(next) }
-                Active(current.generation, current.server, next, null, pair.body.accessToken, accessValidUntil(pair))
+                Active(current.generation, current.signedIn, current.server, next, null, pair.body.accessToken, accessValidUntil(pair))
                     .also { active = it }
             }
             return renewed to pair.body.accessToken
@@ -280,7 +319,7 @@ class SessionManager(
                 }
             }
         }
-        Active(current.generation, current.server, next, pendingSince, current.accessToken, current.accessValidUntil)
+        Active(current.generation, current.signedIn, current.server, next, pendingSince, current.accessToken, current.accessValidUntil)
             .also { active = it }
     }
 
@@ -333,7 +372,8 @@ class SessionManager(
         }
     }
 
-    private fun Active.freshToken(): String? = accessToken?.takeIf { accessValidUntil - elapsed() > RENEW_BEFORE_MS }
+    private fun Active.freshToken(minValidityMs: Long): String? =
+        accessToken?.takeIf { accessValidUntil - elapsed() > minValidityMs }
 
     /**
      * When the access token stops being valid, on the [elapsed] clock. The

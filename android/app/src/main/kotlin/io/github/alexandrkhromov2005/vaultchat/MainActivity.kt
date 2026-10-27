@@ -15,7 +15,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
 import io.github.alexandrkhromov2005.vaultchat.ui.SessionScope
 import io.github.alexandrkhromov2005.vaultchat.ui.auth.AuthFlow
-import io.github.alexandrkhromov2005.vaultchat.ui.home.HomeScreen
+import io.github.alexandrkhromov2005.vaultchat.ui.chat.ChatHome
 import io.github.alexandrkhromov2005.vaultchat.ui.theme.VaultChatTheme
 
 class MainActivity : ComponentActivity() {
@@ -39,7 +39,7 @@ private fun VaultChatRoot(container: AppContainer) {
         when (val current = state) {
             SessionState.Restoring -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
             is SessionState.SignedOut -> AuthFlow(container, current.reason)
-            is SessionState.SignedIn -> HomeScreen(container, current)
+            is SessionState.SignedIn -> ChatHome(container, current)
         }
     }
 }

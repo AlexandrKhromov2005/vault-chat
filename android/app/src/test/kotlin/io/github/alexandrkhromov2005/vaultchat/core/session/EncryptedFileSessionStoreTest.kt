@@ -113,14 +113,18 @@ class EncryptedFileSessionStoreTest {
     }
 }
 
-/** AES-GCM in the JVM's provider, standing in for the Android Keystore. */
+/**
+ * AES-GCM in the JDK's own provider, standing in for the Android Keystore.
+ * The provider is named because Robolectric tests in the same JVM register
+ * providers of their own.
+ */
 private class JvmCipher : SessionCipher {
     private var key: SecretKey = newKey()
     var destroyed = false
     var failure: Exception? = null
     var failEncryptions = 0
 
-    private fun newKey(): SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+    private fun newKey(): SecretKey = KeyGenerator.getInstance("AES", PROVIDER).apply { init(256) }.generateKey()
 
     override fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray {
         if (failEncryptions > 0) {
@@ -128,7 +132,7 @@ private class JvmCipher : SessionCipher {
             throw java.security.ProviderException("keystore operation failed")
         }
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding", PROVIDER)
         cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
         cipher.updateAAD(associatedData)
         return iv + cipher.doFinal(plaintext)
@@ -136,7 +140,7 @@ private class JvmCipher : SessionCipher {
 
     override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray {
         failure?.let { throw it }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding", PROVIDER)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, ciphertext, 0, 12))
         cipher.updateAAD(associatedData)
         return cipher.doFinal(ciphertext, 12, ciphertext.size - 12)
@@ -147,3 +151,5 @@ private class JvmCipher : SessionCipher {
         key = newKey()
     }
 }
+
+private const val PROVIDER = "SunJCE"

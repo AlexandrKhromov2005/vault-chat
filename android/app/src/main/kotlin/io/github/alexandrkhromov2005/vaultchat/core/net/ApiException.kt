@@ -27,5 +27,8 @@ open class ApiException(
 
         /** The session could not be stored on this device. */
         const val STORAGE = "storage"
+
+        /** Something on this device failed, such as its database. */
+        const val LOCAL = "local"
     }
 }
