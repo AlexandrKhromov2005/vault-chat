@@ -34,6 +34,20 @@ service AuthService {
   // access token ("log out everywhere"). Only the token owner's sessions can
   // be revoked.
   rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeAllSessionsResponse);
+  // GetAccount returns the caller's private account settings, never a directory entry.
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+  // RequestEmailVerification accepts a password-protected resend without exposing eligibility.
+  rpc RequestEmailVerification(RequestEmailVerificationRequest) returns (RequestEmailVerificationResponse);
+  // ConfirmEmailVerification consumes an email ownership token after explicit confirmation.
+  rpc ConfirmEmailVerification(ConfirmEmailVerificationRequest) returns (ConfirmEmailVerificationResponse);
+  // RequestPasswordReset accepts a recovery request without disclosing account existence.
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+  // ConfirmPasswordReset consumes a recovery token and revokes prior sessions; it issues no JWT.
+  rpc ConfirmPasswordReset(ConfirmPasswordResetRequest) returns (ConfirmPasswordResetResponse);
+  // RequestEmailChange requires both the caller's access token and a fresh password.
+  rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
+  // ConfirmEmailChange consumes a token for the new address and revokes prior sessions.
+  rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
 }
 
 message RegisterRequest {
@@ -47,6 +61,75 @@ message RegisterResponse {
   string user_id = 1;
   string email = 2;
   string username = 3;
+  optional bool verification_required = 4;
+}
+
+message GetAccountRequest {
+  string access_token = 1;
+}
+
+message GetAccountResponse {
+  string user_id = 1;
+  string email = 2;
+  string username = 3;
+  bool email_verified = 4;
+  bool verification_required = 5;
+  google.protobuf.Timestamp verification_deadline = 6;
+}
+
+message RequestEmailVerificationRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RequestEmailVerificationResponse {
+  string message = 1;
+}
+
+message ConfirmEmailVerificationRequest {
+  string token = 1;
+}
+
+message ConfirmEmailVerificationResponse {
+  string message = 1;
+  string user_id = 2;
+}
+
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {
+  string message = 1;
+}
+
+message ConfirmPasswordResetRequest {
+  string token = 1;
+  string password = 2;
+}
+
+message ConfirmPasswordResetResponse {
+  string message = 1;
+  string user_id = 2;
+}
+
+message RequestEmailChangeRequest {
+  string access_token = 1;
+  string password = 2;
+  string new_email = 3;
+}
+
+message RequestEmailChangeResponse {
+  string message = 1;
+}
+
+message ConfirmEmailChangeRequest {
+  string token = 1;
+}
+
+message ConfirmEmailChangeResponse {
+  string message = 1;
+  string user_id = 2;
 }
 
 message LoginRequest {

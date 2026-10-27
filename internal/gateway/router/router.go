@@ -72,10 +72,23 @@ func New(d Deps) http.Handler {
 			middleware.RateLimit(d.Limiter, middleware.ByUserID, d.Logger),
 		)
 	}
+	protectedCredentials := func(h http.HandlerFunc) http.Handler {
+		return middleware.Chain(credentials(h),
+			middleware.Authenticate(d.TokenValidator),
+			middleware.RateLimit(d.Limiter, middleware.ByUserID, d.Logger),
+		)
+	}
 
 	api := http.NewServeMux()
 	api.Handle("POST /api/v1/auth/register", credentials(d.Auth.Register))
 	api.Handle("POST /api/v1/auth/login", credentials(d.Auth.Login))
+	api.Handle("POST /api/v1/auth/email/verification/request", credentials(d.Auth.RequestEmailVerification))
+	api.Handle("POST /api/v1/auth/email/verification/confirm", credentials(d.Auth.ConfirmEmailVerification))
+	api.Handle("POST /api/v1/auth/password/reset/request", credentials(d.Auth.RequestPasswordReset))
+	api.Handle("POST /api/v1/auth/password/reset/confirm", credentials(d.Auth.ConfirmPasswordReset))
+	api.Handle("POST /api/v1/auth/email/change/request", protectedCredentials(d.Auth.RequestEmailChange))
+	api.Handle("POST /api/v1/auth/email/change/confirm", credentials(d.Auth.ConfirmEmailChange))
+	api.Handle("GET /api/v1/auth/account", protected(d.Auth.Account))
 	api.HandleFunc("POST /api/v1/auth/refresh", d.Auth.Refresh)
 	api.HandleFunc("POST /api/v1/auth/logout", d.Auth.Logout)
 	api.Handle("GET /api/v1/auth/me", protected(d.Auth.Me))

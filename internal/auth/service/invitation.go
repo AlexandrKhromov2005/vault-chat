@@ -51,10 +51,21 @@ func (s *Service) RegisterInvited(ctx context.Context, email, username, password
 		return nil, ErrInvalidInvitation
 	}
 	user, err := s.register(ctx, email, username, password, func(ctx context.Context, user *domain.User) error {
+		if s.emails != nil {
+			user.EmailVerificationRequired = true
+			action, payload, err := s.emails.challenge(user, "verify", user.Email)
+			if err != nil {
+				return err
+			}
+			return s.emails.repo.CreateInvited(ctx, user, hash[:], action, payload)
+		}
 		return s.invitations.CreateInvited(ctx, user, hash[:])
 	})
 	if errors.Is(err, ErrEmailTaken) || errors.Is(err, repository.ErrInvalidInvitation) {
 		return nil, ErrInvalidInvitation
+	}
+	if errors.Is(err, repository.ErrEmailCapacity) || errors.Is(err, repository.ErrEmailPolicyRequired) {
+		return nil, ErrEmailUnavailable
 	}
 	return user, err
 }

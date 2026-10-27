@@ -90,7 +90,9 @@ type Service struct {
 	invitations   InvitationRepository
 	notifier      SessionNotifier
 
-	refreshRetryWindow time.Duration
+	refreshRetryWindow   time.Duration
+	legacyVerifyDeadline *time.Time
+	emails               *EmailAccounts
 }
 
 // NewService wires a Service. A dummy hash is precomputed so that login
@@ -173,7 +175,7 @@ func (s *Service) register(ctx context.Context, email, username, password string
 
 // Login authenticates a user by email and password and issues a token pair.
 // Unknown accounts and wrong passwords produce the same error.
-func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair, error) {
+func (s *Service) authenticate(ctx context.Context, email, password string) (*domain.User, error) {
 	if err := validator.ValidateEmail(email); err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}
@@ -182,13 +184,8 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 	}
 	// CITEXT email lookup is case-insensitive. Hash the same normalized key
 	// for unknown accounts too; neither logs nor limiter keys contain email.
-	account := sha256.Sum256([]byte(strings.ToLower(email)))
-	quota, err := s.loginLimiter.Allow(ctx, hex.EncodeToString(account[:]))
-	if err != nil {
+	if err := s.allowPasswordAttempt(ctx, email); err != nil {
 		return nil, err
-	}
-	if !quota.Allowed {
-		return nil, ErrLoginRateLimited
 	}
 
 	user, err := s.repo.GetByEmail(ctx, email)
@@ -207,12 +204,38 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 	if user == nil || !match {
 		return nil, ErrInvalidCredentials
 	}
+	return user, nil
+}
+
+func (s *Service) allowPasswordAttempt(ctx context.Context, email string) error {
+	account := sha256.Sum256([]byte(strings.ToLower(email)))
+	quota, err := s.loginLimiter.Allow(ctx, hex.EncodeToString(account[:]))
+	if err != nil {
+		return err
+	}
+	if !quota.Allowed {
+		return ErrLoginRateLimited
+	}
+	return nil
+}
+
+func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair, error) {
+	user, err := s.authenticate(ctx, email, password)
+	if err != nil {
+		return nil, err
+	}
+	if s.emailRequired(user) {
+		return nil, ErrEmailUnverified
+	}
 
 	pair, session, err := s.issueTokenPair(user)
 	if err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}
 	if err := s.sessions.Create(ctx, session); err != nil {
+		if errors.Is(err, repository.ErrSessionRevoked) {
+			return nil, ErrInvalidCredentials
+		}
 		return nil, fmt.Errorf("login: failed to store session: %w", err)
 	}
 
@@ -264,7 +287,7 @@ func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenTy
 // issueTokenPair mints an access/refresh token pair for user together with
 // the new session the refresh token is bound to. The session is not stored.
 func (s *Service) issueTokenPair(user *domain.User) (*TokenPair, *domain.Session, error) {
-	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID}
+	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID, CredentialVersion: user.CredentialVersion}
 	pair, err := s.issueTokens(user, session.ID)
 	if err != nil {
 		return nil, nil, err

@@ -176,6 +176,58 @@ label {
   align-self: flex-start;
 }
 
+.security-panel {
+  width: calc(100% - 32px);
+  max-width: 560px;
+  margin: 16px auto 0;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-y: auto;
+  flex-shrink: 0;
+  max-height: 60vh;
+}
+
+.security-panel h2,
+.security-panel h3,
+.security-panel p {
+  margin: 0;
+}
+
+.security-panel h2 {
+  font-size: 18px;
+}
+
+.security-panel h3 {
+  font-size: 15px;
+}
+
+#verification-help summary {
+  cursor: pointer;
+}
+
+#verification-help form {
+  margin-top: 12px;
+}
+
+.text-button {
+  align-self: flex-start;
+  color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .account {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+}
+
 .tabs {
   display: flex;
   gap: 8px;

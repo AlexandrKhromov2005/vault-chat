@@ -18,7 +18,8 @@ info:
     `Retry-After` (seconds).
 
     IPv6 addresses share their /64 quota; IPv4-mapped addresses use the IPv4
-    key. Login and registration share an additional quota (default 5/minute,
+    key. Login, registration, public email/recovery requests, all email proof
+    confirmations and authenticated email-change requests share an additional quota (default 5/minute,
     burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`GATEWAY_AUTH_RATE_LIMIT_BURST`)
     per IP/network, enforced both locally and in Redis. These routes return
     `503` when Redis is unavailable. Ordinary API limiting still fails open.
@@ -78,7 +79,9 @@ paths:
         Requires a single-use invitation issued by an operator for this email;
         invitations expire after 24 hours. Unknown, expired, used, mismatched
         invitations and already registered emails have the same public rejection.
-        Usernames are unique without regard to ASCII letter case.
+        Usernames are unique without regard to ASCII letter case. With email
+        verification enabled, verification_required is true and registration
+        does not sign the user in. Confirm the emailed proof before login.
       tags: [auth]
       requestBody:
         required: true
@@ -106,7 +109,7 @@ paths:
           description: Account created.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/User"}
+              schema: {$ref: "#/components/schemas/Registration"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409":
           description: Username already taken after invitation authorization (`already_exists`).
@@ -124,6 +127,7 @@ paths:
   /api/v1/auth/login:
     post:
       summary: Log in with email and password
+      description: Correct credentials for an account requiring email ownership return 403 email_verification_required; wrong credentials remain 401.
       tags: [auth]
       requestBody:
         required: true
@@ -144,6 +148,176 @@ paths:
               schema: {$ref: "#/components/schemas/TokenPair"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/EmailVerificationRequired"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/account:
+    get:
+      summary: Private account settings of the caller
+      description: Returns fresh account email and verification state from Auth, authorized only by the caller's access token. No user identifier is accepted.
+      tags: [auth]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The caller's private account state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Account"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/email/verification/request:
+    post:
+      summary: Request an email verification message
+      description: |
+        Requires the current password. Eligible, unknown and ineligible accounts receive the same acknowledgement; it does not establish that a message was delivered.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailVerificationRequest"}
+      responses:
+        "202":
+          description: Generic acknowledgement; it does not disclose eligibility or delivery.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailAcknowledgement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/email/verification/confirm:
+    post:
+      summary: Confirm email ownership
+      description: |
+        Consumes a single-use email ownership token only on this explicit POST. Opening the fragment link or making a GET does not confirm it. Wrong-purpose, expired, used and invalid proofs return invalid_email_action.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailProof"}
+      responses:
+        "200":
+          description: The proof was consumed; no JWT is issued.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailCompletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/password/reset/request:
+    post:
+      summary: Request password recovery
+      description: |
+        Eligible, unknown and ineligible accounts receive the same acknowledgement. Delivery availability and rate limits may reject the request without revealing account existence.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailResetRequest"}
+      responses:
+        "202":
+          description: Generic acknowledgement; it does not disclose eligibility or delivery.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailAcknowledgement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/password/reset/confirm:
+    post:
+      summary: Set a password using an email proof
+      description: |
+        Consumes a single-use recovery proof and revokes the affected account sessions. Returns the affected user_id without issuing access or refresh tokens; the client signs in separately. Invalid proofs use invalid_email_action; invalid passwords use invalid_argument.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasswordResetConfirmation"}
+      responses:
+        "200":
+          description: The proof was consumed; no JWT is issued.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailCompletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/email/change/request:
+    post:
+      summary: Request an email address change
+      description: |
+        Requires an access token and a fresh current password. Identity comes only from the access token. The existing email remains active until an explicit confirmation of the new-address proof. The credential quota also applies to this authenticated route.
+      tags: [auth]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailChangeRequest"}
+      responses:
+        "202":
+          description: Generic acknowledgement; it does not disclose eligibility or delivery.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailAcknowledgement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "408": {$ref: "#/components/responses/RequestTimeout"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
+  /api/v1/auth/email/change/confirm:
+    post:
+      summary: Confirm a new email address
+      description: |
+        Consumes a single-use proof for the new address and revokes prior sessions. No access token is required and no login tokens are issued. Invalid, wrong-purpose, used and expired proofs use invalid_email_action.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailProof"}
+      responses:
+        "200":
+          description: The proof was consumed; no JWT is issued.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmailCompletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "413": {$ref: "#/components/responses/TooLarge"}
         "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
@@ -838,6 +1012,71 @@ components:
         user_id: {type: string, format: uuid}
         email: {type: string, format: email}
         username: {type: string}
+    Registration:
+      allOf:
+        - {$ref: "#/components/schemas/User"}
+        - type: object
+          properties:
+            verification_required:
+              type: boolean
+              description: Present and true when email confirmation is required before login. Omitted for legacy registration.
+    Account:
+      type: object
+      additionalProperties: false
+      required: [user_id, email, username, email_verified, verification_required]
+      properties:
+        user_id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        username: {type: string}
+        email_verified: {type: boolean}
+        verification_required: {type: boolean}
+        verification_deadline: {type: string, format: date-time, description: Optional legacy verification grace deadline.}
+    EmailAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: {type: string, enum: ["If the request is eligible, an email will be sent."]}
+    EmailCompletion:
+      type: object
+      additionalProperties: false
+      required: [message, user_id]
+      properties:
+        message: {type: string}
+        user_id: {type: string, format: uuid, description: Account affected by this proof; clients clear a local session only if its user_id matches.}
+    EmailVerificationRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        password: {type: string, maxLength: 128}
+    EmailResetRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+    EmailProof:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: {type: string, minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$", description: Single-use purpose-bound proof from the email link fragment. Never send it in a query string.}
+    PasswordResetConfirmation:
+      type: object
+      additionalProperties: false
+      required: [token, password]
+      properties:
+        token: {type: string, minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$"}
+        password: {type: string, minLength: 8, maxLength: 128, description: 8-128 bytes with at least one ASCII letter and one digit.}
+    EmailChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [password, new_email]
+      properties:
+        password: {type: string, maxLength: 128}
+        new_email: {type: string, format: email, maxLength: 254}
     TokenPair:
       type: object
       properties:
@@ -869,12 +1108,17 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_argument, invalid_json, unauthenticated, permission_denied, not_found,
+              enum: [invalid_argument, invalid_email_action, email_verification_required, invalid_json, unauthenticated, permission_denied, not_found,
                      already_exists, failed_precondition, body_too_large, unsupported_media_type, rate_limited,
                      cors_forbidden, origin_forbidden, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
   responses:
+    EmailVerificationRequired:
+      description: Correct credentials require email ownership before a session may be issued (email_verification_required).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
     NotFound:
       description: User or room absent, or the caller is not a room member.
       content:
@@ -891,7 +1135,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     BadRequest:
-      description: Malformed JSON (`invalid_json`) or invalid field values (`invalid_argument`).
+      description: Malformed JSON (`invalid_json`), invalid field values (`invalid_argument`), or an invalid/used/expired/wrong-purpose email proof (`invalid_email_action`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}

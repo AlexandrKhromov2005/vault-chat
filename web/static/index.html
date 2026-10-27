@@ -13,9 +13,50 @@
     <div id="account" class="account" hidden>
       <span id="connection" class="connection" role="status"></span>
       <span id="account-name" class="account-name"></span>
+      <button id="account-settings-toggle" type="button" aria-expanded="false" aria-controls="account-settings">Аккаунт</button>
       <button id="logout" type="button">Выйти</button>
     </div>
   </header>
+
+  <section id="email-action" class="security-panel stack" aria-labelledby="email-action-title" hidden>
+    <h2 id="email-action-title"></h2>
+    <p id="email-action-description" class="hint"></p>
+    <form id="email-action-form" class="stack">
+      <label id="reset-password-field" hidden>Новый пароль
+        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128">
+      </label>
+      <button id="email-action-submit" type="submit">Подтвердить</button>
+    </form>
+    <p id="email-action-notice" role="status"></p>
+    <p id="email-action-error" class="error" role="alert"></p>
+  </section>
+
+  <section id="account-settings" class="security-panel stack" aria-labelledby="account-settings-title" hidden>
+    <div class="section-header">
+      <h2 id="account-settings-title">Безопасность аккаунта</h2>
+      <button id="settings-refresh" type="button">Обновить</button>
+    </div>
+    <p id="settings-email"></p>
+    <p id="settings-status" role="status"></p>
+    <form id="settings-verify-form" class="stack" hidden>
+      <label>Текущий пароль
+        <input name="password" type="password" autocomplete="current-password" maxlength="128" required>
+      </label>
+      <button type="submit">Отправить подтверждение email</button>
+    </form>
+    <form id="email-change-form" class="stack" hidden>
+      <h3>Сменить email</h3>
+      <label>Новый email
+        <input name="new_email" type="email" autocomplete="email" maxlength="254" required>
+      </label>
+      <label>Текущий пароль
+        <input name="password" type="password" autocomplete="current-password" maxlength="128" required>
+      </label>
+      <button type="submit">Подтвердить новый email</button>
+    </form>
+    <p id="settings-notice" role="status"></p>
+    <p id="settings-error" class="error" role="alert"></p>
+  </section>
 
   <main>
     <section id="auth" class="auth" hidden>
@@ -32,6 +73,16 @@
           <input name="password" type="password" autocomplete="current-password" required>
         </label>
         <button type="submit">Войти</button>
+      </form>
+
+      <button id="show-password-reset" type="button" class="text-button">Забыли пароль?</button>
+
+      <form id="password-reset-request-form" class="stack" hidden>
+        <p class="hint">Введите email аккаунта. Если восстановление доступно, мы отправим ссылку для смены пароля.</p>
+        <label>Email
+          <input name="email" type="email" autocomplete="email" maxlength="254" required>
+        </label>
+        <button type="submit">Восстановить пароль</button>
       </form>
 
       <form id="register-form" class="stack" hidden>
@@ -54,6 +105,20 @@
         <button type="submit">Зарегистрироваться</button>
       </form>
 
+      <details id="verification-help">
+        <summary>Повторно отправить подтверждение email</summary>
+        <form id="verification-request-form" class="stack">
+          <label>Email
+            <input name="email" type="email" autocomplete="email" maxlength="254" required>
+          </label>
+          <label>Текущий пароль
+            <input name="password" type="password" autocomplete="current-password" maxlength="128" required>
+          </label>
+          <button type="submit">Отправить письмо</button>
+        </form>
+      </details>
+
+      <p id="auth-notice" role="status"></p>
       <p id="auth-error" class="error" role="alert"></p>
     </section>
 

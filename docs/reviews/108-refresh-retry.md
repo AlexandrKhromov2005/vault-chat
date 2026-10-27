@@ -57,3 +57,16 @@ exact final commit, followed by another participant's review.
   Node 22.23.4; `xmake test` and `xmake lint` then passed.
 
 No schema migration, deployment or production configuration is changed.
+
+## Integration with email account security
+
+Rotation and retry both retain the current user's credential-version and email
+ownership checks under the shared user lock. A rotated row from an older
+credential epoch returns `ErrSessionRevoked` before reuse classification, so it
+cannot revoke newer logins. Successors must belong to the same user and current
+epoch, and the returned session retains that version.
+
+The existing stale-password, rotated-old-epoch and verification-policy scenarios
+run alongside retry, lock-wait and HTTP lifecycle regressions against disposable
+PostgreSQL with the race detector. The two existing repository callers use the
+strict zero-window adapter; their original security assertions are preserved.

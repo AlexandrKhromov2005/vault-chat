@@ -27,6 +27,13 @@ type AuthClient interface {
 	RefreshToken(ctx context.Context, in *authv1.RefreshTokenRequest, opts ...grpc.CallOption) (*authv1.RefreshTokenResponse, error)
 	Logout(ctx context.Context, in *authv1.LogoutRequest, opts ...grpc.CallOption) (*authv1.LogoutResponse, error)
 	RevokeAllSessions(ctx context.Context, in *authv1.RevokeAllSessionsRequest, opts ...grpc.CallOption) (*authv1.RevokeAllSessionsResponse, error)
+	GetAccount(ctx context.Context, in *authv1.GetAccountRequest, opts ...grpc.CallOption) (*authv1.GetAccountResponse, error)
+	RequestEmailVerification(ctx context.Context, in *authv1.RequestEmailVerificationRequest, opts ...grpc.CallOption) (*authv1.RequestEmailVerificationResponse, error)
+	ConfirmEmailVerification(ctx context.Context, in *authv1.ConfirmEmailVerificationRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailVerificationResponse, error)
+	RequestPasswordReset(ctx context.Context, in *authv1.RequestPasswordResetRequest, opts ...grpc.CallOption) (*authv1.RequestPasswordResetResponse, error)
+	ConfirmPasswordReset(ctx context.Context, in *authv1.ConfirmPasswordResetRequest, opts ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error)
+	RequestEmailChange(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error)
+	ConfirmEmailChange(ctx context.Context, in *authv1.ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error)
 }
 
 type registerRequest struct {
@@ -37,9 +44,10 @@ type registerRequest struct {
 }
 
 type userResponse struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
+	UserID               string `json:"user_id"`
+	Email                string `json:"email"`
+	Username             string `json:"username"`
+	VerificationRequired bool   `json:"verification_required,omitempty"`
 }
 
 type loginRequest struct {
@@ -124,9 +132,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusCreated, userResponse{
-		UserID:   resp.GetUserId(),
-		Email:    resp.GetEmail(),
-		Username: resp.GetUsername(),
+		UserID:               resp.GetUserId(),
+		Email:                resp.GetEmail(),
+		Username:             resp.GetUsername(),
+		VerificationRequired: resp.GetVerificationRequired(),
 	})
 }
 
@@ -226,6 +235,9 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // failures are logged with their cause, which the client never sees.
 func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	statusCode, code, message := response.FromGRPC(err)
+	if emailStatus, emailCode, emailMessage, ok := emailHTTPError(err); ok {
+		statusCode, code, message = emailStatus, emailCode, emailMessage
+	}
 	if statusCode == http.StatusTooManyRequests {
 		// Auth refills account admission at one attempt per minute.
 		w.Header().Set("Retry-After", "60")
