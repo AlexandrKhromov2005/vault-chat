@@ -230,7 +230,7 @@ func TestGateway_SessionLifecycle(t *testing.T) {
 		`{"email":"bob@example.com","username":"bob","password":"password1"}`)
 	require.Equal(t, http.StatusCreated, code, body)
 
-	t.Run("refresh rotates, reuse revokes everything", func(t *testing.T) {
+	t.Run("refresh rotates, a prompt retry succeeds, reuse revokes everything", func(t *testing.T) {
 		first := login(t, api, "bob@example.com")
 
 		code, rotated := refresh(t, api, first.refresh)
@@ -239,10 +239,18 @@ func TestGateway_SessionLifecycle(t *testing.T) {
 		code, _ = call(t, http.MethodGet, api+"/me", rotated.access, "")
 		require.Equal(t, http.StatusOK, code)
 
-		// Presenting the rotated-out token again means it leaked.
+		// The response may have been lost, so a prompt retry continues the
+		// login.
+		code, retried := refresh(t, api, first.refresh)
+		require.Equal(t, http.StatusOK, code)
+		code, next := refresh(t, api, retried.refresh)
+		require.Equal(t, http.StatusOK, code)
+
+		// Once the client has moved on, presenting the rotated-out token
+		// again means it leaked.
 		code, _ = refresh(t, api, first.refresh)
 		require.Equal(t, http.StatusUnauthorized, code)
-		code, _ = refresh(t, api, rotated.refresh)
+		code, _ = refresh(t, api, next.refresh)
 		require.Equal(t, http.StatusUnauthorized, code)
 	})
 

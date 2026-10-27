@@ -48,7 +48,7 @@ type UserRepository interface {
 type SessionRepository interface {
 	IsActive(ctx context.Context, userID, sessionID string) (bool, error)
 	Create(ctx context.Context, session *domain.Session) error
-	Rotate(ctx context.Context, currentID string, next *domain.Session) error
+	Rotate(ctx context.Context, currentID string, next *domain.Session, retryWindow time.Duration) (*domain.Session, error)
 	RevokeFamily(ctx context.Context, userID, sessionID string) error
 	RevokeAllForUser(ctx context.Context, userID string) (int64, error)
 }
@@ -89,6 +89,8 @@ type Service struct {
 	loginLimiter  *ratelimit.MemoryLimiter
 	invitations   InvitationRepository
 	notifier      SessionNotifier
+
+	refreshRetryWindow time.Duration
 }
 
 // NewService wires a Service. A dummy hash is precomputed so that login
@@ -117,6 +119,8 @@ func NewService(
 		// the 512 MiB Auth container. Admission never queues extra hash work.
 		passwordSlots: make(chan struct{}, 2),
 		loginLimiter:  ratelimit.NewMemoryLimiter(time.Minute, 5, 4096),
+
+		refreshRetryWindow: DefaultRefreshRetryWindow,
 	}
 	for _, option := range options {
 		option(s)
@@ -261,16 +265,26 @@ func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenTy
 // the new session the refresh token is bound to. The session is not stored.
 func (s *Service) issueTokenPair(user *domain.User) (*TokenPair, *domain.Session, error) {
 	session := &domain.Session{ID: uuid.NewString(), UserID: user.ID}
-	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username, session.ID)
+	pair, err := s.issueTokens(user, session.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to issue access token: %w", err)
+		return nil, nil, err
+	}
+	session.ExpiresAt = pair.RefreshExpiresAt
+	return pair, session, nil
+}
+
+// issueTokens mints an access/refresh token pair for user bound to the
+// session sessionID.
+func (s *Service) issueTokens(user *domain.User, sessionID string) (*TokenPair, error) {
+	accessToken, accessExpiresAt, err := s.tokens.IssueAccessToken(user.ID, user.Email, user.Username, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to issue access token: %w", err)
 	}
 
-	refreshToken, refreshExpiresAt, err := s.tokens.IssueRefreshToken(session.ID, user.ID, user.Email, user.Username)
+	refreshToken, refreshExpiresAt, err := s.tokens.IssueRefreshToken(sessionID, user.ID, user.Email, user.Username)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to issue refresh token: %w", err)
+		return nil, fmt.Errorf("failed to issue refresh token: %w", err)
 	}
-	session.ExpiresAt = refreshExpiresAt
 
 	return &TokenPair{
 		UserID:           user.ID,
@@ -278,5 +292,5 @@ func (s *Service) issueTokenPair(user *domain.User) (*TokenPair, *domain.Session
 		RefreshToken:     refreshToken,
 		AccessExpiresAt:  accessExpiresAt,
 		RefreshExpiresAt: refreshExpiresAt,
-	}, session, nil
+	}, nil
 }
