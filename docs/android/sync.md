@@ -96,7 +96,12 @@ coalesced per room: events during a refresh add one more refresh after it.
 A room that an event adds is read from the server outside the event loop and
 outside the room-list lock, which is taken only to store it, so waiting for
 the budget never holds up live events. A room the user left while it was
-being read is not stored.
+being read is not stored; one who joins again meanwhile gets it after all.
+
+Opening a room loads or catches it up at once, without waiting for
+background work on the same room: the database keeps the block contiguous
+whichever answer arrives first, so the lock that background work takes only
+saves duplicate requests.
 
 ## Resource budgets
 
@@ -107,6 +112,7 @@ being read is not stored.
 | Profiles | Only while more than 5 tokens are left | Listing, catch-up and joined rooms never wait behind names |
 | Requests the user waits for (opening a room, older history) | Not delayed; they draw on the same bucket, at most 15 into debt | Background work waits them out |
 | Concurrent sync requests | 2 | Leaves room for the user's own requests |
+| Rooms a sync loads or catches up at once | 2 | The others hold no lock while they wait, so opening any of them is not delayed |
 | Room list | 100 per page, at most 50 pages | 5000 rooms; beyond that the list is stored but nothing is deleted |
 | Rooms preloaded per sync | 10 | Bounds the first sync of a new device |
 | Catch-up | 100 per page, at most 10 pages per room | After 1000 missed messages the room is reset to its latest page |

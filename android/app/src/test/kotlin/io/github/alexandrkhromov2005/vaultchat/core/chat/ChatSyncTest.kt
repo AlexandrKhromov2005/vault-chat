@@ -488,4 +488,45 @@ class ChatSyncTest {
 
         assertEquals(0, unread(channel))
     }
+
+    // Third review: opening a room waited for its lock, held by a background
+    // catch-up that was waiting for the budget.
+    @Test
+    fun aStaleRoomOpenedDuringCatchUpOpensAtOnce() = runBlocking {
+        val rooms = (1..40).map { server.addChannel(it).also { room -> server.post(room, sender = peer) } }
+        // Loaded quickly, as by an earlier run of the app.
+        assertNull(sync(ChatSync.Limits(preloadedRooms = 40, requestsPerMinute = 60_000, burst = 100)).syncNow())
+
+        // Offline meanwhile: every room has a new message.
+        rooms.forEach { server.post(it, sender = peer) }
+        val sync = sync()
+        scope.launch { sync.syncNow() }
+        delay(500)
+
+        val caughtUp = server.calls().filter { Regex("after=[0-9]").containsMatchIn(it) }.map { it.split(" ")[1] }.toSet()
+        val waiting = rooms.first { it !in caughtUp }
+        assertNotNull("openRoom waited behind the background catch-up", withTimeoutOrNull(3_000) { sync.openRoom(waiting) })
+        assertEquals(listOf(1L, 2L), stored(waiting))
+    }
+
+    // Third review: a second join while the first was being read was merged
+    // into it, and the first dropped the room because of the departure.
+    @Test
+    fun aRoomRejoinedWhileItWasBeingAddedIsStored() = runBlocking {
+        val sync = sync()
+        assertNull(sync.syncNow())
+        val room = server.addChannel(1)
+        val slow = AtomicBoolean(true)
+        server.intercept = { call ->
+            if (call == "room $room" && slow.getAndSet(false)) Thread.sleep(500)
+            null
+        }
+
+        sync.onEvent(Frame.MemberAdded(room, me))
+        delay(100)
+        sync.onEvent(Frame.MemberGone(room, me))
+        sync.onEvent(Frame.MemberAdded(room, me))
+
+        assertTrue("the rejoined room is stored", within(3_000) { dao.room(room) != null })
+    }
 }

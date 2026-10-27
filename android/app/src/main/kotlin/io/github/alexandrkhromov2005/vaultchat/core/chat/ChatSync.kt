@@ -35,9 +35,10 @@ data class SyncStatus(val running: Boolean, val failure: ApiException?)
  * events (docs/android/sync.md).
  *
  * Changes to the room list are serialised by [listLock], so that a room an
- * event adds while a listing is under way is not deleted as unlisted. Each
- * room loads or catches up under its own lock; older pages need none, since
- * the database drops a page that no longer fits. Refreshes that live events
+ * event adds while a listing is under way is not deleted as unlisted.
+ * Background work loads or catches up each room under its own lock, which
+ * only saves duplicate requests; opening a room and older pages take none,
+ * since the database keeps the block contiguous whatever arrives first. Refreshes that live events
  * ask for are coalesced per room.
  *
  * Requests run at most [CONCURRENT_REQUESTS] at a time and pause together
@@ -90,8 +91,12 @@ class ChatSync(
     private val rate = RequestBudget(limits.requestsPerMinute, limits.burst, clock)
     private val pending = HashMap<String, PendingRefresh>()
 
-    // Rooms being added after events, with the lowest readThrough asked for.
-    private val adding = HashMap<String, Long?>()
+    /** A room being added after events; see [addRoom]. */
+    private class PendingAdd(var readThrough: Long?) {
+        var again = false
+    }
+
+    private val adding = HashMap<String, PendingAdd>()
 
     // How often the user has left each room; a room read from the server
     // before the user left it is not stored afterwards.
@@ -138,9 +143,13 @@ class ChatSync(
         if (events.trySend(frame).isFailure) requestSync()
     }
 
-    /** Loads a room that is being opened, or catches it up. */
+    /**
+     * Loads a room that is being opened, or catches it up. It does not wait
+     * for background work on the same room: the database keeps the block
+     * contiguous whichever answer comes first, and the user is waiting.
+     */
     suspend fun openRoom(roomId: String) {
-        refreshRoom(roomId, Priority.USER, readThrough = null)
+        loadOrCatchUp(roomId, Priority.USER, readThrough = null)
     }
 
     /**
@@ -207,9 +216,13 @@ class ChatSync(
                 room.lastMessageAt > (dao.newestMessageTime(room.roomId) ?: Long.MIN_VALUE)
         }
         val unloaded = listed.filter { timelines[it.roomId] == null }.take(limits.preloadedRooms)
-        // The budget bounds how many of them run at once.
+        // A few rooms at a time, so that the others do not hold their locks
+        // while they wait for the budget.
+        val running = Semaphore(CONCURRENT_ROOMS)
         coroutineScope {
-            (stale + unloaded).forEach { room -> launch { refreshRoom(room.roomId, Priority.BACKGROUND, readThrough = null) } }
+            (stale + unloaded).forEach { room ->
+                launch { running.withPermit { refreshRoom(room.roomId, Priority.BACKGROUND, readThrough = null) } }
+            }
         }
     }
 
@@ -265,45 +278,67 @@ class ChatSync(
 
     /**
      * Lists a room the user has just joined, then loads its messages, in the
-     * background. Further events for the room while it is being added only
-     * lower [readThrough], the position up to which its messages count as
-     * read; without one, a new dialog is unread and a channel's history is
-     * not.
+     * background. [readThrough] is the position up to which its messages
+     * count as read; without one, a new dialog is unread and a channel's
+     * history is not. Events for the room while it is being added lower it
+     * and make the attempt run once more after this one, so that a user who
+     * left and joined again meanwhile still gets the room.
      */
     private fun addRoom(roomId: String, readThrough: Long?) {
-        synchronized(adding) {
-            if (roomId in adding) {
-                adding[roomId] = listOfNotNull(adding[roomId], readThrough).minOrNull()
+        val add = synchronized(adding) {
+            adding[roomId]?.let { queued ->
+                queued.readThrough = listOfNotNull(queued.readThrough, readThrough).minOrNull()
+                queued.again = true
                 return
             }
-            adding[roomId] = readThrough
+            PendingAdd(readThrough).also { adding[roomId] = it }
         }
-        val departed = departures[roomId] ?: 0
         scope.launch {
             try {
-                val known = dao.room(roomId) != null
-                val room = if (known) null else try {
-                    request(Priority.BACKGROUND) { room(it, roomId) }
-                } catch (e: ApiException) {
-                    // 404: not a member any more. Otherwise the next sync lists it.
-                    return@launch
-                }
-                if (room != null) {
-                    val stored = listLock.withLock {
-                        if ((departures[roomId] ?: 0) != departed) return@withLock false
-                        if (dao.room(roomId) == null) dao.addRoom(room.toEntity(me, activity = 0))
-                        true
+                while (true) {
+                    tryAddRoom(roomId, add)
+                    // Deciding to stop and leaving the map happen together, so
+                    // that no event falls between them.
+                    synchronized(adding) {
+                        if (!add.again) {
+                            adding.remove(roomId)
+                            return@launch
+                        }
+                        add.again = false
                     }
-                    if (!stored) return@launch
-                    room.participantIds?.filter { it != me }?.let { loadProfiles(it) }
                 }
-                val asked = synchronized(adding) { adding[roomId] }
-                val dialog = room?.kind == RoomEntity.DIRECT
-                scheduleRefresh(roomId, listOfNotNull(asked, if (dialog) 0L else null).minOrNull())
-            } finally {
+            } catch (e: Throwable) {
                 synchronized(adding) { adding.remove(roomId) }
+                throw e
             }
         }
+    }
+
+    private suspend fun tryAddRoom(roomId: String, add: PendingAdd) {
+        val departed = departures[roomId] ?: 0
+        val room = if (dao.room(roomId) != null) {
+            null
+        } else {
+            try {
+                request(Priority.BACKGROUND) { room(it, roomId) }
+            } catch (e: ApiException) {
+                // 404: not a member any more. Otherwise the next sync lists it.
+                return
+            }
+        }
+        if (room != null) {
+            val stored = listLock.withLock {
+                // The user left while the room was read.
+                if ((departures[roomId] ?: 0) != departed) return@withLock false
+                if (dao.room(roomId) == null) dao.addRoom(room.toEntity(me, activity = 0))
+                true
+            }
+            if (!stored) return
+            room.participantIds?.filter { it != me }?.let { loadProfiles(it) }
+        }
+        val asked = synchronized(adding) { add.readThrough }
+        val dialog = room?.kind == RoomEntity.DIRECT
+        scheduleRefresh(roomId, listOfNotNull(asked, if (dialog) 0L else null).minOrNull())
     }
 
     /**
@@ -341,10 +376,13 @@ class ChatSync(
         }
     }
 
+    /** Loads or catches up a room in the background, one refresh per room at a time. */
     private suspend fun refreshRoom(roomId: String, priority: Priority, readThrough: Long?) {
-        roomLocks.getOrPut(roomId) { Mutex() }.withLock {
-            if (dao.timeline(roomId) == null) loadLatest(roomId, priority, readThrough) else catchUp(roomId, priority)
-        }
+        roomLocks.getOrPut(roomId) { Mutex() }.withLock { loadOrCatchUp(roomId, priority, readThrough) }
+    }
+
+    private suspend fun loadOrCatchUp(roomId: String, priority: Priority, readThrough: Long?) {
+        if (dao.timeline(roomId) == null) loadLatest(roomId, priority, readThrough) else catchUp(roomId, priority)
     }
 
     private suspend fun loadLatest(roomId: String, priority: Priority, readThrough: Long?) {
@@ -452,6 +490,9 @@ class ChatSync(
 
     companion object {
         const val CONCURRENT_REQUESTS = 2
+
+        /** Rooms a sync loads or catches up at the same time. */
+        const val CONCURRENT_ROOMS = 2
         const val EVENT_BUFFER = 1024
         private const val DEFAULT_RETRY_AFTER_SECONDS = 30L
     }
