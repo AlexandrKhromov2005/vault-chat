@@ -92,9 +92,17 @@ func run() error {
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, ContextTimeoutEnabled: true, MaxRetries: -1, DialTimeout: 250 * time.Millisecond, ReadTimeout: 250 * time.Millisecond, WriteTimeout: 250 * time.Millisecond})
 	defer redisClient.Close()
+	emailOpts, mailWorker, err := emailOptions(cfg, pool, logger)
+	if err != nil {
+		return fmt.Errorf("configure account email: %w", err)
+	}
+	options := append([]service.Option{
+		service.WithInvitations(repository.NewUserRepository(pool)),
+		service.WithSessionNotifier(events.Notifier{Client: redisClient}),
+	}, emailOpts...)
 	svc, err := service.NewService(
 		repository.NewUserRepository(pool),
-		repository.NewSessionRepository(pool),
+		repository.NewSessionRepository(pool, cfg.EmailLegacyDeadline),
 		service.NewArgon2idHasher(service.Argon2idParams{
 			MemoryKiB:   cfg.Argon2MemoryKiB,
 			Time:        cfg.Argon2Time,
@@ -104,12 +112,13 @@ func run() error {
 		}),
 		tokenManager,
 		logger,
-		service.WithInvitations(repository.NewUserRepository(pool)),
-		service.WithSessionNotifier(events.Notifier{Client: redisClient}),
+		options...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to init auth service: %w", err)
 	}
+	stopMail := startMailWorker(ctx, mailWorker)
+	defer stopMail()
 
 	listener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {

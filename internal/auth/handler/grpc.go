@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
@@ -27,6 +28,13 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
 	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
+	GetAccount(ctx context.Context, accessToken string) (*service.AccountInfo, error)
+	RequestEmailVerification(ctx context.Context, email, password string) error
+	ConfirmEmailVerification(ctx context.Context, token string) (string, error)
+	RequestPasswordReset(ctx context.Context, email string) error
+	ConfirmPasswordReset(ctx context.Context, token, password string) (string, error)
+	RequestEmailChange(ctx context.Context, accessToken, password, newEmail string) error
+	ConfirmEmailChange(ctx context.Context, token string) (string, error)
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -46,11 +54,15 @@ func (h *AuthGRPCHandler) Register(ctx context.Context, req *authv1.RegisterRequ
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &authv1.RegisterResponse{
+	resp := &authv1.RegisterResponse{
 		UserId:   user.ID,
 		Email:    user.Email,
 		Username: user.Username,
-	}, nil
+	}
+	if user.EmailVerificationRequired && user.EmailVerifiedAt == nil {
+		resp.VerificationRequired = proto.Bool(true)
+	}
+	return resp, nil
 }
 
 // Login authenticates a user and issues an access/refresh token pair.
@@ -133,6 +145,7 @@ var publicErrors = []struct {
 }{
 	{service.ErrInvalidInvitation, codes.PermissionDenied, "invalid or expired invitation"},
 	{service.ErrPasswordCapacity, codes.Unavailable, "password capacity reached"},
+	{service.ErrEmailUnavailable, codes.Unavailable, "email service unavailable"},
 	{service.ErrLoginRateLimited, codes.ResourceExhausted, "too many login attempts"},
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
@@ -152,6 +165,12 @@ var publicErrors = []struct {
 // toStatus maps domain errors to gRPC status codes. Only the fixed public
 // message is sent, never the wrapping context of err.
 func toStatus(err error) error {
+	if errors.Is(err, service.ErrEmailUnverified) {
+		return emailStatus(codes.FailedPrecondition, "email verification required", "EMAIL_VERIFICATION_REQUIRED")
+	}
+	if errors.Is(err, service.ErrInvalidEmailAction) {
+		return emailStatus(codes.InvalidArgument, "invalid email action", "INVALID_EMAIL_ACTION")
+	}
 	for _, e := range publicErrors {
 		if errors.Is(err, e.err) {
 			return status.Error(e.code, e.message)

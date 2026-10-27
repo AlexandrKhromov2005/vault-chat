@@ -46,3 +46,21 @@ func TestRunHTTP(t *testing.T) {
 	require.Equal(t, exitUnhealthy, run([]string{"-http", unhealthy.URL, "-timeout", "1s"}, &stderr))
 	require.Contains(t, stderr.String(), "unhealthy")
 }
+
+func TestAccountEmailCapabilityNeedsNoSecretsOrNetwork(t *testing.T) {
+	t.Setenv("AUTH_MAIL_ENABLED", "true")
+	t.Setenv("AUTH_MAIL_KEY_FILE", "/missing/synthetic-key")
+	t.Setenv("AUTH_SMTP_PASSWORD_FILE", "/missing/synthetic-password")
+	t.Setenv("AUTH_SMTP_ADDRESS", "not-a-network-address")
+	var stderr bytes.Buffer
+	require.Equal(t, exitHealthy, run([]string{"-check-account-email"}, &stderr))
+	require.Empty(t, stderr.String())
+	for _, args := range [][]string{
+		{"-check-account-email", "-http", "http://127.0.0.1:1"},
+		{"-check-account-email", "-grpc", "127.0.0.1:1"},
+		{"-check-account-email", "-check-rpc-tls"},
+		{"-check-account-email", "extra"},
+	} {
+		require.Equal(t, exitUsage, run(args, &stderr))
+	}
+}

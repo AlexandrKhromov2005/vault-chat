@@ -32,6 +32,9 @@ type UserRepository struct {
 	pool *pgxpool.Pool
 }
 
+const userColumns = `id::text, email, username, password_hash, created_at, updated_at,
+email_verified_at, email_verification_required, credential_version`
+
 // NewUserRepository creates a repository on top of the given connection pool.
 func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
@@ -66,16 +69,14 @@ func userCreationError(err error) error {
 // GetByEmail returns the user with the given email. Lookup is
 // case-insensitive (the column is CITEXT). Returns ErrNotFound when absent.
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	const query = `SELECT id::text, email, username, password_hash, created_at, updated_at
-		FROM users WHERE email = $1`
+	const query = `SELECT ` + userColumns + ` FROM users WHERE email = $1`
 
 	return r.scanUser(r.pool.QueryRow(ctx, query, email))
 }
 
 // GetByID returns the user with the given id. Returns ErrNotFound when absent.
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	const query = `SELECT id::text, email, username, password_hash, created_at, updated_at
-		FROM users WHERE id = $1::uuid`
+	const query = `SELECT ` + userColumns + ` FROM users WHERE id = $1::uuid`
 
 	return r.scanUser(r.pool.QueryRow(ctx, query, id))
 }
@@ -141,7 +142,8 @@ func (r *UserRepository) SearchByUsernamePrefix(
 func (r *UserRepository) scanUser(row pgx.Row) (*domain.User, error) {
 	var user domain.User
 	err := row.Scan(&user.ID, &user.Email, &user.Username,
-		&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt, &user.EmailVerifiedAt,
+		&user.EmailVerificationRequired, &user.CredentialVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
