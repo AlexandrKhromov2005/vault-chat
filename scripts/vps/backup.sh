@@ -36,6 +36,7 @@ python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/
 set -- .env.vps secrets deployments/docker-compose.vps.yml
 if [ -f "$VAULT_ROOT/.env.monitoring" ]; then set -- "$@" .env.monitoring deployments/monitoring/app.yml; fi
 if [ -f "$VAULT_ROOT/.env.rpc" ]; then set -- "$@" .env.rpc deployments/docker-compose.mtls.yml; fi
+if [ -f "$VAULT_ROOT/.env.email" ]; then set -- "$@" .env.email deployments/docker-compose.email.yml; fi
 python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/config.tar.gz.age" tar -C "$VAULT_ROOT" -czf - "$@"
 compose config --images > "$backup_dir/images.txt"
 cleanup

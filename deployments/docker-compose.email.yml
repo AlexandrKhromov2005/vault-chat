@@ -1,0 +1,24 @@
+# Explicit opt-in: use with .env.email; see docs/mail.md.
+services:
+  auth:
+    environment:
+      AUTH_MAIL_ENABLED: ${AUTH_MAIL_ENABLED:-true}
+      AUTH_PUBLIC_URL: ${AUTH_PUBLIC_URL:?set AUTH_PUBLIC_URL}
+      AUTH_MAIL_KEY_FILE: /run/secrets/mail/outbox.key
+      AUTH_SMTP_ADDRESS: ${AUTH_SMTP_ADDRESS:?set AUTH_SMTP_ADDRESS}
+      AUTH_SMTP_FROM: ${AUTH_SMTP_FROM:?set AUTH_SMTP_FROM}
+      AUTH_SMTP_USERNAME: ${AUTH_SMTP_USERNAME:-}
+      AUTH_SMTP_PASSWORD_FILE: ${AUTH_SMTP_PASSWORD_FILE-/run/secrets/mail/smtp_password}
+      AUTH_SMTP_TLS_MODE: ${AUTH_SMTP_TLS_MODE:-starttls}
+      AUTH_SMTP_CA_FILE: ${AUTH_SMTP_CA_FILE:-}
+      AUTH_EMAIL_LEGACY_DEADLINE: ${AUTH_EMAIL_LEGACY_DEADLINE:-}
+    networks:
+      - mail-egress
+    volumes:
+      - type: bind
+        source: ../secrets/mail
+        target: /run/secrets/mail
+        read_only: true
+        bind: {create_host_path: false}
+networks:
+  mail-egress: {}

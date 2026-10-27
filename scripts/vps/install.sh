@@ -14,6 +14,7 @@ compose config --quiet
 for service in auth chat media gateway minio; do
     docker image inspect "vault-chat/$service:$(value VAULT_IMAGE_TAG)" >/dev/null
  done
+check_rpc_images
 for site in /etc/nginx/sites-enabled/*; do
     case "${site##*/}" in default|vault-chat|'*') ;; *) echo "Existing nginx site: $site; configure manually" >&2; exit 1;; esac
  done
