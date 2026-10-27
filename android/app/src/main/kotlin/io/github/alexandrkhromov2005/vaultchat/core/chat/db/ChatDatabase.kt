@@ -13,7 +13,8 @@ import java.security.MessageDigest
  */
 @Database(
     entities = [RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class],
-    version = 1,
+    // 2: times in microseconds instead of milliseconds.
+    version = 2,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun dao(): ChatDao

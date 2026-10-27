@@ -9,17 +9,19 @@ import kotlin.math.ceil
  *
  * Background work waits for a token. A request the user is waiting for, such
  * as opening a room, takes one at once; it may run the bucket into debt of at
- * most [burst] tokens, which background work then waits out.
+ * most [burst] tokens, which background work then waits out. Work that can
+ * wait longest takes a token only while more than a reserve is left, so that
+ * it never holds up the work that keeps the data correct.
  */
 class RequestBudget(perMinute: Int, private val burst: Int, private val clock: () -> Long) {
     private val msPerToken = 60_000.0 / perMinute
     private var tokens = burst.toDouble()
     private var updatedAt = clock()
 
-    /** Takes a token for background work, waiting until there is one. */
-    suspend fun take() {
+    /** Takes a token for background work, waiting until there is one beyond [reserve]. */
+    suspend fun take(reserve: Int = 0) {
         while (true) {
-            val wait = tryTake()
+            val wait = tryTake(reserve)
             if (wait <= 0) return
             delay(wait)
         }
@@ -34,13 +36,14 @@ class RequestBudget(perMinute: Int, private val burst: Int, private val clock: (
 
     /** Takes a token and returns 0, or returns how long to wait for one. */
     @Synchronized
-    private fun tryTake(): Long {
+    private fun tryTake(reserve: Int): Long {
         refill()
-        if (tokens >= 1) {
+        val needed = 1.0 + reserve
+        if (tokens >= needed) {
             tokens -= 1
             return 0
         }
-        return ceil((1 - tokens) * msPerToken).toLong().coerceAtLeast(1)
+        return ceil((needed - tokens) * msPerToken).toLong().coerceAtLeast(1)
     }
 
     private fun refill() {

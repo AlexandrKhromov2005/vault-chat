@@ -59,8 +59,9 @@ two messages can share a millisecond.
 Unread counts are local: messages of others after the newest one seen on
 this device, which is when the newest message is on screen. History present
 when a room is first loaded by a sync or by opening it counts as read; a room
-loaded because of a live message shows that message as unread, and a room
-the user has just joined shows all of its loaded messages. When unread
+loaded because of a live message shows that message as unread. In a dialog
+that someone has just opened with the user every message is unread; in a
+channel the user was added to, history from before counts as read. When unread
 messages lie before the stored block, the count is shown as a lower bound
 ("10+").
 
@@ -92,6 +93,10 @@ corrects both.
 
 Live events that need a room refreshed (a gap, a room not loaded yet) are
 coalesced per room: events during a refresh add one more refresh after it.
+A room that an event adds is read from the server outside the event loop and
+outside the room-list lock, which is taken only to store it, so waiting for
+the budget never holds up live events. A room the user left while it was
+being read is not stored.
 
 ## Resource budgets
 
@@ -99,6 +104,7 @@ coalesced per room: events during a refresh add one more refresh after it.
 |---|---|---|
 | Gateway rate limit per user and IP | 120/min, burst 30 (server default) | Sync must stay well inside it |
 | Background requests (listing, preload, catch-up, profiles) | 60/min, burst 15 (token bucket) | Half of the Gateway's limit stays for the user |
+| Profiles | Only while more than 5 tokens are left | Listing, catch-up and joined rooms never wait behind names |
 | Requests the user waits for (opening a room, older history) | Not delayed; they draw on the same bucket, at most 15 into debt | Background work waits them out |
 | Concurrent sync requests | 2 | Leaves room for the user's own requests |
 | Room list | 100 per page, at most 50 pages | 5000 rooms; beyond that the list is stored but nothing is deleted |

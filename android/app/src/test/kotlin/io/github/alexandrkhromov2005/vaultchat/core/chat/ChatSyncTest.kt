@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
@@ -405,5 +406,86 @@ class ChatSyncTest {
 
         val reads = server.calls().count { it.startsWith("messages $room") }
         assertTrue("$reads history requests for one room", reads <= 2)
+    }
+
+    private suspend fun within(ms: Long, condition: suspend () -> Boolean): Boolean =
+        withTimeoutOrNull(ms) { while (!condition()) delay(20); true } ?: false
+
+    private fun dialogs() = (1..100).forEach { n -> server.addDialog(n, server.id(4, n), "user$n") }
+
+    // Second review: profiles filled the background budget, and work that
+    // keeps the data correct waited behind them.
+    @Test
+    fun aGapIsCaughtUpWhileProfilesLoad() = runBlocking {
+        dialogs()
+        val channel = server.addChannel(200)
+        val sync = sync(ChatSync.Limits(preloadedRooms = 0))
+        assertNull(sync.syncNow())
+        sync.openRoom(channel)
+
+        server.post(channel, sender = peer)
+        // The first message's event was lost.
+        sync.onEvent(Frame.MessageCreated(channel, server.post(channel, sender = peer)))
+
+        assertTrue("gap filled within 3 s", within(3_000) { stored(channel) == listOf(1L, 2L) })
+    }
+
+    @Test
+    fun liveEventsAreNotHeldBackByAJoinedRoom() = runBlocking {
+        dialogs()
+        val channel = server.addChannel(200)
+        val sync = sync(ChatSync.Limits(preloadedRooms = 0))
+        assertNull(sync.syncNow())
+        sync.openRoom(channel)
+
+        sync.onEvent(Frame.MemberAdded(server.addChannel(201), me))
+        sync.onEvent(Frame.MessageCreated(channel, server.post(channel, sender = peer)))
+
+        assertTrue("a live message of a loaded room is stored within 2 s", within(2_000) { stored(channel).isNotEmpty() })
+    }
+
+    @Test
+    fun aPreloadedRoomOpenedDuringTheFirstSyncOpensAtOnce() = runBlocking {
+        dialogs()
+        val top = server.rooms.first().roomId
+        val sync = sync()
+        scope.launch { sync.syncNow() }
+        delay(300)
+
+        assertNotNull("openRoom waited for the background preload", withTimeoutOrNull(3_000) { sync.openRoom(top) })
+    }
+
+    @Test
+    fun aRoomLeftWhileItWasBeingReadIsNotStored() = runBlocking {
+        val sync = sync()
+        assertNull(sync.syncNow())
+        val joined = server.addChannel(1)
+        server.intercept = { call ->
+            // The answer is on its way when the user leaves the room.
+            if (call == "room $joined") {
+                sync.onEvent(Frame.MemberGone(joined, me))
+                Thread.sleep(300)
+            }
+            null
+        }
+
+        sync.onEvent(Frame.MemberAdded(joined, me))
+        eventually { server.calls().contains("room $joined") }
+        delay(1_000)
+
+        assertNull(dao.room(joined))
+    }
+
+    @Test
+    fun theHistoryOfAChannelTheUserWasAddedToCountsAsRead() = runBlocking {
+        val sync = sync()
+        assertNull(sync.syncNow())
+        val channel = server.addChannel(1)
+        server.postMany(channel, 3, sender = peer)
+
+        sync.onEvent(Frame.MemberAdded(channel, me))
+        eventually { stored(channel).size == 3 }
+
+        assertEquals(0, unread(channel))
     }
 }

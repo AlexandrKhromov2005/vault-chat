@@ -2,6 +2,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.chat
 
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ProfileEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
@@ -42,7 +43,10 @@ data class SyncStatus(val running: Boolean, val failure: ApiException?)
  * Requests run at most [CONCURRENT_REQUESTS] at a time and pause together
  * after a 429. Background work also waits for [RequestBudget], which keeps
  * sync below the Gateway's limit per user; requests the user waits for,
- * opening a room and reading older history, do not wait for it.
+ * opening a room and reading older history, do not wait for it, and
+ * profiles leave a reserve for everything else. Rooms that events add are
+ * read outside the event loop and outside [listLock], so that waiting for
+ * the budget holds up neither live events nor the room list.
  */
 class ChatSync(
     private val dao: ChatDao,
@@ -64,10 +68,15 @@ class ChatSync(
         /** Half of the Gateway's default per-user limit (120/min, burst 30). */
         val requestsPerMinute: Int = 60,
         val burst: Int = 15,
+        /** Tokens that profile requests leave to the rest of sync. */
+        val profileReserve: Int = 5,
     )
 
-    /** Whether the user waits for a request, or it may wait for the budget. */
-    private enum class Priority { USER, BACKGROUND }
+    /**
+     * Whether the user waits for a request; otherwise whether it keeps the
+     * stored data correct, or only fills in names.
+     */
+    private enum class Priority { USER, BACKGROUND, PROFILE }
 
     /** A refresh of a room that live events asked for; see [scheduleRefresh]. */
     private class PendingRefresh(var readThrough: Long?) {
@@ -80,6 +89,13 @@ class ChatSync(
     private val connections = Semaphore(CONCURRENT_REQUESTS)
     private val rate = RequestBudget(limits.requestsPerMinute, limits.burst, clock)
     private val pending = HashMap<String, PendingRefresh>()
+
+    // Rooms being added after events, with the lowest readThrough asked for.
+    private val adding = HashMap<String, Long?>()
+
+    // How often the user has left each room; a room read from the server
+    // before the user left it is not stored afterwards.
+    private val departures = ConcurrentHashMap<String, Long>()
     private val profilesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     @Volatile
@@ -238,34 +254,56 @@ class ChatSync(
                     ChatDao.Following.UNKNOWN_ROOM -> addRoom(frame.roomId, readThrough)
                 }
             }
-            // Everything in a room the user has just joined is new to them.
-            is Frame.MemberAdded -> if (frame.userId == me) addRoom(frame.roomId, readThrough = 0)
-            is Frame.MemberGone -> if (frame.userId == me) listLock.withLock { dao.deleteRooms(listOf(frame.roomId)) }
+            is Frame.MemberAdded -> if (frame.userId == me) addRoom(frame.roomId, readThrough = null)
+            is Frame.MemberGone -> if (frame.userId == me) {
+                departures.merge(frame.roomId, 1L, Long::plus)
+                listLock.withLock { dao.deleteRooms(listOf(frame.roomId)) }
+            }
             is Frame.Ready -> Unit
         }
     }
 
-    /** Lists a room the user has just joined, then loads its messages. */
-    private suspend fun addRoom(roomId: String, readThrough: Long) {
-        val added = try {
-            listLock.withLock {
-                if (dao.room(roomId) != null) return@withLock true
-                // Not forRoom: its 404 handling takes listLock, which is held here.
-                val room = try {
+    /**
+     * Lists a room the user has just joined, then loads its messages, in the
+     * background. Further events for the room while it is being added only
+     * lower [readThrough], the position up to which its messages count as
+     * read; without one, a new dialog is unread and a channel's history is
+     * not.
+     */
+    private fun addRoom(roomId: String, readThrough: Long?) {
+        synchronized(adding) {
+            if (roomId in adding) {
+                adding[roomId] = listOfNotNull(adding[roomId], readThrough).minOrNull()
+                return
+            }
+            adding[roomId] = readThrough
+        }
+        val departed = departures[roomId] ?: 0
+        scope.launch {
+            try {
+                val known = dao.room(roomId) != null
+                val room = if (known) null else try {
                     request(Priority.BACKGROUND) { room(it, roomId) }
                 } catch (e: ApiException) {
-                    if (e.status == 404) return@withLock false
-                    throw e
+                    // 404: not a member any more. Otherwise the next sync lists it.
+                    return@launch
                 }
-                dao.addRoom(room.toEntity(me, activity = 0))
-                room.participantIds?.filter { it != me }?.let { loadProfiles(it) }
-                true
+                if (room != null) {
+                    val stored = listLock.withLock {
+                        if ((departures[roomId] ?: 0) != departed) return@withLock false
+                        if (dao.room(roomId) == null) dao.addRoom(room.toEntity(me, activity = 0))
+                        true
+                    }
+                    if (!stored) return@launch
+                    room.participantIds?.filter { it != me }?.let { loadProfiles(it) }
+                }
+                val asked = synchronized(adding) { adding[roomId] }
+                val dialog = room?.kind == RoomEntity.DIRECT
+                scheduleRefresh(roomId, listOfNotNull(asked, if (dialog) 0L else null).minOrNull())
+            } finally {
+                synchronized(adding) { adding.remove(roomId) }
             }
-        } catch (e: ApiException) {
-            // Unreachable for now: the next sync lists the room.
-            false
         }
-        if (added) scheduleRefresh(roomId, readThrough)
     }
 
     /**
@@ -373,7 +411,7 @@ class ChatSync(
             scope.launch {
                 try {
                     val profile = try {
-                        request(Priority.BACKGROUND) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
+                        request(Priority.PROFILE) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
                     } catch (e: ApiException) {
                         if (e.status != 404) return@launch
                         ProfileEntity(userId, null)
@@ -391,7 +429,11 @@ class ChatSync(
         priority: Priority,
         call: suspend GatewayApi.(authorization: String) -> Response<T>,
     ): T {
-        if (priority == Priority.USER) rate.takeNow() else rate.take()
+        when (priority) {
+            Priority.USER -> rate.takeNow()
+            Priority.BACKGROUND -> rate.take()
+            Priority.PROFILE -> rate.take(reserve = limits.profileReserve)
+        }
         return connections.withPermit {
             val wait = pausedUntil - clock()
             if (wait > 0) delay(wait)
