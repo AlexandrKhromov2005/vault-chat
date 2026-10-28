@@ -91,6 +91,67 @@ abstract class ChatDao {
     @Query("UPDATE rooms SET activity = :activity, last_message_at = MAX(COALESCE(last_message_at, 0), :at) WHERE room_id = :roomId")
     protected abstract suspend fun bump(roomId: String, activity: Long, at: Long)
 
+    @Query("UPDATE rooms SET activity = :activity WHERE room_id = :roomId")
+    protected abstract suspend fun setActivity(roomId: String, activity: Long)
+
+    // The outgoing queue (docs/android/send.md).
+
+    @Query("SELECT * FROM outbox WHERE room_id = :roomId ORDER BY position")
+    abstract fun outgoing(roomId: String): Flow<List<OutgoingEntity>>
+
+    @Query("SELECT * FROM outbox WHERE client_message_id = :clientMessageId")
+    abstract suspend fun outgoingRow(clientMessageId: String): OutgoingEntity?
+
+    @Query("SELECT * FROM outbox WHERE room_id = :roomId ORDER BY position")
+    abstract suspend fun storedOutgoing(roomId: String): List<OutgoingEntity>
+
+    /** Rooms with a message waiting to be sent, the longest waiting first. */
+    @Query("SELECT room_id FROM outbox WHERE state = 'queued' GROUP BY room_id ORDER BY MIN(position)")
+    abstract suspend fun queuedRooms(): List<String>
+
+    /** The next message of a room to send: the oldest queued one. */
+    @Query("SELECT * FROM outbox WHERE room_id = :roomId AND state = 'queued' ORDER BY position LIMIT 1")
+    abstract suspend fun nextQueued(roomId: String): OutgoingEntity?
+
+    @Query("SELECT COUNT(*) FROM outbox WHERE state = 'queued'")
+    abstract fun queuedCount(): Flow<Int>
+
+    /** Messages the server has not stored, as far as this device knows. */
+    @Query("SELECT COUNT(*) FROM outbox WHERE state != 'sent'")
+    abstract fun unsentCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM outbox")
+    protected abstract suspend fun maxPosition(): Long
+
+    @Insert
+    protected abstract suspend fun insertOutgoing(row: OutgoingEntity)
+
+    @Query("DELETE FROM outbox WHERE client_message_id = :clientMessageId")
+    protected abstract suspend fun deleteOutgoing(clientMessageId: String)
+
+    @Query("UPDATE outbox SET state = 'sent', sequence = :sequence, error = NULL WHERE client_message_id = :clientMessageId AND state = 'queued'")
+    protected abstract suspend fun setSent(clientMessageId: String, sequence: Long)
+
+    @Query("UPDATE outbox SET state = 'failed', error = :error WHERE client_message_id = :clientMessageId AND state = 'queued'")
+    abstract suspend fun markFailed(clientMessageId: String, error: String)
+
+    @Query("DELETE FROM outbox WHERE client_message_id = :clientMessageId AND state = 'failed'")
+    abstract suspend fun deleteFailed(clientMessageId: String)
+
+    /**
+     * Deletes the rows of a room that its stored block now shows: those that a
+     * stored message of their sender matches by key, and sent rows within or
+     * below the block. The key alone is not enough: keys are per sender, and
+     * another member may use the same one.
+     */
+    @Query(
+        "DELETE FROM outbox WHERE room_id = :roomId AND (" +
+            "EXISTS (SELECT 1 FROM messages m WHERE m.room_id = outbox.room_id " +
+            "AND m.client_message_id = outbox.client_message_id AND m.sender_id = outbox.sender_id) " +
+            "OR (state = 'sent' AND sequence <= (SELECT newest FROM timelines t WHERE t.room_id = outbox.room_id)))",
+    )
+    protected abstract suspend fun resolveOutgoing(roomId: String)
+
     /**
      * Stores a room listing in its order, above every stored room; their
      * activity is assigned here. With [complete], rooms that are not listed
@@ -113,6 +174,38 @@ abstract class ChatDao {
     @Transaction
     open suspend fun addRoom(room: RoomEntity) {
         upsertRooms(listOf(room.copy(activity = maxActivity() + 1)))
+    }
+
+    /**
+     * Queues a message at the end of the queue and moves its room to the top
+     * of the list; false if the room is not stored.
+     */
+    @Transaction
+    open suspend fun enqueue(row: OutgoingEntity): Boolean {
+        if (room(row.roomId) == null) return false
+        insertOutgoing(row.copy(position = maxPosition() + 1, state = OutgoingEntity.QUEUED, sequence = null, error = null))
+        setActivity(row.roomId, maxActivity() + 1)
+        return true
+    }
+
+    /** Records that the server stored a queued message as [sequence]. */
+    @Transaction
+    open suspend fun markSent(roomId: String, clientMessageId: String, sequence: Long) {
+        setSent(clientMessageId, sequence)
+        resolveOutgoing(roomId)
+    }
+
+    /**
+     * Queues a failed message again at the end of the queue, under
+     * [clientMessageId] (its own key, or a new one after a conflict).
+     * Returns false if the row is not failed any more.
+     */
+    @Transaction
+    open suspend fun requeue(failedId: String, clientMessageId: String): Boolean {
+        val row = outgoingRow(failedId)?.takeIf { it.state == OutgoingEntity.FAILED } ?: return false
+        deleteOutgoing(failedId)
+        insertOutgoing(row.copy(clientMessageId = clientMessageId, position = maxPosition() + 1, state = OutgoingEntity.QUEUED, error = null))
+        return true
     }
 
     open suspend fun deleteRooms(roomIds: List<String>) {
@@ -161,6 +254,7 @@ abstract class ChatDao {
         if (update.replace) deleteMessages(roomId)
         upsertTimeline(update.timeline)
         insertMessages(update.insert)
+        resolveOutgoing(roomId)
     }
 
     private companion object {
@@ -168,7 +262,10 @@ abstract class ChatDao {
             "m.attachments AS last_attachments, m.created_at AS last_created_at, " +
             "(SELECT COUNT(*) FROM messages u WHERE u.room_id = r.room_id AND u.sequence > t.last_read " +
             "AND u.sender_id != :me) AS unread, " +
-            "COALESCE(t.oldest > t.last_read + 1, 0) AS unread_more " +
+            "COALESCE(t.oldest > t.last_read + 1, 0) AS unread_more, " +
+            "(SELECT o.text FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_text, " +
+            "(SELECT o.state FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_state, " +
+            "(SELECT o.created_at FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_created_at " +
             "FROM rooms r LEFT JOIN timelines t ON t.room_id = r.room_id " +
             "LEFT JOIN messages m ON m.room_id = r.room_id AND m.sequence = t.newest " +
             "LEFT JOIN profiles p ON p.user_id = r.peer_id"

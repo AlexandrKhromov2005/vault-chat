@@ -112,6 +112,7 @@ dependencies {
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.room.runtime)
     implementation(libs.room.paging)
+    implementation(libs.work.runtime)
     implementation(libs.paging.runtime)
     implementation(libs.paging.compose)
     ksp(libs.room.compiler)

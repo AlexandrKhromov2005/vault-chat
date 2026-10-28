@@ -1,6 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.core.chat
 
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ProfileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
@@ -55,8 +56,10 @@ class ChatSync(
     private val requests: ChatRequests,
     private val scope: CoroutineScope,
     /** A monotonic clock in milliseconds, for rate-limit pauses. */
-    private val clock: () -> Long,
+    clock: () -> Long,
     val limits: Limits = Limits(),
+    /** The rate-limit pause, shared with sending. */
+    val gate: RateGate = RateGate(clock),
 ) {
     /** Page sizes and budgets of docs/android/sync.md. */
     data class Limits(
@@ -103,9 +106,6 @@ class ChatSync(
     private val departures = ConcurrentHashMap<String, Long>()
     private val profilesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    @Volatile
-    private var pausedUntil = 0L
-
     private val mutableStatus = MutableStateFlow(SyncStatus(running = false, failure = null))
     val status: StateFlow<SyncStatus> = mutableStatus.asStateFlow()
 
@@ -141,6 +141,14 @@ class ChatSync(
     /** Queues a live event from the WebSocket. */
     fun onEvent(frame: Frame) {
         if (events.trySend(frame).isFailure) requestSync()
+    }
+
+    /**
+     * Applies a message the server has just stored for this user, like a
+     * live one: it extends the room, or a gap starts a catch-up.
+     */
+    suspend fun receive(entity: MessageEntity) {
+        applyCreated(entity.roomId, entity)
     }
 
     /**
@@ -194,7 +202,7 @@ class ChatSync(
         mutableStatus.value = SyncStatus(running = false, failure = failure)
         if (failure?.status == 429) {
             scope.launch {
-                delay(pausedUntil - clock())
+                delay(gate.remaining())
                 requestSync()
             }
         }
@@ -259,13 +267,7 @@ class ChatSync(
                 } catch (e: ApiException) {
                     return
                 }
-                // A room loaded because of this message shows it as unread.
-                val readThrough = message.sequence - 1
-                when (dao.applyFollowing(frame.roomId, listOf(message), live = true)) {
-                    ChatDao.Following.APPLIED -> loadProfiles(listOf(message.senderId))
-                    ChatDao.Following.GAP, ChatDao.Following.NOT_LOADED -> scheduleRefresh(frame.roomId, readThrough)
-                    ChatDao.Following.UNKNOWN_ROOM -> addRoom(frame.roomId, readThrough)
-                }
+                applyCreated(frame.roomId, message)
             }
             is Frame.MemberAdded -> if (frame.userId == me) addRoom(frame.roomId, readThrough = null)
             is Frame.MemberGone -> if (frame.userId == me) {
@@ -273,6 +275,16 @@ class ChatSync(
                 listLock.withLock { dao.deleteRooms(listOf(frame.roomId)) }
             }
             is Frame.Ready -> Unit
+        }
+    }
+
+    private suspend fun applyCreated(roomId: String, message: MessageEntity) {
+        // A room loaded because of this message shows it as unread.
+        val readThrough = message.sequence - 1
+        when (dao.applyFollowing(roomId, listOf(message), live = true)) {
+            ChatDao.Following.APPLIED -> loadProfiles(listOf(message.senderId))
+            ChatDao.Following.GAP, ChatDao.Following.NOT_LOADED -> scheduleRefresh(roomId, readThrough)
+            ChatDao.Following.UNKNOWN_ROOM -> addRoom(roomId, readThrough)
         }
     }
 
@@ -473,16 +485,14 @@ class ChatSync(
             Priority.PROFILE -> rate.take(reserve = limits.profileReserve)
         }
         return connections.withPermit {
-            val wait = pausedUntil - clock()
+            val wait = gate.remaining()
             if (wait > 0) delay(wait)
             try {
                 requests.send(call)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ApiException) {
-                if (e.status == 429) {
-                    pausedUntil = clock() + (e.retryAfterSeconds ?: DEFAULT_RETRY_AFTER_SECONDS) * 1000
-                }
+                if (e.status == 429) gate.pause(e.retryAfterSeconds)
                 throw e
             }
         }
@@ -494,6 +504,5 @@ class ChatSync(
         /** Rooms a sync loads or catches up at the same time. */
         const val CONCURRENT_ROOMS = 2
         const val EVENT_BUFFER = 1024
-        private const val DEFAULT_RETRY_AFTER_SECONDS = 30L
     }
 }

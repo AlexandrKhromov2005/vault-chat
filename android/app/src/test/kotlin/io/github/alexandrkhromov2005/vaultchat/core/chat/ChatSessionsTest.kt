@@ -3,6 +3,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.chat
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
@@ -11,6 +12,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,9 +60,28 @@ class ChatSessionsTest {
             throw UnsupportedOperationException()
     }
 
+    // A session in the background with a network, as the background job finds it.
+    private fun backgroundDeps(gateway: FakeChatServer) = object : ChatSessionDeps by deps {
+        override val network: StateFlow<Any?> = MutableStateFlow(Unit)
+
+        override suspend fun <T : Any> send(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T =
+            gateway.requests.send(request)
+    }
+
     @After
     fun tearDown() {
         scope.cancel()
+    }
+
+    /** Leaves a queued message behind, as a process killed after queuing it would. */
+    private suspend fun queueAMessage(gateway: FakeChatServer): String {
+        val roomId = gateway.addChannel(1)
+        val database = databases.open(server.toString(), alice.userId)
+        val dao = database.dao()
+        dao.storeRoomList(listOf(RoomEntity(roomId, RoomEntity.CHANNEL, "general", null, false, 0, null, null, 0)), complete = true)
+        dao.enqueue(OutgoingEntity(gateway.id(4, 1), roomId, alice.userId, 0, "hello", 0, OutgoingEntity.QUEUED))
+        database.close()
+        return roomId
     }
 
     private suspend fun storeARoom() {
@@ -102,6 +123,43 @@ class ChatSessionsTest {
         screen.close()
         withTimeout(10_000) { while (fileName in context.databaseList()) delay(50) }
         assertFalse(fileName in context.databaseList())
+    }
+
+    @Test
+    fun theBackgroundJobSendsTheQueueOfTheStoredSession() = runBlocking {
+        val gateway = FakeChatServer(alice.userId)
+        val roomId = queueAMessage(gateway)
+        val state = MutableStateFlow<SessionState>(SessionState.Restoring)
+        val sessions = ChatSessions(databases, backgroundDeps(gateway), scope)
+        sessions.follow(state)
+
+        val job = scope.async { sendQueuedMessages(sessions, budgetMs = 5_000) }
+        delay(200)
+        // The job waits for the stored session to be known.
+        assertFalse(job.isCompleted)
+        state.value = alice
+
+        assertTrue(job.await())
+        assertEquals(listOf("hello"), gateway.sent(roomId).map { it.text })
+    }
+
+    @Test
+    fun theBackgroundJobAsksForAnotherRunWhenItCannotSendInTime() = runBlocking {
+        val gateway = FakeChatServer(alice.userId)
+        val roomId = queueAMessage(gateway)
+        gateway.intercept = { if (it == "send $roomId") 503 else null }
+        val sessions = ChatSessions(databases, backgroundDeps(gateway), scope)
+        sessions.follow(MutableStateFlow(alice))
+
+        assertFalse(sendQueuedMessages(sessions, budgetMs = 500))
+    }
+
+    @Test
+    fun theBackgroundJobEndsAtOnceWithoutASession() = runBlocking {
+        val sessions = ChatSessions(databases, deps, scope)
+        sessions.follow(MutableStateFlow(SessionState.SignedOut(SessionState.Reason.NONE)))
+
+        assertTrue(withTimeout(1_000) { sendQueuedMessages(sessions, budgetMs = 60_000) })
     }
 
     @Test

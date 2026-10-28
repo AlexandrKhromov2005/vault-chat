@@ -27,7 +27,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** The app's long-lived objects, built once per process on the main thread. */
-class AppContainer(context: Context) {
+class AppContainer(private val context: Context) {
 
     /** Work that must outlive a screen, such as ending a session on the server. */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -76,6 +76,10 @@ class AppContainer(context: Context) {
 
         override fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket =
             gateway.webSocket(session.server, listener)
+
+        override fun scheduleBackgroundSend() {
+            OutboxWorker.schedule(context)
+        }
     }, appScope).also { it.follow(session.state) }
 }
 

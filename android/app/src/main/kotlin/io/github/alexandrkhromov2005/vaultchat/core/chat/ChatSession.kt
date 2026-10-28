@@ -53,6 +53,9 @@ interface ChatSessionDeps {
     suspend fun renew(session: SessionState.SignedIn, rejected: String): AccessGrant
 
     fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket
+
+    /** Makes sure queued messages are sent even if the app leaves the screen (OutboxWorker). */
+    fun scheduleBackgroundSend() {}
 }
 
 /**
@@ -76,10 +79,14 @@ class ChatSession(
     private val dao: ChatDao = database.dao()
     val me: String = signedIn.userId
 
-    val sync = ChatSync(dao, me, object : ChatRequests {
+    private val requests = object : ChatRequests {
         override suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
             deps.send(signedIn, request)
-    }, scope, deps.elapsed)
+    }
+
+    val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
+
+    val outbox = Outbox(dao, me, requests, sync, scope, deps.network, onQueued = deps::scheduleBackgroundSend)
 
     val realtime = Realtime(
         userId = me,
@@ -90,7 +97,10 @@ class ChatSession(
         },
         open = { listener -> deps.openSocket(signedIn, listener) },
         elapsed = deps.elapsed,
-        onReady = sync::requestSync,
+        onReady = {
+            sync.requestSync()
+            outbox.kick()
+        },
         onFrame = sync::onEvent,
     )
 
@@ -115,6 +125,7 @@ class ChatSession(
                 .distinctUntilChanged()
                 .collectLatest { network ->
                     if (network == null) return@collectLatest
+                    outbox.kick()
                     // A sync also runs without the WebSocket, if it does not
                     // become live soon; its ready triggers one otherwise.
                     launch {

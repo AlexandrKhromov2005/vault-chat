@@ -86,6 +86,9 @@ data class MessageDto(
 )
 
 @Serializable
+data class SendMessageRequest(@SerialName("client_message_id") val clientMessageId: String, val text: String)
+
+@Serializable
 data class MessagePage(val messages: List<MessageDto>, @SerialName("next_cursor") val nextCursor: String)
 
 @Serializable

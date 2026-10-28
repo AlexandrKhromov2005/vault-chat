@@ -72,6 +72,11 @@ server and user (`chat-<hash>.db`), which the screens read through Flow and
 Paging. `ChatSync` fills it from REST and the WebSocket; `Realtime` keeps the
 WebSocket open while the app is visible. The design, request budgets and
 failure behaviour are in [docs/android/sync.md](../docs/android/sync.md).
+
+Messages are queued in the same database before they are sent (`Outbox`),
+in order within a room and with a retry key that the server deduplicates;
+a WorkManager job (`OutboxWorker`) sends what is left when the app is not on
+screen. See [docs/android/send.md](../docs/android/send.md).
 The schema of each database version is exported to `app/schemas` for
 migration tests; there is no migration yet because no version has been
 released.

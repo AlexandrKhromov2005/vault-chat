@@ -78,6 +78,26 @@
     <string name="sender_unknown">Участник</string>
     <string name="day_today">Сегодня</string>
     <string name="day_yesterday">Вчера</string>
+    <string name="composer_hint">Сообщение</string>
+    <string name="composer_send">Отправить</string>
+    <string name="composer_too_long">%1$d / %2$d</string>
+    <string name="composer_invalid">Текст содержит недопустимые символы.</string>
+    <string name="message_queued">Отправляется</string>
+    <string name="message_sent">Отправлено</string>
+    <string name="message_failed">Не отправлено</string>
+    <string name="message_failed_no_access">Не отправлено: нет доступа к комнате</string>
+    <string name="message_failed_rejected">Не отправлено: сервер отклонил сообщение</string>
+    <string name="message_retry">Отправить ещё раз</string>
+    <string name="message_copy">Скопировать</string>
+    <string name="message_delete">Удалить</string>
+    <string name="logout_title">Выйти из аккаунта?</string>
+    <string name="logout_cancel">Отмена</string>
+    <plurals name="logout_unsent">
+        <item quantity="one">%1$d сообщение не отправлено и будет удалено с устройства.</item>
+        <item quantity="few">%1$d сообщения не отправлены и будут удалены с устройства.</item>
+        <item quantity="many">%1$d сообщений не отправлены и будут удалены с устройства.</item>
+        <item quantity="other">%1$d сообщения не отправлены и будут удалены с устройства.</item>
+    </plurals>
     <plurals name="attachments">
         <item quantity="one">%1$d вложение</item>
         <item quantity="few">%1$d вложения</item>

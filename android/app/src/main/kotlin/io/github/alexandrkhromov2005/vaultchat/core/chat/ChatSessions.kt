@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -39,6 +40,16 @@ class ChatSessions(
                 cleanUp()
             }
         }
+    }
+
+    /**
+     * The chat of the current session once the stored session is known, or
+     * null when nobody is signed in.
+     */
+    suspend fun awaitCurrent(): ChatSession? {
+        val state = synchronized(this) { state } ?: return null
+        val signedIn = state.first { it != SessionState.Restoring } as? SessionState.SignedIn ?: return null
+        return get(signedIn)
     }
 
     /** The chat of [signedIn], created when first asked for. */

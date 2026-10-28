@@ -71,6 +71,48 @@ data class MessageEntity(
     val attachmentCount: Int get() = if (attachments.isEmpty()) 0 else attachments.count { it == ',' } + 1
 }
 
+/**
+ * A message of this user that is not yet part of its room's stored block
+ * (docs/android/send.md). [position] orders the queue; [clientMessageId] is
+ * the retry key and never changes while the row is retried, except after a
+ * conflict. A row is deleted once a stored message of [senderId] with the same
+ * key is in the room, or once the block reaches a [SENT] row's [sequence].
+ */
+@Entity(
+    tableName = "outbox",
+    foreignKeys = [ForeignKey(RoomEntity::class, ["room_id"], ["room_id"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("room_id", "position"), Index("position")],
+)
+data class OutgoingEntity(
+    @PrimaryKey @ColumnInfo(name = "client_message_id") val clientMessageId: String,
+    @ColumnInfo(name = "room_id") val roomId: String,
+    @ColumnInfo(name = "sender_id") val senderId: String,
+    val position: Long,
+    val text: String,
+    /** Local time of queuing, microseconds since the epoch like the server's times. */
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    val state: String,
+    /** The sequence the server gave it; set in [SENT]. */
+    val sequence: Long? = null,
+    /** Why the server rejected it; set in [FAILED]. */
+    val error: String? = null,
+) {
+    companion object {
+        /** Waiting to be sent, or being sent. */
+        const val QUEUED = "queued"
+
+        /** Stored by the server, but the room's block does not reach it yet. */
+        const val SENT = "sent"
+
+        /** Rejected by the server; sent again only when the user asks. */
+        const val FAILED = "failed"
+
+        const val ERROR_INVALID = "invalid"
+        const val ERROR_NO_ACCESS = "no_access"
+        const val ERROR_CONFLICT = "conflict"
+    }
+}
+
 /** A public profile; [username] is null for an account that no longer exists. */
 @Entity(tableName = "profiles")
 data class ProfileEntity(
@@ -89,6 +131,10 @@ data class RoomListItem(
     val unread: Int,
     /** Whether unread messages older than the stored block exist, so that [unread] is a lower bound. */
     @ColumnInfo(name = "unread_more") val unreadMore: Boolean,
+    /** The last queued message of the room, which is newer than any stored one. */
+    @ColumnInfo(name = "pending_text") val pendingText: String?,
+    @ColumnInfo(name = "pending_state") val pendingState: String?,
+    @ColumnInfo(name = "pending_created_at") val pendingCreatedAt: Long?,
 )
 
 /** A message with its sender's name. */

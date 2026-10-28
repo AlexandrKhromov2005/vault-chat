@@ -56,6 +56,14 @@ interface GatewayApi {
         @Query("limit") limit: Int,
     ): Response<MessagePage>
 
+    /** Stores a message; a repeat with the same key returns the original (docs/chat/messages.md). */
+    @POST("api/v1/rooms/{room_id}/messages")
+    suspend fun sendMessage(
+        @Header("Authorization") authorization: String,
+        @Path("room_id") roomId: String,
+        @Body body: SendMessageRequest,
+    ): Response<MessageDto>
+
     @GET("api/v1/users/{user_id}")
     suspend fun user(@Header("Authorization") authorization: String, @Path("user_id") userId: String): Response<PublicProfile>
 }

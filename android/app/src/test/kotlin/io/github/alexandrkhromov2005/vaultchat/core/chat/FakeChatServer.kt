@@ -13,6 +13,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.Registration
 import io.github.alexandrkhromov2005.vaultchat.core.net.RequestProgress
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomPage
+import io.github.alexandrkhromov2005.vaultchat.core.net.SendMessageRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.TokenPair
 import io.github.alexandrkhromov2005.vaultchat.core.net.User
 import io.github.alexandrkhromov2005.vaultchat.core.net.call
@@ -42,6 +43,17 @@ class FakeChatServer(val me: String) : GatewayApi {
     /** Answers a call with this HTTP error status instead, when it returns one. */
     @Volatile
     var intercept: (String) -> Int? = { null }
+
+    /**
+     * Runs after a send has been stored (or found as a repeat), before the
+     * answer; throwing an IOException here loses the answer.
+     */
+    @Volatile
+    var afterSend: suspend (MessageDto) -> Unit = {}
+
+    /** What a send answers instead of the stored message. */
+    @Volatile
+    var reply: (MessageDto) -> MessageDto = { it }
 
     /** Runs after a room page has been prepared, before it is returned. */
     @Volatile
@@ -82,13 +94,20 @@ class FakeChatServer(val me: String) : GatewayApi {
     /** Stores a message and moves its room to the top. */
     @Synchronized
     fun post(roomId: String, sender: String = me, text: String = "text"): MessageDto {
+        val n = messages.getValue(roomId).size + 1
+        return store(roomId, sender, id(3, n + roomId.hashCode().and(0xffff) * 1000), "$text $n")
+    }
+
+    /** Stores a message with exactly this key and text, and moves its room to the top. */
+    @Synchronized
+    fun store(roomId: String, sender: String, clientMessageId: String, text: String): MessageDto {
         val list = messages.getValue(roomId)
         val message = MessageDto(
             messageId = id(2, list.size + 1 + roomId.hashCode().and(0xffff) * 1000),
             roomId = roomId,
             senderId = sender,
-            clientMessageId = id(3, list.size + 1),
-            text = "$text ${list.size + 1}",
+            clientMessageId = clientMessageId,
+            text = text,
             sequence = list.size + 1L,
             createdAt = tick(),
         )
@@ -151,6 +170,27 @@ class FakeChatServer(val me: String) : GatewayApi {
             }
         }
     }
+
+    /** Stores by (room, sender, key) like Chat: a repeat returns the original, another text is a conflict. */
+    override suspend fun sendMessage(authorization: String, roomId: String, body: SendMessageRequest): Response<MessageDto> {
+        log += "send $roomId ${body.clientMessageId}"
+        intercept("send $roomId")?.let { return error(it) }
+        val message = synchronized(this) {
+            if (rooms.none { it.roomId == roomId }) return error(404)
+            val existing = messages.getValue(roomId).firstOrNull { it.senderId == me && it.clientMessageId == body.clientMessageId }
+            when {
+                existing == null -> store(roomId, me, body.clientMessageId, body.text)
+                existing.text != body.text -> return error(409)
+                else -> existing
+            }
+        }
+        afterSend(message)
+        return ok(reply(message))
+    }
+
+    /** The messages of [me] in a room, oldest first. */
+    @Synchronized
+    fun sent(roomId: String): List<MessageDto> = messages.getValue(roomId).filter { it.senderId == me }
 
     override suspend fun user(authorization: String, userId: String): Response<PublicProfile> {
         log += "user $userId"

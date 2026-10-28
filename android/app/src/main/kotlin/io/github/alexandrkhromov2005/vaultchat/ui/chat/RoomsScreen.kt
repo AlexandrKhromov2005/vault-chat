@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -36,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -52,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -80,6 +84,10 @@ class RoomsViewModel(
 
     fun refresh() = chat.sync.requestSync()
 
+    /** Messages that signing out would delete unsent. */
+    val unsent: StateFlow<Int> = chat.outbox.unsentCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0)
+
     // Ending the session on the server must not stop when this screen goes away.
     fun logout() {
         appScope.launch { logout.invoke() }
@@ -102,11 +110,15 @@ fun RoomsScreen(
     val rooms by model.rooms.collectAsStateWithLifecycle()
     val connection by model.connection.collectAsStateWithLifecycle()
     val refreshing by model.refreshing.collectAsStateWithLifecycle()
+    val unsent by model.unsent.collectAsStateWithLifecycle()
+    var confirmLogout by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { TitleWithStatus(stringResource(R.string.rooms_title), connectionText(connection)) },
-                actions = { AccountMenu(username, server, onLogout = model::logout) },
+                actions = {
+                    AccountMenu(username, server, onLogout = { if (unsent > 0) confirmLogout = true else model.logout() })
+                },
             )
         },
     ) { padding ->
@@ -127,6 +139,32 @@ fun RoomsScreen(
             }
         }
     }
+    if (confirmLogout) {
+        LogoutDialog(
+            unsent,
+            onConfirm = {
+                confirmLogout = false
+                model.logout()
+            },
+            onDismiss = { confirmLogout = false },
+        )
+    }
+}
+
+/** Signing out deletes the queue with the rest of the data; say so first. */
+@Composable
+private fun LogoutDialog(unsent: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.logout_title)) },
+        text = { Text(pluralStringResource(R.plurals.logout_unsent, unsent, unsent)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(stringResource(R.string.logout)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.logout_cancel)) }
+        },
+    )
 }
 
 /** A screen title with the connection state below it, when there is one to show. */
@@ -193,7 +231,8 @@ private fun EmptyRooms() {
 @Composable
 private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
     val title = roomTitle(item.room, item.peerName)
-    val time = item.lastCreatedAt ?: item.room.lastMessageAt
+    // A queued message is newer than any stored one.
+    val time = item.pendingCreatedAt ?: item.lastCreatedAt ?: item.room.lastMessageAt
     val preview = preview(item, me)
     Row(
         Modifier
@@ -225,6 +264,7 @@ private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                PendingIcon(item.pendingState)
                 Text(
                     preview,
                     style = MaterialTheme.typography.bodyMedium,
@@ -242,8 +282,30 @@ private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
     }
 }
 
+/** The state of the room's last queued message, before its preview. */
+@Composable
+private fun PendingIcon(state: String?) {
+    val (icon, tint) = when (state) {
+        OutgoingEntity.QUEUED -> R.drawable.ic_schedule to MaterialTheme.colorScheme.onSurfaceVariant
+        OutgoingEntity.SENT -> R.drawable.ic_done to MaterialTheme.colorScheme.onSurfaceVariant
+        OutgoingEntity.FAILED -> R.drawable.ic_error to MaterialTheme.colorScheme.error
+        else -> return
+    }
+    val description = stringResource(
+        when (state) {
+            OutgoingEntity.FAILED -> R.string.message_failed
+            OutgoingEntity.SENT -> R.string.message_sent
+            else -> R.string.message_queued
+        },
+    )
+    Icon(painterResource(icon), contentDescription = description, tint = tint, modifier = Modifier.padding(end = 4.dp).size(16.dp))
+}
+
 @Composable
 private fun preview(item: RoomListItem, me: String): String {
+    item.pendingText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.let {
+        return stringResource(R.string.preview_own, it)
+    }
     val text = item.lastText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
     val body = when {
         !text.isNullOrEmpty() -> text
