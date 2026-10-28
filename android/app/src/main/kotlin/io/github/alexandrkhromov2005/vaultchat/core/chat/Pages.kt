@@ -1,8 +1,10 @@
 package io.github.alexandrkhromov2005.vaultchat.core.chat
 
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MemberEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import io.github.alexandrkhromov2005.vaultchat.core.net.MemberPage
 import io.github.alexandrkhromov2005.vaultchat.core.net.MessageDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.MessagePage
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
@@ -106,4 +108,23 @@ internal fun RoomDto.toEntity(me: String, activity: Long): RoomEntity {
         lastMessageAt = lastMessageAt?.let { time(it, "last_message_at") },
         activity = activity,
     )
+}
+
+/**
+ * A page of a room's members read after [cursor] (null for the first page):
+ * user IDs in strictly ascending order, all after the cursor, and a cursor
+ * for the next page that is the last ID of this one. Returns the members and
+ * the next cursor, or null at the end.
+ */
+internal fun memberPage(roomId: String, cursor: String?, limit: Int, page: MemberPage): Pair<List<MemberEntity>, String?> {
+    if (page.members.size > limit) throw invalid("member page over its limit")
+    val members = page.members.map { MemberEntity(roomId, uuid(it.userId, "user_id"), time(it.joinedAt, "joined_at")) }
+    // Lowercase canonical UUIDs sort like the server's UUIDs.
+    val ids = listOfNotNull(cursor) + members.map { it.userId }
+    ids.zipWithNext().forEach { (before, after) ->
+        if (after <= before) throw invalid("members are not in ascending order after the cursor")
+    }
+    val next = page.nextCursor.ifEmpty { null }
+    if (next != null && next != members.lastOrNull()?.userId) throw invalid("member cursor is not the last member")
+    return members to next
 }

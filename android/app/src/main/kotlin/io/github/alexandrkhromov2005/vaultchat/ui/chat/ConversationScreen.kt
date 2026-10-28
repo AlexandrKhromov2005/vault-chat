@@ -209,7 +209,7 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit) {
+fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onMembers: () -> Unit) {
     val model = viewModel { ConversationViewModel(chat, roomId) }
     val room by model.room.collectAsStateWithLifecycle()
     val connection by model.connection.collectAsStateWithLifecycle()
@@ -241,10 +241,28 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit) {
                 },
                 title = {
                     if (present != null) {
-                        TitleWithStatus(
-                            roomTitle(present.room, present.peerName),
-                            connectionText(connection) ?: roomKind(present.room),
-                        )
+                        val channel = present.room.kind == RoomEntity.CHANNEL
+                        val members = stringResource(R.string.members_open)
+                        // A channel's title leads to its members, as in other messengers.
+                        Box(
+                            if (channel) {
+                                Modifier.fillMaxWidth().clickable(onClickLabel = members, onClick = onMembers)
+                            } else {
+                                Modifier
+                            },
+                        ) {
+                            TitleWithStatus(
+                                roomTitle(present.room, present.peerName),
+                                connectionText(connection) ?: roomKind(present.room),
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    if (present?.room?.kind == RoomEntity.CHANNEL) {
+                        IconButton(onClick = onMembers) {
+                            Icon(painterResource(R.drawable.ic_group), contentDescription = stringResource(R.string.members_open))
+                        }
                     }
                 },
             )

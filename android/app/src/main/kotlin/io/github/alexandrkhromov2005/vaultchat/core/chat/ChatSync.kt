@@ -82,7 +82,7 @@ class ChatSync(
      * Whether the user waits for a request; otherwise whether it keeps the
      * stored data correct, or only fills in names.
      */
-    private enum class Priority { USER, BACKGROUND, PROFILE }
+    internal enum class Priority { USER, BACKGROUND, PROFILE }
 
     /** A refresh of a room that live events asked for; see [scheduleRefresh]. */
     private class PendingRefresh(var readThrough: Long?) {
@@ -108,8 +108,17 @@ class ChatSync(
     private val departures = ConcurrentHashMap<String, Long>()
     private val profilesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
+    // How often each room's roster has changed by an event or by the user;
+    // a roster read meanwhile is read again (Membership.loadRoster).
+    private val rosterChanges = ConcurrentHashMap<String, Long>()
+
     private val mutableStatus = MutableStateFlow(SyncStatus(running = false, failure = null))
     val status: StateFlow<SyncStatus> = mutableStatus.asStateFlow()
+
+    private val mutableCompleted = MutableStateFlow(0)
+
+    /** How many syncs have succeeded; events missed before a sync are recovered only by reading again. */
+    val completed: StateFlow<Int> = mutableCompleted.asStateFlow()
 
     // A request during a sync runs one more sync after it.
     private val syncRequests = Channel<Unit>(Channel.CONFLATED)
@@ -202,6 +211,7 @@ class ChatSync(
             ApiException(0, ApiException.LOCAL, "local failure", cause = e)
         }
         mutableStatus.value = SyncStatus(running = false, failure = failure)
+        if (failure == null) mutableCompleted.value++
         if (failure?.status == 429) {
             scope.launch {
                 delay(gate.remaining())
@@ -291,13 +301,59 @@ class ChatSync(
                 }
                 applyCreated(frame.roomId, message)
             }
-            is Frame.MemberAdded -> if (frame.userId == me) addRoom(frame.roomId, readThrough = null)
-            is Frame.MemberGone -> if (frame.userId == me) {
-                departures.merge(frame.roomId, 1L, Long::plus)
-                listLock.withLock { dao.deleteRooms(listOf(frame.roomId)) }
+            is Frame.MemberAdded -> when {
+                frame.userId == me -> addRoom(frame.roomId, readThrough = null)
+                isUuid(frame.userId) -> {
+                    rosterChanged(frame.roomId)
+                    dao.addMember(frame.roomId, frame.userId)
+                }
+            }
+            is Frame.MemberGone -> when {
+                frame.userId == me -> forget(frame.roomId)
+                isUuid(frame.userId) -> {
+                    rosterChanged(frame.roomId)
+                    dao.removeMember(frame.roomId, frame.userId)
+                }
             }
             is Frame.Ready -> Unit
         }
+    }
+
+    /**
+     * Stores a room that the user has just created or opened at the top of
+     * the list, keeping what is stored of it. It waits for a listing under
+     * way, so that the listing cannot delete it as unlisted.
+     */
+    internal suspend fun storeJoined(room: RoomEntity) {
+        listLock.withLock {
+            // A room as created or opened has no last_message_at; the listing's stays.
+            val stored = dao.room(room.roomId)
+            dao.addRoom(room.copy(lastMessageAt = room.lastMessageAt ?: stored?.lastMessageAt))
+        }
+        room.peerId?.let { loadProfiles(listOf(it)) }
+    }
+
+    /**
+     * Deletes a room the user is no longer a member of, with its messages
+     * and queue. A room read from the server for an earlier event is not
+     * stored afterwards.
+     */
+    internal suspend fun forget(roomId: String) {
+        departures.merge(roomId, 1L, Long::plus)
+        listLock.withLock { dao.deleteRooms(listOf(roomId)) }
+    }
+
+    /** How often the roster of [roomId] has changed; see [rosterChanged]. */
+    internal fun rosterVersion(roomId: String): Long = rosterChanges[roomId] ?: 0
+
+    /** Records a change of a roster before it is written, so that a read under way starts again. */
+    internal fun rosterChanged(roomId: String) {
+        rosterChanges.merge(roomId, 1L, Long::plus)
+    }
+
+    /** Reads the profiles of [userIds] that are not stored yet, in the background. */
+    fun wantProfiles(userIds: List<String>) {
+        scope.launch { loadProfiles(userIds) }
     }
 
     private suspend fun applyCreated(roomId: String, message: MessageEntity) {
@@ -457,7 +513,7 @@ class ChatSync(
      * Runs a request for one room. A 404 means the user is no longer a
      * member: the room is deleted and null returned.
      */
-    private suspend fun <T> forRoom(roomId: String, request: suspend () -> T): T? = try {
+    internal suspend fun <T> forRoom(roomId: String, request: suspend () -> T): T? = try {
         request()
     } catch (e: ApiException) {
         if (e.status != 404) throw e
@@ -497,7 +553,7 @@ class ChatSync(
     }
 
     /** Sends a request within the budget; a 429 pauses every request. */
-    private suspend fun <T : Any> request(
+    internal suspend fun <T : Any> request(
         priority: Priority,
         call: suspend GatewayApi.(authorization: String) -> Response<T>,
     ): T {

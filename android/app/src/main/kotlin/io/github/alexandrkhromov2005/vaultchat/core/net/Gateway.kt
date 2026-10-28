@@ -8,11 +8,13 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.asResponseBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.Buffer
+import okio.BufferedSink
 import okio.ForwardingSource
 import okio.buffer
 import retrofit2.Response
@@ -29,7 +31,9 @@ import java.util.concurrent.TimeUnit
  * that a misbehaving server cannot exhaust memory. [refreshApi] serves only
  * token refresh: OkHttp must not silently repeat it, because each attempt
  * rotates the token, and its deadline must leave time to retry within the
- * server's retry window (see SessionManager).
+ * server's retry window (see SessionManager). Requests tagged
+ * [NotRepeatable] are not repeated by OkHttp either, once they began to be
+ * sent.
  */
 class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
     // A WebSocket has no read deadline: the server pings every 30 s, and our
@@ -39,7 +43,10 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
         .pingInterval(WEBSOCKET_PING_SECONDS, TimeUnit.SECONDS)
         .build()
 
-    private val apiHttp = http.newBuilder().addInterceptor(ResponseSizeLimit(MAX_RESPONSE_BYTES)).build()
+    private val apiHttp = http.newBuilder()
+        .addInterceptor(OneShotBodies)
+        .addInterceptor(ResponseSizeLimit(MAX_RESPONSE_BYTES))
+        .build()
     private val refreshHttp = apiHttp.newBuilder()
         .retryOnConnectionFailure(false)
         .connectTimeout(REFRESH_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -160,6 +167,31 @@ private class RequestSentListener(private val progress: RequestProgress) : Event
     override fun requestHeadersStart(call: Call) {
         progress.sent = true
     }
+}
+
+/**
+ * Sends the body of a [NotRepeatable] request as one-shot. OkHttp repeats a
+ * request on a fresh connection when the old one fails, even after the
+ * request was sent, unless its body is one-shot; a failure before sending
+ * still allows the repeat, since the server cannot have seen it.
+ */
+internal object OneShotBodies : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
+        val request = chain.request()
+        val body = request.body
+        if (body == null || request.tag(NotRepeatable::class.java) == null) return chain.proceed(request)
+        return chain.proceed(request.newBuilder().method(request.method, OneShotBody(body)).build())
+    }
+}
+
+private class OneShotBody(private val body: RequestBody) : RequestBody() {
+    override fun contentType() = body.contentType()
+
+    override fun contentLength() = body.contentLength()
+
+    override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
+
+    override fun isOneShot() = true
 }
 
 class ResponseTooLargeException(limit: Long) : IOException("response body exceeds $limit bytes")
