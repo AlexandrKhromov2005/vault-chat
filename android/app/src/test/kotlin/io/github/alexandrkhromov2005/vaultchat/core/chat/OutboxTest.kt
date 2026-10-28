@@ -121,6 +121,42 @@ class OutboxTest {
         assertEquals(listOf("pending"), queue(target).map { it.text })
     }
 
+    /** The rooms one sync asks about are bounded; later syncs take the rest. */
+    @Test
+    fun unlistedRoomsWithQueuesAreConfirmedWithinABudget() = runBlocking {
+        sync = ChatSync(dao, me, server.requests, scope, System::currentTimeMillis, ChatSync.Limits(unlistedChecks = 3))
+        val rooms = (1..5).map { server.addChannel(it) }
+        assertNull(sync.syncNow())
+        network.value = null
+        val outbox = outbox()
+        rooms.forEach { outbox.send(it, "pending") }
+        rooms.forEach { server.removeRoom(it) }
+
+        assertNull(sync.syncNow())
+        assertEquals(3, server.calls().count { it.startsWith("room ") })
+        assertEquals(2, dao.rooms().size)
+
+        assertNull(sync.syncNow())
+        assertTrue(dao.rooms().isEmpty())
+    }
+
+    /** A failure of the check keeps the room and its queue until a later sync. */
+    @Test
+    fun anUnlistedRoomStaysWhileTheServerCannotConfirm() = runBlocking {
+        val room = loadedChannel(1)
+        network.value = null
+        outbox().send(room, "pending")
+        server.removeRoom(room)
+        server.intercept = { if (it == "room $room") 503 else null }
+
+        assertNull(sync.syncNow())
+        assertEquals(listOf("pending"), queue(room).map { it.text })
+
+        server.intercept = { null }
+        assertNull(sync.syncNow())
+        assertNull(dao.room(room))
+    }
+
     /** A database failure while starting rooms must not end sending for the life of the process. */
     @Test
     fun aDatabaseErrorWhileStartingRoomsDoesNotStopSending() = runBlocking {

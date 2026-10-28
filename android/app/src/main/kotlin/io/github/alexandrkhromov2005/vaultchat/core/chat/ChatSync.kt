@@ -74,6 +74,8 @@ class ChatSync(
         val burst: Int = 15,
         /** Tokens that profile requests leave to the rest of sync. */
         val profileReserve: Int = 5,
+        /** Unlisted rooms with unsent messages that one sync asks the server about. */
+        val unlistedChecks: Int = 10,
     )
 
     /**
@@ -263,11 +265,13 @@ class ChatSync(
      * Asks the server about unlisted rooms that a complete listing did not
      * delete because they hold unsent messages: a listing may miss a room that
      * moved meanwhile, and the queue exists only here. A 404 deletes the room;
-     * other failures leave it to the next sync.
+     * other failures leave it to the next sync. At most [Limits.unlistedChecks]
+     * rooms per sync, one at a time; a room that exists is listed again by a
+     * later sync and drops out, so the others get their turn.
      */
     private suspend fun confirmUnlisted(listed: Set<String>) {
-        for (roomId in dao.roomsWithUnsent()) {
-            if (roomId in listed || dao.room(roomId) == null) continue
+        val unlisted = dao.roomsWithUnsent().filter { it !in listed && dao.room(it) != null }
+        for (roomId in unlisted.take(limits.unlistedChecks)) {
             try {
                 forRoom(roomId) { request(Priority.BACKGROUND) { room(it, roomId) } }
             } catch (e: ApiException) {

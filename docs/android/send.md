@@ -96,7 +96,8 @@ queued, and turns pasted `\r\n` and `\r` into `\n` as the text is typed.
 rooms move may miss one and delete it, since the next sync brings it back
 with its history. The queue exists only on this device, so a complete
 listing does not delete a room with unsent rows; `ChatSync` asks the server
-about it, and only a `404` deletes it (with its rows). A `member.removed`
+about it (up to 10 rooms per sync, see [sync.md](sync.md)), and only a `404`
+deletes it (with its rows); any other failure keeps it for the next sync. A `member.removed`
 event for this user deletes the room at once, queue included.
 
 ## Sending

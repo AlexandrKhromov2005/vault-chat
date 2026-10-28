@@ -75,7 +75,13 @@ sync at a time, and a request during a sync runs one more after it.
 1. Read the room list page by page. If it took more than one page, read the
    first page again: rooms with new activity move to the top and would
    otherwise be missed. Store the rooms; delete rooms that are not listed,
-   with their messages, only if the listing is complete.
+   with their messages, only if the listing is complete. A room with
+   messages that are not yet sent (stage 4, [send.md](send.md)) is not
+   deleted for being unlisted: the queue exists only on this device, and a
+   listing may miss a room that moved. Up to 10 such rooms per sync are
+   asked about with `GET /api/v1/rooms/{room_id}`, one at a time; a `404`
+   deletes the room with its queue, any other failure keeps it for the next
+   sync.
 2. Catch up every loaded room whose `last_message_at` is newer than its newest
    stored message.
 3. Read the latest page of the most recently active rooms that have never
@@ -115,6 +121,7 @@ saves duplicate requests.
 | Rooms a sync loads or catches up at once | 2 | The others hold no lock while they wait, so opening any of them is not delayed |
 | Room list | 100 per page, at most 50 pages | 5000 rooms; beyond that the list is stored but nothing is deleted |
 | Rooms preloaded per sync | 10 | Bounds the first sync of a new device |
+| Unlisted rooms with unsent messages checked per sync | 10, one at a time, background budget | Only rooms a complete listing missed while they hold a queue; a room that exists is listed again and drops out |
 | Catch-up | 100 per page, at most 10 pages per room | After 1000 missed messages the room is reset to its latest page |
 | History page | 50 | One screen and a half |
 | Response size | 1 MiB (existing limit) | |
@@ -134,6 +141,7 @@ names of their peers arrive over a minute or more, at the background rate.
 | Request fails (network, 5xx, timeout) | The sync stops and is shown; the next trigger retries. Stored data stays visible |
 | `401` | The access token is renewed once (SessionManager); a rejected refresh signs out |
 | `404` for a room | The user lost access: the room and its messages are deleted |
+| An unlisted room with unsent messages cannot be checked (network, 5xx, timeout) | It stays with its queue until a later sync gets an answer |
 | WebSocket 4001 | Renew the token, reconnect at once; a second 4001 in a row reconnects after the backoff |
 | Re-authentication | Before the token has 60 s left, and at least 11 s after the last `ready` (the Gateway requires 10 s since it sent `ready`) |
 | WebSocket 1001, 1013, 4002, lost connection | Reconnect with backoff, then sync |
