@@ -96,13 +96,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure account email: %w", err)
 	}
+	sessions := repository.NewSessionRepository(pool, cfg.EmailLegacyDeadline)
 	options := append([]service.Option{
 		service.WithInvitations(repository.NewUserRepository(pool)),
 		service.WithSessionNotifier(events.Notifier{Client: redisClient}),
+		service.WithPushDevices(sessions),
 	}, emailOpts...)
 	svc, err := service.NewService(
 		repository.NewUserRepository(pool),
-		repository.NewSessionRepository(pool, cfg.EmailLegacyDeadline),
+		sessions,
 		service.NewArgon2idHasher(service.Argon2idParams{
 			MemoryKiB:   cfg.Argon2MemoryKiB,
 			Time:        cfg.Argon2Time,
