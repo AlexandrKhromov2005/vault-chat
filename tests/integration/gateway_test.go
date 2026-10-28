@@ -90,6 +90,10 @@ func gatewayDeps(t *testing.T, conn *grpc.ClientConn, redisAddr string, burst ui
 	require.NoError(t, err)
 	credentialLimiter, err := ratelimit.NewRedisLimiter(redisClient, 600, burst)
 	require.NoError(t, err)
+	credentialIPLimiter, err := ratelimit.NewRedisLimiter(redisClient, 600, burst)
+	require.NoError(t, err)
+	refreshLimiter, err := ratelimit.NewRedisLimiter(redisClient, 600, burst)
+	require.NoError(t, err)
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	authClient := authv1.NewAuthServiceClient(conn)
@@ -98,17 +102,23 @@ func gatewayDeps(t *testing.T, conn *grpc.ClientConn, redisAddr string, burst ui
 		chat = handler.NewChatHandler(chatv1.NewChatServiceClient(chatConns[0]), logger)
 	}
 	return router.Deps{
-		Auth:                   handler.NewAuthHandler(authClient, logger),
-		Chat:                   chat,
-		Health:                 handler.NewHealth(nil, logger),
-		TokenValidator:         authClient,
-		Limiter:                limiter,
-		AuthLimiter:            credentialLimiter,
-		AuthRateLimitPerMinute: 600,
-		AuthRateLimitBurst:     burst,
-		Logger:                 logger,
-		MaxBodyBytes:           1 << 20,
-		RequestTimeout:         5 * time.Second,
+		Auth:                      handler.NewAuthHandler(authClient, logger),
+		Chat:                      chat,
+		Health:                    handler.NewHealth(nil, logger),
+		TokenValidator:            authClient,
+		Limiter:                   limiter,
+		AuthLimiter:               credentialLimiter,
+		AuthIPLimiter:             credentialIPLimiter,
+		RefreshLimiter:            refreshLimiter,
+		AuthRateLimitPerMinute:    600,
+		AuthRateLimitBurst:        burst,
+		AuthIPRateLimitPerMinute:  600,
+		AuthIPRateLimitBurst:      burst,
+		RefreshRateLimitPerMinute: 600,
+		RefreshRateLimitBurst:     burst,
+		Logger:                    logger,
+		MaxBodyBytes:              1 << 20,
+		RequestTimeout:            5 * time.Second,
 	}
 }
 
