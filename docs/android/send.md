@@ -108,10 +108,12 @@ event for this user deletes the room at once, queue included.
   for everyone. A `FAILED` row does not block the rows after it; retried, it
   goes to the end of the queue.
 - Rooms are independent; at most 2 sends are under way at once. Sends keep
-  to a budget of 30 a minute (burst 10): a row's first attempt takes from it
-  without waiting, as the user is waiting for it, and may run it into debt
-  of at most the burst; repeats wait for a token. A send that waited for a
-  permit looks at the `429` pause again before it goes.
+  to a budget of 30 a minute (burst 10): a row's first attempt goes at once
+  while the budget is in debt of less than its burst (`takeWithinDebt`), so
+  that a few quick messages are not held up, and waits beyond that, so that a
+  queue written offline drains at the budget's rate; repeats wait for a
+  token. A send that waited for a permit looks at the `429` pause again
+  before it goes.
 - A send starts when a message is queued, when a network appears, after the
   WebSocket's `ready`, when the app comes to the foreground and when its
   backoff has passed. The first four also cut a running backoff short.
@@ -159,7 +161,7 @@ network constraint already runs within minutes.
 
 | Budget | Value | Why |
 |---|---|---|
-| Gateway rate limit per user and IP | 120/min, burst 30 (server default), shared with sync | Sync keeps to 60/min, burst 15, and repeated sends to 30/min, burst 10 (two `RequestBudget`s), so that together they stay inside it even when every queued room repeats during an outage; first attempts are not delayed but count, at most 10 into debt |
+| Gateway rate limit per user and IP | 120/min, burst 30 (server default), shared with sync | Sync keeps to 60/min, burst 15, and repeated sends to 30/min, burst 10 (two `RequestBudget`s), so that together they stay inside it even when every queued room repeats during an outage or a long queue goes out after one; up to 20 first attempts go at once (the burst and as much in debt) |
 | Concurrent sends | 2, one per room | Rooms do not wait for each other |
 | `429` pause | 1 s to 5 minutes | A `Retry-After` of 0 cannot make a busy loop, nor a bogus one stop the app for hours |
 | Backoff of a room | 1 s doubling to 60 s, with jitter | Resets after a success |
@@ -223,6 +225,8 @@ JVM tests with Robolectric (Room) and a fake Gateway that stores messages by
 20. Stress: three rooms of 25 messages queued at once, with 503s, lost
     answers and brief database failures: every message arrives once and in
     order, and the queue empties.
+21. A queue of 40 messages written offline goes within the send budget when
+    a network appears.
 
 Not covered by automated tests: Compose screens (there is no Compose UI test
 setup yet), checked by hand on a device.
@@ -274,6 +278,19 @@ clears the old composer state while the restored text stays, so sending it
 again queues a second message with a new key. The order of
 `roomsWithUnsent` is not defined; if more than 10 unlisted rooms kept
 failing their check, the others would wait. Both are theoretical.
+
+## Review of 6e3a890
+
+The fixes of the second round were confirmed, including how `repeat` is
+counted. One finding, whose regression failed on 6e3a890:
+
+| Finding | Test | Resolution |
+|---|---|---|
+| `takeNow` never waits, and every row after a success is a first attempt: a queue written offline went out at once (40 in 2 s), with sync's burst beyond the Gateway's, so only its `429` limited it | `aQueueWrittenOfflineIsDrainedWithinTheSendBudget` | First attempts use `RequestBudget.takeWithinDebt`: at once within the burst in debt, then they wait |
+
+Not changed: a row resolved by its echo during a backoff makes the next row
+count as a repeat, and so does a database failure before an attempt. Both
+only wait for a token; neither sends more.
 
 Checked without a defect in the second round: no second sender for a room
 (the reviewer's stress test above); one delayed restart per failed start of

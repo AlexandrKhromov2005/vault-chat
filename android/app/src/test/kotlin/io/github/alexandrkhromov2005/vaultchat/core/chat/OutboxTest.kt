@@ -186,9 +186,10 @@ class OutboxTest {
             budget = RequestBudget(perMinute = 60, burst = 3, clock = System::currentTimeMillis),
         )
 
-        repeat(8) { outbox.send(room, "ok $it") }
+        // The burst and as much again in debt.
+        repeat(6) { outbox.send(room, "ok $it") }
 
-        assertTrue(within(1_500) { server.sent(room).size == 8 })
+        assertTrue(within(1_500) { server.sent(room).size == 6 })
     }
 
     /**
@@ -227,6 +228,29 @@ class OutboxTest {
         for (room in rooms) {
             assertEquals((1..25).map { "m$it" }, server.sent(room).map { it.text })
         }
+    }
+
+    /**
+     * A queue written offline goes within the send budget when a network
+     * appears: first attempts may run it into debt of at most its burst, not
+     * further. Failed on 6e3a890 (all 40 at once).
+     */
+    @Test
+    fun aQueueWrittenOfflineIsDrainedWithinTheSendBudget() = runBlocking {
+        val room = loadedChannel(1)
+        network.value = null
+        val outbox = Outbox(
+            dao, me, server.requests, sync, scope, network,
+            newId = { key(keys.incrementAndGet()) },
+            budget = RequestBudget(Outbox.SENDS_PER_MINUTE, Outbox.SEND_BURST, System::currentTimeMillis),
+        )
+        repeat(40) { outbox.send(room, "offline $it") }
+
+        network.value = Unit
+        delay(2_000)
+
+        val sent = server.sent(room).size
+        assertTrue("sent within 2 s: $sent", sent <= 2 * Outbox.SEND_BURST + 1)
     }
 
     /** The rooms one sync asks about are bounded; later syncs take the rest. */
@@ -337,9 +361,9 @@ class OutboxTest {
         rooms.forEach { outbox.send(it, "hello") }
         delay(1_000)
 
-        // Each room's first attempt goes at once and runs the budget into debt;
-        // repeats wait it out (238 sends on 2440b66).
-        assertTrue(sends().size.toString(), sends().size <= rooms.size + 1)
+        // First attempts run the budget into debt of at most its burst; then
+        // everything waits, one a second (238 sends on 2440b66).
+        assertTrue(sends().size.toString(), sends().size <= 2 * 3 + 1)
     }
 
     /**

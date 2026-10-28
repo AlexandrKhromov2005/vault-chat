@@ -27,6 +27,13 @@ class RequestBudget(perMinute: Int, private val burst: Int, private val clock: (
         }
     }
 
+    /**
+     * Takes a token for work the user has just asked for but does not watch
+     * as it runs, such as sending a queued message: it goes at once while the
+     * bucket is in debt of less than [burst] tokens, and waits beyond that.
+     */
+    suspend fun takeWithinDebt() = take(reserve = -burst)
+
     /** Takes a token for a request the user waits for, without waiting. */
     @Synchronized
     fun takeNow() {

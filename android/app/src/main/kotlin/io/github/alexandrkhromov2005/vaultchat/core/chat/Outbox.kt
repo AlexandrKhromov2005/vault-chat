@@ -184,9 +184,10 @@ class Outbox(
     }
 
     /**
-     * Sends the room's next row. A first attempt draws on the budget without
-     * waiting, as the user is waiting for it, and may run it into debt that
-     * repeats then wait out; a [repeat] waits for a token.
+     * Sends the room's next row. A first attempt goes at once while the
+     * budget is in debt of less than its burst, so that a few quick messages
+     * are not held up, but a queue written offline still drains at the
+     * budget's rate; a [repeat] waits for a token.
      */
     private suspend fun sendNext(roomId: String, repeat: Boolean): Outcome {
         val row = dao.nextQueued(roomId)
@@ -206,7 +207,7 @@ class Outbox(
         }
         network.first { it != null }
         awaitPause()
-        if (repeat) budget.take() else budget.takeNow()
+        if (repeat) budget.take() else budget.takeWithinDebt()
         return permits.withPermit {
             // A 429 may have started a pause while this room waited for a permit.
             awaitPause()
