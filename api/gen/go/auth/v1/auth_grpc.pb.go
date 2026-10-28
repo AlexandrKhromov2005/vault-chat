@@ -34,6 +34,8 @@ const (
 	AuthService_ConfirmPasswordReset_FullMethodName     = "/auth.v1.AuthService/ConfirmPasswordReset"
 	AuthService_RequestEmailChange_FullMethodName       = "/auth.v1.AuthService/RequestEmailChange"
 	AuthService_ConfirmEmailChange_FullMethodName       = "/auth.v1.AuthService/ConfirmEmailChange"
+	AuthService_RegisterPushToken_FullMethodName        = "/auth.v1.AuthService/RegisterPushToken"
+	AuthService_UnregisterPushToken_FullMethodName      = "/auth.v1.AuthService/UnregisterPushToken"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -81,6 +83,12 @@ type AuthServiceClient interface {
 	RequestEmailChange(ctx context.Context, in *RequestEmailChangeRequest, opts ...grpc.CallOption) (*RequestEmailChangeResponse, error)
 	// ConfirmEmailChange consumes a token for the new address and revokes prior sessions.
 	ConfirmEmailChange(ctx context.Context, in *ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*ConfirmEmailChangeResponse, error)
+	// RegisterPushToken binds a provider token to the login of the access
+	// token, replacing the login's previous token. Revoking the login deletes it.
+	RegisterPushToken(ctx context.Context, in *RegisterPushTokenRequest, opts ...grpc.CallOption) (*RegisterPushTokenResponse, error)
+	// UnregisterPushToken removes the token of the login of the access token.
+	// It is idempotent.
+	UnregisterPushToken(ctx context.Context, in *UnregisterPushTokenRequest, opts ...grpc.CallOption) (*UnregisterPushTokenResponse, error)
 }
 
 type authServiceClient struct {
@@ -241,6 +249,26 @@ func (c *authServiceClient) ConfirmEmailChange(ctx context.Context, in *ConfirmE
 	return out, nil
 }
 
+func (c *authServiceClient) RegisterPushToken(ctx context.Context, in *RegisterPushTokenRequest, opts ...grpc.CallOption) (*RegisterPushTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterPushTokenResponse)
+	err := c.cc.Invoke(ctx, AuthService_RegisterPushToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) UnregisterPushToken(ctx context.Context, in *UnregisterPushTokenRequest, opts ...grpc.CallOption) (*UnregisterPushTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnregisterPushTokenResponse)
+	err := c.cc.Invoke(ctx, AuthService_UnregisterPushToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -286,6 +314,12 @@ type AuthServiceServer interface {
 	RequestEmailChange(context.Context, *RequestEmailChangeRequest) (*RequestEmailChangeResponse, error)
 	// ConfirmEmailChange consumes a token for the new address and revokes prior sessions.
 	ConfirmEmailChange(context.Context, *ConfirmEmailChangeRequest) (*ConfirmEmailChangeResponse, error)
+	// RegisterPushToken binds a provider token to the login of the access
+	// token, replacing the login's previous token. Revoking the login deletes it.
+	RegisterPushToken(context.Context, *RegisterPushTokenRequest) (*RegisterPushTokenResponse, error)
+	// UnregisterPushToken removes the token of the login of the access token.
+	// It is idempotent.
+	UnregisterPushToken(context.Context, *UnregisterPushTokenRequest) (*UnregisterPushTokenResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -340,6 +374,12 @@ func (UnimplementedAuthServiceServer) RequestEmailChange(context.Context, *Reque
 }
 func (UnimplementedAuthServiceServer) ConfirmEmailChange(context.Context, *ConfirmEmailChangeRequest) (*ConfirmEmailChangeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfirmEmailChange not implemented")
+}
+func (UnimplementedAuthServiceServer) RegisterPushToken(context.Context, *RegisterPushTokenRequest) (*RegisterPushTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterPushToken not implemented")
+}
+func (UnimplementedAuthServiceServer) UnregisterPushToken(context.Context, *UnregisterPushTokenRequest) (*UnregisterPushTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnregisterPushToken not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
@@ -632,6 +672,42 @@ func _AuthService_ConfirmEmailChange_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_RegisterPushToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterPushTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).RegisterPushToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_RegisterPushToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).RegisterPushToken(ctx, req.(*RegisterPushTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_UnregisterPushToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterPushTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).UnregisterPushToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_UnregisterPushToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).UnregisterPushToken(ctx, req.(*UnregisterPushTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -698,6 +774,14 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfirmEmailChange",
 			Handler:    _AuthService_ConfirmEmailChange_Handler,
+		},
+		{
+			MethodName: "RegisterPushToken",
+			Handler:    _AuthService_RegisterPushToken_Handler,
+		},
+		{
+			MethodName: "UnregisterPushToken",
+			Handler:    _AuthService_UnregisterPushToken_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

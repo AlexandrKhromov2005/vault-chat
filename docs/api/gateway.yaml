@@ -423,6 +423,43 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/push/token:
+    put:
+      summary: Register the push token of this login
+      description: |
+        Binds a provider registration token to the caller's login (the session
+        family of the access token), replacing its previous token; a token
+        registered by another login moves to this one. A user keeps at most 10
+        tokens. Logout and every other revocation of the login delete the
+        token. Pushes only signal that the client should synchronize; they
+        carry no message text. See `docs/push.md`.
+      tags: [push]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PushTokenRegistration"}
+      responses:
+        "204": {description: Token registered.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+    delete:
+      summary: Remove the push token of this login
+      description: Idempotent; succeeds when the login has no token.
+      tags: [push]
+      security: [{bearerAuth: []}]
+      responses:
+        "204": {description: Token removed or absent.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
   /api/v1/users:
     get:
       summary: Search users by username prefix
@@ -1088,6 +1125,13 @@ components:
       required: [refresh_token]
       properties:
         refresh_token: {type: string}
+    PushTokenRegistration:
+      type: object
+      additionalProperties: false
+      required: [provider, token]
+      properties:
+        provider: {type: string, enum: [fcm]}
+        token: {type: string, minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_:.-]+$"}
     Readiness:
       type: object
       properties:

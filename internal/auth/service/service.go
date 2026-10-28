@@ -91,6 +91,7 @@ type Service struct {
 	notifier             SessionNotifier
 	legacyVerifyDeadline *time.Time
 	emails               *EmailAccounts
+	pushDevices          PushDeviceRepository
 }
 
 // NewService wires a Service. A dummy hash is precomputed so that login

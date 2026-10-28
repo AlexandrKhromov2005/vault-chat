@@ -691,6 +691,80 @@ func (_c *MockAuthClient_Register_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
+// RegisterPushToken provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) RegisterPushToken(ctx context.Context, in *authv1.RegisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.RegisterPushTokenResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterPushToken")
+	}
+
+	var r0 *authv1.RegisterPushTokenResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RegisterPushTokenRequest, ...grpc.CallOption) (*authv1.RegisterPushTokenResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.RegisterPushTokenRequest, ...grpc.CallOption) *authv1.RegisterPushTokenResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.RegisterPushTokenResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.RegisterPushTokenRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_RegisterPushToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterPushToken'
+type MockAuthClient_RegisterPushToken_Call struct {
+	*mock.Call
+}
+
+// RegisterPushToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.RegisterPushTokenRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) RegisterPushToken(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_RegisterPushToken_Call {
+	return &MockAuthClient_RegisterPushToken_Call{Call: _e.mock.On("RegisterPushToken",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_RegisterPushToken_Call) Run(run func(ctx context.Context, in *authv1.RegisterPushTokenRequest, opts ...grpc.CallOption)) *MockAuthClient_RegisterPushToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.RegisterPushTokenRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_RegisterPushToken_Call) Return(_a0 *authv1.RegisterPushTokenResponse, _a1 error) *MockAuthClient_RegisterPushToken_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_RegisterPushToken_Call) RunAndReturn(run func(context.Context, *authv1.RegisterPushTokenRequest, ...grpc.CallOption) (*authv1.RegisterPushTokenResponse, error)) *MockAuthClient_RegisterPushToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RequestEmailChange provides a mock function with given fields: ctx, in, opts
 func (_m *MockAuthClient) RequestEmailChange(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1057,6 +1131,80 @@ func (_c *MockAuthClient_SearchUsers_Call) Return(_a0 *authv1.SearchUsersRespons
 }
 
 func (_c *MockAuthClient_SearchUsers_Call) RunAndReturn(run func(context.Context, *authv1.SearchUsersRequest, ...grpc.CallOption) (*authv1.SearchUsersResponse, error)) *MockAuthClient_SearchUsers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UnregisterPushToken provides a mock function with given fields: ctx, in, opts
+func (_m *MockAuthClient) UnregisterPushToken(ctx context.Context, in *authv1.UnregisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.UnregisterPushTokenResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnregisterPushToken")
+	}
+
+	var r0 *authv1.UnregisterPushTokenResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.UnregisterPushTokenRequest, ...grpc.CallOption) (*authv1.UnregisterPushTokenResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *authv1.UnregisterPushTokenRequest, ...grpc.CallOption) *authv1.UnregisterPushTokenResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*authv1.UnregisterPushTokenResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *authv1.UnregisterPushTokenRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAuthClient_UnregisterPushToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnregisterPushToken'
+type MockAuthClient_UnregisterPushToken_Call struct {
+	*mock.Call
+}
+
+// UnregisterPushToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *authv1.UnregisterPushTokenRequest
+//   - opts ...grpc.CallOption
+func (_e *MockAuthClient_Expecter) UnregisterPushToken(ctx interface{}, in interface{}, opts ...interface{}) *MockAuthClient_UnregisterPushToken_Call {
+	return &MockAuthClient_UnregisterPushToken_Call{Call: _e.mock.On("UnregisterPushToken",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockAuthClient_UnregisterPushToken_Call) Run(run func(ctx context.Context, in *authv1.UnregisterPushTokenRequest, opts ...grpc.CallOption)) *MockAuthClient_UnregisterPushToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*authv1.UnregisterPushTokenRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockAuthClient_UnregisterPushToken_Call) Return(_a0 *authv1.UnregisterPushTokenResponse, _a1 error) *MockAuthClient_UnregisterPushToken_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthClient_UnregisterPushToken_Call) RunAndReturn(run func(context.Context, *authv1.UnregisterPushTokenRequest, ...grpc.CallOption) (*authv1.UnregisterPushTokenResponse, error)) *MockAuthClient_UnregisterPushToken_Call {
 	_c.Call.Return(run)
 	return _c
 }

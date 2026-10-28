@@ -47,6 +47,12 @@ service AuthService {
   rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
   // ConfirmEmailChange consumes a token for the new address and revokes prior sessions.
   rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
+  // RegisterPushToken binds a provider token to the login of the access
+  // token, replacing the login's previous token. Revoking the login deletes it.
+  rpc RegisterPushToken(RegisterPushTokenRequest) returns (RegisterPushTokenResponse);
+  // UnregisterPushToken removes the token of the login of the access token.
+  // It is idempotent.
+  rpc UnregisterPushToken(UnregisterPushTokenRequest) returns (UnregisterPushTokenResponse);
 }
 
 message RegisterRequest {
@@ -212,3 +218,20 @@ message UserProfile {
   string user_id = 1;
   string username = 2;
 }
+
+message RegisterPushTokenRequest {
+  string access_token = 1;
+  // Push provider; only "fcm" is supported.
+  string provider = 2;
+  // Provider registration token: 1 to 4096 characters of ASCII letters,
+  // digits and "_:.-".
+  string token = 3;
+}
+
+message RegisterPushTokenResponse {}
+
+message UnregisterPushTokenRequest {
+  string access_token = 1;
+}
+
+message UnregisterPushTokenResponse {}
