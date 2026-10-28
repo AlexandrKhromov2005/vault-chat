@@ -140,8 +140,11 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 		f.mu.Unlock()
 	}
 	code := fcmErrorCode(answer)
-	switch {
-	case code == "UNREGISTERED", resp.StatusCode == http.StatusNotFound, code == "SENDER_ID_MISMATCH":
+	// Only FCM's own verdict on the token deletes it: a bare 404 may come
+	// from a proxy, and SENDER_ID_MISMATCH means our credentials belong to
+	// another project, not that the token is gone.
+	switch code {
+	case "UNREGISTERED":
 		return ErrTokenInvalid
 	default:
 		// Neither the token nor the answer body is logged or returned.
