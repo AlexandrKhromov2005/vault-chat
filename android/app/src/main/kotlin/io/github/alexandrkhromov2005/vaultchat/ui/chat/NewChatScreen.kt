@@ -35,6 +35,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.UserSearch
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.core.net.PublicProfile
 import io.github.alexandrkhromov2005.vaultchat.ui.auth.text
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,6 +66,10 @@ class NewChatViewModel(private val chat: ChatSession) : ViewModel() {
                 onOpened(chat.membership.openDialog(user.userId))
             } catch (e: ApiException) {
                 mutableError.value = e
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                mutableError.value = ApiException(0, ApiException.LOCAL, "local failure", cause = e)
             } finally {
                 mutableOpening.value = null
             }

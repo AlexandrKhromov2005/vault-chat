@@ -76,6 +76,8 @@ class AddMemberViewModel(private val chat: ChatSession, private val roomId: Stri
                     null
                 } catch (e: ApiException) {
                     e
+                } catch (e: Exception) {
+                    ApiException(0, ApiException.LOCAL, "local failure", cause = e)
                 }
             }
             mutableAdding.value = null

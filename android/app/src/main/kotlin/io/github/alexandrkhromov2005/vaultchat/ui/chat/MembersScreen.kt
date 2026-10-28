@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -23,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -37,6 +39,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
+import io.github.alexandrkhromov2005.vaultchat.core.chat.isUuid
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MemberItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
@@ -45,6 +48,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.ui.auth.Message
 import io.github.alexandrkhromov2005.vaultchat.ui.auth.text
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -94,6 +98,9 @@ class MembersViewModel(private val chat: ChatSession, private val roomId: String
     /** The member being removed, or the user themselves while leaving. */
     val busy: StateFlow<String?> = mutableBusy.asStateFlow()
 
+    // Whether reload was asked for while a read was under way; main thread only.
+    private var again = false
+
     init {
         reload()
         // Events missed while the WebSocket was down are recovered only by
@@ -101,12 +108,19 @@ class MembersViewModel(private val chat: ChatSession, private val roomId: String
         viewModelScope.launch { chat.sync.completed.drop(1).collect { reload() } }
     }
 
+    /** Reads the roster; asked for during a read, it reads once more after it, which may predate the change. */
     fun reload() {
-        if (mutableLoading.value) return
+        if (mutableLoading.value) {
+            again = true
+            return
+        }
         mutableLoading.value = true
         viewModelScope.launch {
             try {
-                chat.membership.loadRoster(roomId)
+                do {
+                    again = false
+                    chat.membership.loadRoster(roomId)
+                } while (again)
                 mutableError.value = null
             } catch (e: ApiException) {
                 mutableError.value = describe(e, ChatAction.ROSTER)
@@ -118,8 +132,8 @@ class MembersViewModel(private val chat: ChatSession, private val roomId: String
         }
     }
 
-    /** Asks for the names of members on screen. */
-    fun wantName(userId: String) = chat.sync.wantProfiles(listOf(userId))
+    /** Reads the names of the members on screen, while the screen collects [visible]. */
+    suspend fun followNames(visible: Flow<List<String>>) = chat.sync.followVisibleProfiles(visible)
 
     fun remove(userId: String) = act(userId, ChatAction.REMOVE_MEMBER, onDone = {}) {
         chat.membership.removeMember(roomId, userId)
@@ -139,6 +153,8 @@ class MembersViewModel(private val chat: ChatSession, private val roomId: String
                     null
                 } catch (e: ApiException) {
                     e
+                } catch (e: Exception) {
+                    ApiException(0, ApiException.LOCAL, "local failure", cause = e)
                 }
             }
             mutableBusy.value = null
@@ -173,6 +189,11 @@ fun MembersScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onGone:
     val present = (room as? RoomView.Present)?.item?.room
     val owner = present?.kind == RoomEntity.CHANNEL && present.ownerId.equals(model.me, ignoreCase = true)
     val list = members.orEmpty()
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState) {
+        // Only the rows on screen: other items have keys that are not UUIDs.
+        model.followNames(snapshotFlow { listState.layoutInfo.visibleItemsInfo.mapNotNull { (it.key as? String)?.takeIf(::isUuid) } })
+    }
 
     Scaffold(
         topBar = {
@@ -191,7 +212,7 @@ fun MembersScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onGone:
             )
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState) {
             if (loading) item(key = "progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             error?.let { message ->
                 item(key = "error") {
@@ -213,9 +234,6 @@ fun MembersScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onGone:
                 }
             }
             items(list, key = { it.userId }) { member ->
-                LaunchedEffect(member.userId, member.known) {
-                    if (!member.known && member.userId != model.me) model.wantName(member.userId)
-                }
                 val isMe = member.userId == model.me
                 val isOwner = present?.ownerId.equals(member.userId, ignoreCase = true)
                 val name = memberName(member, isMe)

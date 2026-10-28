@@ -89,6 +89,9 @@ class CreateChannelViewModel(private val chat: ChatSession) : ViewModel() {
                     Result.success(chat.membership.createChannel(normalized, private))
                 } catch (e: ApiException) {
                     Result.failure(e)
+                } catch (e: Exception) {
+                    // Unexpected here; whether the channel was created is unknown.
+                    Result.failure(ApiException(0, ApiException.LOCAL, "local failure", cause = e))
                 }
             }
             mutableCreating.value = false

@@ -119,7 +119,9 @@ internal fun RoomDto.toEntity(me: String, activity: Long): RoomEntity {
 internal fun memberPage(roomId: String, cursor: String?, limit: Int, page: MemberPage): Pair<List<MemberEntity>, String?> {
     if (page.members.size > limit) throw invalid("member page over its limit")
     val members = page.members.map { MemberEntity(roomId, uuid(it.userId, "user_id"), time(it.joinedAt, "joined_at")) }
-    // Lowercase canonical UUIDs sort like the server's UUIDs.
+    // The server sends lowercase canonical UUIDs, which sort like its UUIDs;
+    // another case would let one user pass as two.
+    if (members.any { it.userId != it.userId.lowercase() }) throw invalid("user_id is not lowercase")
     val ids = listOfNotNull(cursor) + members.map { it.userId }
     ids.zipWithNext().forEach { (before, after) ->
         if (after <= before) throw invalid("members are not in ascending order after the cursor")

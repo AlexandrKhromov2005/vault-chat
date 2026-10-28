@@ -25,15 +25,15 @@ are shown as they arrive and are not a source of truth.
 - **Gateway responses are input from the network**, like in sync.md. They
   are checked before anything is stored:
   - a search page has at most the requested number of users, every ID is a
-    UUID, and the caller is not among them (the server excludes them; the
-    client drops them anyway);
+    UUID and appears once, and the caller is not among them (the server
+    excludes them; the client drops them anyway);
   - a dialog returned by `POST /rooms/direct` is `direct`, and its
     `participant_ids` are exactly the caller and the chosen user;
   - a channel returned by `POST /rooms/channels` is a `channel` owned by the
     caller with the requested name and privacy;
   - a member page has at most the requested number of members, user IDs are
-    UUIDs in strictly ascending order and after the cursor, and a non-empty
-    `next_cursor` is the last ID of the page.
+    lowercase canonical UUIDs in strictly ascending order and after the
+    cursor, and a non-empty `next_cursor` is the last ID of the page.
 
   A response that fails the check is reported as an invalid response and
   nothing is stored. A room the server returns for a create or open request
@@ -80,11 +80,14 @@ While stored, a roster follows `member.added`, `member.removed` and
 `member.left` for other users, and the client's own successful add and
 remove. Events can be lost while the WebSocket is down, so every full sync
 reads the rosters of members screens that are open again; closed screens
-read theirs on the next opening. A dialog has no roster screen: its two
-participants are part of the room.
+read theirs on the next opening. A sync that ends while a roster is being
+read makes the screen read it once more afterwards, since the read under
+way may predate what the sync recovered. A dialog has no roster screen: its
+two participants are part of the room.
 
-Names of members are read only for the rows on screen, through the profile
-path of sync.md.
+Names of members are read only for the rows on screen once the list has
+stood still for 300 ms, at the profile priority of sync.md. Scrolling on or
+closing the screen cancels the requests that still wait for the budget.
 
 ## Resource budgets
 
@@ -96,7 +99,7 @@ path of sync.md.
 | One action at a time per screen | The button is disabled while its request runs | No double creation by a double tap |
 | Roster | 100 per page, at most 10 pages per load; the first at user priority, the rest at background priority | A huge channel does not exhaust the budget |
 | Roster reloads | On opening the screen and after a full sync while it is open; events are applied without a request | A busy channel does not cause a request per event |
-| Member names | Only rows on screen, profile priority | A thousand members do not cost a thousand requests at once |
+| Member names | Rows on screen after 300 ms without scrolling, profile priority, cancelled with the screen | A fling through a thousand members costs one screen of names |
 
 All requests share the 429 pause of sync and sending.
 
@@ -109,6 +112,7 @@ All requests share the 429 pause of sync and sending.
 | Opening a dialog fails | Shown; nothing stored. The request is idempotent on the server, so trying again is safe |
 | `404` when opening a dialog | The user no longer exists |
 | Creating a channel: no answer, 5xx, timeout or an invalid answer | The request is not idempotent, so its outcome is unknown: the client does not repeat it, OkHttp is not allowed to repeat it either (a one-shot body), the form keeps the name, a sync is started, and the message says to check the room list before trying again |
+| Creating a channel: the answer cannot be stored | The channel exists on the server: reported as an unknown outcome, and the sync it starts stores the channel |
 | Creating a channel: `400` | The name is rejected; nothing was created |
 | `401` | The token is renewed and the request repeated once (SessionManager); a `401` means that the Gateway did not pass it on, so this is safe for creation too |
 | Adding a member: `404` | Either the user or the room is gone: the room is read again; a `404` for it deletes the room, otherwise the user is reported as not found |
@@ -118,6 +122,7 @@ All requests share the 429 pause of sync and sending.
 | Roster fails (network, 5xx) | The stored roster stays on screen with the error and "Повторить" |
 | Roster `404` | The room is deleted and the screen closes |
 | Room deleted while one of its screens is open (event, sync) | The members screen and the conversation close |
+| Database failure in any of these actions | Reported as "could not store on this device"; nothing crashes |
 | Session ends | Results for the ended session are dropped, as in sync.md |
 
 ## Acceptance tests
@@ -145,3 +150,28 @@ JVM and Robolectric tests against the fake Gateway:
 
 Not covered by automated tests: the Compose screens, which are checked by
 hand on a device.
+
+## Review of 42d1914
+
+Every finding below failed its test on 42d1914 before its fix. The names
+test failed there in the reviewer's form, against the former
+`wantProfiles` (300 requests for a fling through 300 rows); it now drives
+the flow of visible rows that replaced it.
+
+| Finding | Test | Resolution |
+|---|---|---|
+| A failure other than an `ApiException` crashed the screen, including a database failure after the server had created the channel, which also skipped the sync and the "check the list" message | `aStorageFailureAfterCreatingIsAnUnknownOutcome` | A failure to store a created channel is an unknown outcome; the screens report any other failure as a local one |
+| A sync that ended while the roster was read was dropped, so a change missed while offline stayed missing until the next sync | `aSyncThatEndsDuringARosterReadIsNotDropped` | Reloads during a read run one more read after it |
+| Names were requested for every row composed while scrolling, in the session's scope: a fling through 1000 members cost 1000 requests, and closing the screen did not stop them | `namesOfRowsScrolledPastAreNotRequested` | Rows on screen after 300 ms, requested in the screen's coroutine |
+| A search page with a user twice crashed the list, whose keys are user IDs | `aSearchPageWithAUserTwiceIsRejected` | Rejected as an invalid response |
+| The same member in upper and lower case passed the order check and was stored twice | `aMalformedRosterStoresNothing` | Member IDs must be lowercase, as the server sends them |
+
+Not changed:
+
+- **`forRoom` deletes a room on `404` without counting a departure**, now
+  also for rosters and adding members. A room read for an earlier event
+  may come back, and the next request for it gets `404` and deletes it
+  again. Inherited from stage 3 and self-correcting.
+- **Channel names may contain format characters** such as U+202E, which the
+  server accepts. They are shown as plain text, as all names are; whether
+  to restrict them is for the server, where every client would benefit.

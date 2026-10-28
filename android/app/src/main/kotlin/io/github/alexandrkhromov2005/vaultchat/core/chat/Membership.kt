@@ -13,6 +13,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.NotRepeatable
 import io.github.alexandrkhromov2005.vaultchat.core.net.OpenDirectRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.PublicProfile
 import io.github.alexandrkhromov2005.vaultchat.core.net.noContent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -44,6 +45,8 @@ class Membership(
         val page = sync.request(Priority.USER) { this.searchUsers(it, query, limits.searchPage) }
         if (page.users.size > limits.searchPage) throw invalid("search page over its limit")
         if (page.users.any { !isUuid(it.userId) }) throw invalid("user_id is not a UUID")
+        // The results are listed by user ID, which must be unique.
+        if (page.users.distinctBy { it.userId.lowercase() }.size != page.users.size) throw invalid("a user twice")
         val users = page.users.filter { !it.userId.equals(me, ignoreCase = true) }
         dao.upsertProfiles(users.map { ProfileEntity(it.userId, it.username) })
         return users
@@ -77,7 +80,14 @@ class Membership(
                 throw invalid("not the channel asked for")
             }
             val entity = room.toEntity(me, activity = 0)
-            sync.storeJoined(entity)
+            try {
+                sync.storeJoined(entity)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The channel exists, but this device could not store it.
+                throw ApiException(0, ApiException.LOCAL, "local failure", cause = e)
+            }
             return entity.roomId
         } catch (e: ApiException) {
             if (isUnknownOutcome(e)) sync.requestSync()
@@ -174,8 +184,9 @@ class Membership(
     companion object {
         /**
          * Whether a failed request may still have been carried out: the
-         * connection broke, the answer was not what the API describes, or the
-         * Gateway or a service behind it failed or timed out.
+         * connection broke, the answer was not what the API describes, the
+         * Gateway or a service behind it failed or timed out, or this device
+         * could not store the answer.
          */
         fun isUnknownOutcome(e: ApiException): Boolean =
             e.status == 0 || e.code == ApiException.INVALID_RESPONSE || e.status >= 500 || e.status == 408

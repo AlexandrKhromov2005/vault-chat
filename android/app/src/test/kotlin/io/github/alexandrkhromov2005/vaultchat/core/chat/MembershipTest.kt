@@ -98,6 +98,48 @@ class MembershipTest {
     }
 
     @Test
+    fun aSearchPageWithAUserTwiceIsRejected() = runBlocking {
+        // The results are keyed by user ID; a repeated key crashes the list.
+        server.searchReply = { page -> page.copy(users = page.users + PublicProfile(bob, "bob")) }
+        assertEquals(ApiException.INVALID_RESPONSE, failure { membership().search("bo") }.code)
+    }
+
+    @Test
+    fun aStorageFailureAfterCreatingIsAnUnknownOutcome() = runBlocking {
+        val sql = database.openHelper.writableDatabase
+        sql.execSQL("ALTER TABLE rooms RENAME TO rooms_unavailable")
+        val error = try {
+            failure { membership().createChannel("news", private = false) }
+        } finally {
+            sql.execSQL("ALTER TABLE rooms_unavailable RENAME TO rooms")
+        }
+
+        assertEquals(1, server.created())
+        assertEquals(ApiException.LOCAL, error.code)
+        assertTrue(Membership.isUnknownOutcome(error))
+        // A sync was started, which lists the channel once the database works.
+        eventually { server.calls().contains("rooms null") }
+    }
+
+    @Test
+    fun namesOfRowsScrolledPastAreNotRequested() = runBlocking {
+        val fast = ChatSync(dao, me, server.requests, scope, System::currentTimeMillis, ChatSync.Limits(requestsPerMinute = 60_000))
+        val ids = (1..300).map { server.id(9, it) }
+        val visible = kotlinx.coroutines.flow.MutableStateFlow(ids.take(10))
+        val following = scope.launch { fast.followVisibleProfiles(visible) }
+        // A fling: ten rows on screen at a time, a few milliseconds each.
+        ids.windowed(10, 10).forEach {
+            visible.value = it
+            delay(2)
+        }
+        delay(ChatSync.VISIBLE_SETTLE_MS + 500)
+        following.cancel()
+
+        val requested = server.calls().filter { it.startsWith("user ") }.map { it.removePrefix("user ") }
+        assertEquals(ids.takeLast(10).sorted(), requested.sorted())
+    }
+
+    @Test
     fun aQueryTheServerRejectsIsNeverSent() = runBlocking {
         for (query in listOf("b", "1bob", "bo b", "боб")) {
             try {
@@ -270,6 +312,12 @@ class MembershipTest {
             { page -> page.copy(members = page.members + MemberDto(server.id(9, 99), "2026-10-27T12:00:00Z")) },
             // Not a UUID.
             { page -> page.copy(members = listOf(MemberDto("me", "2026-10-27T12:00:00Z"))) },
+            // The same user in another case, which sorts before lowercase.
+            { page ->
+                val user = page.members.first().userId.also { assertEquals(me, it) }
+                // Without a next page, so that only the case is wrong.
+                MemberPage(listOf(MemberDto(user.uppercase(), "2026-10-27T12:00:00Z"), MemberDto(user, "2026-10-27T12:00:00Z")), "")
+            },
         )
         for (reply in pages) {
             server.memberReply = reply

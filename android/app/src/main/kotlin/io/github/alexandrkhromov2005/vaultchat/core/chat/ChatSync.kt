@@ -9,12 +9,17 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -351,9 +356,29 @@ class ChatSync(
         rosterChanges.merge(roomId, 1L, Long::plus)
     }
 
-    /** Reads the profiles of [userIds] that are not stored yet, in the background. */
-    fun wantProfiles(userIds: List<String>) {
-        scope.launch { loadProfiles(userIds) }
+    /**
+     * Reads the profiles of the users that [visible] shows on screen, once
+     * it has stood still for [VISIBLE_SETTLE_MS]. A change cancels the
+     * requests still waiting for the budget, and so does cancelling the
+     * caller, so rows scrolled past and closed screens cost nothing. Runs
+     * until cancelled.
+     */
+    @OptIn(FlowPreview::class)
+    suspend fun followVisibleProfiles(visible: Flow<List<String>>) {
+        visible.distinctUntilChanged().debounce(VISIBLE_SETTLE_MS).collectLatest { userIds ->
+            coroutineScope {
+                for (userId in unknownProfiles(userIds)) {
+                    if (!profilesInFlight.add(userId)) continue
+                    launch {
+                        try {
+                            loadProfile(userId)
+                        } finally {
+                            profilesInFlight.remove(userId)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private suspend fun applyCreated(roomId: String, message: MessageEntity) {
@@ -531,25 +556,33 @@ class ChatSync(
      * are retried the next time the profile is needed.
      */
     private suspend fun loadProfiles(userIds: List<String>) {
-        val wanted = userIds.distinct().filter { it != me && isUuid(it) }
-        if (wanted.isEmpty()) return
-        val known = wanted.chunked(500).flatMap { dao.knownProfiles(it) }.toSet()
-        for (userId in wanted) {
-            if (userId in known || !profilesInFlight.add(userId)) continue
+        for (userId in unknownProfiles(userIds)) {
+            if (!profilesInFlight.add(userId)) continue
             scope.launch {
                 try {
-                    val profile = try {
-                        request(Priority.PROFILE) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
-                    } catch (e: ApiException) {
-                        if (e.status != 404) return@launch
-                        ProfileEntity(userId, null)
-                    }
-                    dao.upsertProfiles(listOf(profile))
+                    loadProfile(userId)
                 } finally {
                     profilesInFlight.remove(userId)
                 }
             }
         }
+    }
+
+    private suspend fun unknownProfiles(userIds: List<String>): List<String> {
+        val wanted = userIds.distinct().filter { it != me && isUuid(it) }
+        if (wanted.isEmpty()) return emptyList()
+        val known = wanted.chunked(500).flatMap { dao.knownProfiles(it) }.toSet()
+        return wanted.filter { it !in known }
+    }
+
+    private suspend fun loadProfile(userId: String) {
+        val profile = try {
+            request(Priority.PROFILE) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
+        } catch (e: ApiException) {
+            if (e.status != 404) return
+            ProfileEntity(userId, null)
+        }
+        dao.upsertProfiles(listOf(profile))
     }
 
     /** Sends a request within the budget; a 429 pauses every request. */
@@ -582,5 +615,8 @@ class ChatSync(
         /** Rooms a sync loads or catches up at the same time. */
         const val CONCURRENT_ROOMS = 2
         const val EVENT_BUFFER = 1024
+
+        /** How long the rows on screen must stay the same before their names are read. */
+        const val VISIBLE_SETTLE_MS = 300L
     }
 }
