@@ -120,6 +120,10 @@ abstract class ChatDao {
     @Query("SELECT COUNT(*) FROM outbox WHERE state != 'sent'")
     abstract fun unsentCount(): Flow<Int>
 
+    /** Rooms with messages the server has not stored; they exist only on this device. */
+    @Query("SELECT DISTINCT room_id FROM outbox WHERE state != 'sent'")
+    abstract suspend fun roomsWithUnsent(): List<String>
+
     @Query("SELECT COALESCE(MAX(position), 0) FROM outbox")
     protected abstract suspend fun maxPosition(): Long
 
@@ -140,14 +144,17 @@ abstract class ChatDao {
 
     /**
      * Deletes the rows of a room that its stored block now shows: those that a
-     * stored message of their sender matches by key, and sent rows within or
-     * below the block. The key alone is not enough: keys are per sender, and
-     * another member may use the same one.
+     * stored message of their sender matches by key and text, and sent rows
+     * within or below the block. The key alone is not enough: keys are per
+     * sender, and another member may use the same one; and a stored message
+     * with the same key but another text (the server's 409) shows only that
+     * this text was not stored.
      */
     @Query(
         "DELETE FROM outbox WHERE room_id = :roomId AND (" +
             "EXISTS (SELECT 1 FROM messages m WHERE m.room_id = outbox.room_id " +
-            "AND m.client_message_id = outbox.client_message_id AND m.sender_id = outbox.sender_id) " +
+            "AND m.client_message_id = outbox.client_message_id AND m.sender_id = outbox.sender_id " +
+            "AND m.text = outbox.text) " +
             "OR (state = 'sent' AND sequence <= (SELECT newest FROM timelines t WHERE t.room_id = outbox.room_id)))",
     )
     protected abstract suspend fun resolveOutgoing(roomId: String)
@@ -165,7 +172,10 @@ abstract class ChatDao {
         upsertRooms(stored)
         if (!complete) return emptyList()
         val listed = stored.mapTo(HashSet()) { it.roomId }
-        val removed = before.filter { it !in listed }
+        // A listing may miss a room that moved meanwhile; a room with unsent
+        // messages is deleted only once the server confirms it (ChatSync).
+        val unsent = roomsWithUnsent().toSet()
+        val removed = before.filter { it !in listed && it !in unsent }
         deleteRooms(removed)
         return removed
     }
@@ -183,7 +193,15 @@ abstract class ChatDao {
     @Transaction
     open suspend fun enqueue(row: OutgoingEntity): Boolean {
         if (room(row.roomId) == null) return false
-        insertOutgoing(row.copy(position = maxPosition() + 1, state = OutgoingEntity.QUEUED, sequence = null, error = null))
+        insertOutgoing(
+            row.copy(
+                position = maxPosition() + 1,
+                state = OutgoingEntity.QUEUED,
+                sequence = null,
+                error = null,
+                afterSequence = timeline(row.roomId)?.newest ?: 0,
+            ),
+        )
         setActivity(row.roomId, maxActivity() + 1)
         return true
     }
@@ -204,7 +222,15 @@ abstract class ChatDao {
     open suspend fun requeue(failedId: String, clientMessageId: String): Boolean {
         val row = outgoingRow(failedId)?.takeIf { it.state == OutgoingEntity.FAILED } ?: return false
         deleteOutgoing(failedId)
-        insertOutgoing(row.copy(clientMessageId = clientMessageId, position = maxPosition() + 1, state = OutgoingEntity.QUEUED, error = null))
+        insertOutgoing(
+            row.copy(
+                clientMessageId = clientMessageId,
+                position = maxPosition() + 1,
+                state = OutgoingEntity.QUEUED,
+                error = null,
+                afterSequence = timeline(row.roomId)?.newest ?: 0,
+            ),
+        )
         return true
     }
 
@@ -258,14 +284,20 @@ abstract class ChatDao {
     }
 
     private companion object {
+        // The room's preview from the outbox: its last row, if it is queued or
+        // sent, or failed with no message stored after it was queued. Local and
+        // server clocks differ, so sequences decide, not times.
+        const val PREVIEWED = "o.room_id = r.room_id AND (o.state != 'failed' OR o.after_sequence >= COALESCE(t.newest, 0)) " +
+            "ORDER BY o.position DESC LIMIT 1"
+
         const val ROOM_LIST = "SELECT r.*, p.username AS peer_name, m.text AS last_text, m.sender_id AS last_sender_id, " +
             "m.attachments AS last_attachments, m.created_at AS last_created_at, " +
             "(SELECT COUNT(*) FROM messages u WHERE u.room_id = r.room_id AND u.sequence > t.last_read " +
             "AND u.sender_id != :me) AS unread, " +
             "COALESCE(t.oldest > t.last_read + 1, 0) AS unread_more, " +
-            "(SELECT o.text FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_text, " +
-            "(SELECT o.state FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_state, " +
-            "(SELECT o.created_at FROM outbox o WHERE o.room_id = r.room_id ORDER BY o.position DESC LIMIT 1) AS pending_created_at " +
+            "(SELECT o.text FROM outbox o WHERE " + PREVIEWED + ") AS pending_text, " +
+            "(SELECT o.state FROM outbox o WHERE " + PREVIEWED + ") AS pending_state, " +
+            "(SELECT o.created_at FROM outbox o WHERE " + PREVIEWED + ") AS pending_created_at " +
             "FROM rooms r LEFT JOIN timelines t ON t.room_id = r.room_id " +
             "LEFT JOIN messages m ON m.room_id = r.room_id AND m.sequence = t.newest " +
             "LEFT JOIN profiles p ON p.user_id = r.peer_id"

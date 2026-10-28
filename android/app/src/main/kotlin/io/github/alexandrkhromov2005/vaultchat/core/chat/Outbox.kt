@@ -40,6 +40,11 @@ class Outbox(
     private val backoff: () -> Backoff = { Backoff(baseMs = 1_000, maxMs = 60_000) },
     /** Called after a message is queued, so that it is sent in the background too. */
     private val onQueued: () -> Unit = {},
+    /**
+     * Sends, repeats included, keep to this budget, so that an outage with
+     * many queued rooms stays inside the Gateway's limit next to sync's.
+     */
+    private val budget: RequestBudget = RequestBudget(SENDS_PER_MINUTE, SEND_BURST) { System.nanoTime() / 1_000_000 },
 ) {
     private val gate = sync.gate
     private val permits = Semaphore(CONCURRENT_SENDS)
@@ -54,7 +59,21 @@ class Outbox(
 
     init {
         // The first value also picks up a queue left by an earlier process.
-        scope.launch { wakes.collect { startRooms() } }
+        scope.launch {
+            wakes.collect {
+                try {
+                    startRooms()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A database failure must not end sending; try again soon.
+                    scope.launch {
+                        delay(RESTART_AFTER_FAILURE_MS)
+                        wake()
+                    }
+                }
+            }
+        }
     }
 
     val queuedCount: Flow<Int> get() = dao.queuedCount()
@@ -65,12 +84,12 @@ class Outbox(
     fun outgoing(roomId: String): Flow<List<OutgoingEntity>> = dao.outgoing(roomId)
 
     /**
-     * Queues [text] for [roomId] unchanged. Returns why it cannot be sent, or
-     * null once it is queued. A room that is no longer stored is gone for the
-     * user, and the text is dropped with it.
+     * Queues [text] for [roomId] unchanged. Returns whether it was queued: not
+     * if the server would reject the text (MessageText) or the room is no
+     * longer stored, so that the composer keeps it.
      */
-    suspend fun send(roomId: String, text: String): MessageText.Problem? {
-        MessageText.check(text)?.let { return it }
+    suspend fun send(roomId: String, text: String): Boolean {
+        if (MessageText.check(text) != null) return false
         val row = OutgoingEntity(
             clientMessageId = newId(),
             roomId = roomId,
@@ -80,8 +99,9 @@ class Outbox(
             createdAt = nowMicros(),
             state = OutgoingEntity.QUEUED,
         )
-        if (dao.enqueue(row)) queued()
-        return null
+        if (!dao.enqueue(row)) return false
+        queued()
+        return true
     }
 
     /**
@@ -131,26 +151,18 @@ class Outbox(
         }
     }
 
-    /** Sends the queue of one room until it is empty. */
+    /**
+     * Sends the queue of one room until it is empty. The room stays in
+     * [sending] until then, also through failures, so that no second sender
+     * for it can start and break its order.
+     */
     private suspend fun sendRoom(roomId: String) {
         val delays = backoff()
         while (true) {
-            val row = dao.nextQueued(roomId)
-            if (row == null) {
-                synchronized(sending) { sending.remove(roomId) }
-                // A message queued after the check above and before the room
-                // left the set started nothing.
-                if (dao.nextQueued(roomId) != null) wake()
-                return
-            }
-            network.first { it != null }
             // A kick during the attempt, such as a new network, also cuts the backoff after it short.
             val seen = kicks.value
             val outcome = try {
-                permits.withPermit {
-                    while (gate.remaining() > 0) delay(gate.remaining())
-                    attempt(row)
-                }
+                sendNext(roomId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -158,6 +170,7 @@ class Outbox(
                 Outcome.RETRY
             }
             when (outcome) {
+                Outcome.EMPTY -> return
                 Outcome.DONE -> delays.reset()
                 Outcome.PAUSED -> Unit
                 Outcome.RETRY -> {
@@ -167,7 +180,29 @@ class Outbox(
         }
     }
 
-    private enum class Outcome { DONE, RETRY, PAUSED }
+    private suspend fun sendNext(roomId: String): Outcome {
+        val row = dao.nextQueued(roomId)
+        if (row == null) {
+            synchronized(sending) { sending.remove(roomId) }
+            // A message queued after the check above and before the room left
+            // the set started nothing. If the check fails, a wake does no harm.
+            val more = try {
+                dao.nextQueued(roomId) != null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                true
+            }
+            if (more) wake()
+            return Outcome.EMPTY
+        }
+        network.first { it != null }
+        while (gate.remaining() > 0) delay(gate.remaining())
+        budget.take()
+        return permits.withPermit { attempt(row) }
+    }
+
+    private enum class Outcome { EMPTY, DONE, RETRY, PAUSED }
 
     private suspend fun attempt(row: OutgoingEntity): Outcome {
         val message = try {
@@ -211,5 +246,11 @@ class Outbox(
 
     companion object {
         const val CONCURRENT_SENDS = 2
+
+        // With sync's 60/min and burst 15, inside the Gateway's 120/min and 30.
+        const val SENDS_PER_MINUTE = 30
+        const val SEND_BURST = 10
+
+        private const val RESTART_AFTER_FAILURE_MS = 1_000L
     }
 }

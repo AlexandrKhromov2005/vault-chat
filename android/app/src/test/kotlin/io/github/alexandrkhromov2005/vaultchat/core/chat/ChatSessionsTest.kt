@@ -155,6 +155,15 @@ class ChatSessionsTest {
     }
 
     @Test
+    fun theBackgroundJobKeepsToItsBudgetWhileTheSessionIsRestored() = runBlocking {
+        val sessions = ChatSessions(databases, deps, scope)
+        sessions.follow(MutableStateFlow(SessionState.Restoring))
+
+        // A restore that never ends must not hold the job until WorkManager stops it.
+        assertFalse(withTimeout(2_000) { sendQueuedMessages(sessions, budgetMs = 300) })
+    }
+
+    @Test
     fun theBackgroundJobEndsAtOnceWithoutASession() = runBlocking {
         val sessions = ChatSessions(databases, deps, scope)
         sessions.follow(MutableStateFlow(SessionState.SignedOut(SessionState.Reason.NONE)))

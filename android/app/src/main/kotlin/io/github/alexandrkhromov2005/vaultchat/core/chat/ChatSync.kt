@@ -210,13 +210,14 @@ class ChatSync(
     }
 
     private suspend fun sync() {
-        val listed = listLock.withLock {
+        val (listed, complete) = listLock.withLock {
             val (rooms, complete) = listRooms()
             val entities = rooms.map { it.toEntity(me, activity = 0) }
             dao.storeRoomList(entities, complete)
-            entities
+            entities to complete
         }
         loadProfiles(listed.mapNotNull { it.peerId })
+        if (complete) confirmUnlisted(listed.mapTo(HashSet()) { it.roomId })
 
         val timelines = dao.timelines().associateBy { it.roomId }
         val stale = listed.filter { room ->
@@ -256,6 +257,23 @@ class ChatSync(
         val moved = first.associateBy { it.roomId }
         val merged = first + rooms.values.filter { it.roomId !in moved }
         return merged to (cursor == null)
+    }
+
+    /**
+     * Asks the server about unlisted rooms that a complete listing did not
+     * delete because they hold unsent messages: a listing may miss a room that
+     * moved meanwhile, and the queue exists only here. A 404 deletes the room;
+     * other failures leave it to the next sync.
+     */
+    private suspend fun confirmUnlisted(listed: Set<String>) {
+        for (roomId in dao.roomsWithUnsent()) {
+            if (roomId in listed || dao.room(roomId) == null) continue
+            try {
+                forRoom(roomId) { request(Priority.BACKGROUND) { room(it, roomId) } }
+            } catch (e: ApiException) {
+                // Unknown for now; the room and its queue stay.
+            }
+        }
     }
 
     /** Applies one live event. */

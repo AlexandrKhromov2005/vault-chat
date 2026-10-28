@@ -86,7 +86,11 @@ class ChatSession(
 
     val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
 
-    val outbox = Outbox(dao, me, requests, sync, scope, deps.network, onQueued = deps::scheduleBackgroundSend)
+    val outbox = Outbox(
+        dao, me, requests, sync, scope, deps.network,
+        onQueued = deps::scheduleBackgroundSend,
+        budget = RequestBudget(Outbox.SENDS_PER_MINUTE, Outbox.SEND_BURST, deps.elapsed),
+    )
 
     val realtime = Realtime(
         userId = me,

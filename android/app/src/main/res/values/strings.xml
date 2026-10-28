@@ -87,6 +87,7 @@
     <string name="message_failed">Не отправлено</string>
     <string name="message_failed_no_access">Не отправлено: нет доступа к комнате</string>
     <string name="message_failed_rejected">Не отправлено: сервер отклонил сообщение</string>
+    <string name="message_actions">Действия с сообщением</string>
     <string name="message_retry">Отправить ещё раз</string>
     <string name="message_copy">Скопировать</string>
     <string name="message_delete">Удалить</string>

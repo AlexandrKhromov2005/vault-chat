@@ -58,6 +58,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -160,8 +162,22 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
     val outgoing: StateFlow<List<OutgoingEntity>> = chat.outbox.outgoing(roomId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
-    /** Queues [text]; it is stored even if the screen closes at once. */
-    fun send(text: String) = outboxWork { chat.outbox.send(roomId, text) }
+    /**
+     * Queues [text] and reports whether it was queued, so that the composer
+     * keeps text that was not. It is stored even if the screen closes at once.
+     */
+    fun send(text: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val queued = withContext(NonCancellable) {
+                try {
+                    chat.outbox.send(roomId, text)
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            onResult(queued)
+        }
+    }
 
     fun retry(clientMessageId: String) = outboxWork { chat.outbox.retry(clientMessageId) }
 
@@ -256,8 +272,9 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit) {
  * button is enabled only for text the server accepts (MessageText).
  */
 @Composable
-private fun Composer(onSend: (String) -> Unit) {
+private fun Composer(onSend: (String, (Boolean) -> Unit) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
     val problem = MessageText.check(text)
     val length = MessageText.length(text)
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -268,7 +285,9 @@ private fun Composer(onSend: (String) -> Unit) {
             Column(Modifier.weight(1f)) {
                 TextField(
                     value = text,
-                    onValueChange = { text = it },
+                    // Pasted Windows line ends would otherwise be rejected as
+                    // control characters; what is queued is what is shown.
+                    onValueChange = { text = it.replace("\r\n", "\n").replace('\r', '\n') },
                     placeholder = { Text(stringResource(R.string.composer_hint)) },
                     maxLines = COMPOSER_LINES,
                     shape = RoundedCornerShape(24.dp),
@@ -292,21 +311,26 @@ private fun Composer(onSend: (String) -> Unit) {
                         hint,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+                        modifier = Modifier.padding(start = 16.dp, top = 2.dp).semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
             }
             IconButton(
                 onClick = {
-                    onSend(text)
-                    text = ""
+                    val sent = text
+                    sending = true
+                    onSend(sent) { queued ->
+                        sending = false
+                        // Text typed meanwhile stays.
+                        if (queued && text == sent) text = ""
+                    }
                 },
-                enabled = problem == null,
+                enabled = problem == null && !sending,
             ) {
                 Icon(
                     painterResource(R.drawable.ic_send),
                     contentDescription = stringResource(R.string.composer_send),
-                    tint = if (problem == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (problem == null && !sending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -330,25 +354,32 @@ private fun Messages(
 ) {
     val listState = rememberLazyListState()
     val refresh = rows.loadState.refresh
-    // Outgoing messages are the first items; the newest stored one follows them.
+    // Outgoing messages are the first items; the newest stored one follows
+    // them. Long outgoing messages may fill the screen, so what is in view is
+    // read from the layout, not from the first index.
     val outgoingCount by rememberUpdatedState(outgoing.size)
+    fun inView(index: Int) = listState.layoutInfo.visibleItemsInfo.any { it.index == index }
 
-    // Follow new messages while the newest one is in view.
+    // Follow new messages while the newest one, or the one it pushed up, is in view.
     val newest = if (rows.itemCount > 0) rows.peek(0)?.key else null
     LaunchedEffect(newest) {
-        if (listState.firstVisibleItemIndex <= outgoingCount + 1) listState.animateScrollToItem(0)
+        if (inView(outgoingCount) || inView(outgoingCount + 1)) listState.animateScrollToItem(0)
     }
     // The room is read once its newest message is on screen, not while the
     // reader is scrolled up in the history.
-    val atNewest by remember { derivedStateOf { listState.firstVisibleItemIndex <= outgoingCount } }
+    val atNewest by remember { derivedStateOf { inView(outgoingCount) } }
     LifecycleResumeEffect(newest, atNewest) {
         if (newest != null && atNewest) onNewestSeen()
         onPauseOrDispose { }
     }
-    // A message the user has just queued is always brought into view.
-    val lastQueued = outgoing.lastOrNull()?.clientMessageId
+    // A message the user has just queued (or queued again) is brought into
+    // view; one leaving the queue moves nothing.
+    val lastQueued = outgoing.maxOfOrNull { it.position }
+    var seenQueued by remember { mutableStateOf(lastQueued) }
     LaunchedEffect(lastQueued) {
-        if (lastQueued != null) listState.animateScrollToItem(0)
+        val previous = seenQueued
+        seenQueued = lastQueued
+        if (lastQueued != null && (previous == null || lastQueued > previous)) listState.animateScrollToItem(0)
     }
 
     if (rows.itemCount == 0 && outgoing.isEmpty()) {
@@ -528,8 +559,8 @@ private fun StatusIcon(icon: Int, tint: Color) {
 }
 
 /**
- * A message of the outgoing queue. A failed one opens a menu to send it
- * again, copy its text or delete it.
+ * A message of the outgoing queue. It opens a menu to copy its text; a
+ * failed one also to send it again or delete it.
  */
 @Composable
 private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) -> Unit, onDelete: (String) -> Unit) {
@@ -547,6 +578,7 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
     val time = formatTime(row.createdAt, LocalLocale.current.platformLocale)
     val description = listOf(stringResource(R.string.sender_you), row.text, time, state).joinToString(", ")
     var menu by remember { mutableStateOf(false) }
+    val actions = stringResource(R.string.message_actions)
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
 
@@ -556,7 +588,7 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                 Modifier
                     .widthIn(max = maxWidth)
                     .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(18.dp))
-                    .then(if (failure != null) Modifier.clickable { menu = true } else Modifier)
+                    .clickable(onClickLabel = actions) { menu = true }
                     .clearAndSetSemantics { contentDescription = description }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
@@ -564,13 +596,15 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                 Footer(time, delivery, Modifier.align(Alignment.End))
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.message_retry)) },
-                    onClick = {
-                        menu = false
-                        onRetry(row.clientMessageId)
-                    },
-                )
+                if (failure != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.message_retry)) },
+                        onClick = {
+                            menu = false
+                            onRetry(row.clientMessageId)
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.message_copy)) },
                     onClick = {
@@ -578,13 +612,15 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                         scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, row.text))) }
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.message_delete)) },
-                    onClick = {
-                        menu = false
-                        onDelete(row.clientMessageId)
-                    },
-                )
+                if (failure != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.message_delete)) },
+                        onClick = {
+                            menu = false
+                            onDelete(row.clientMessageId)
+                        },
+                    )
+                }
             }
         }
         if (failure != null) {
@@ -592,7 +628,8 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                 failure,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 2.dp, end = 4.dp),
+                // The bubble's description already says it.
+                modifier = Modifier.padding(top = 2.dp, end = 4.dp).clearAndSetSemantics { },
             )
         }
     }

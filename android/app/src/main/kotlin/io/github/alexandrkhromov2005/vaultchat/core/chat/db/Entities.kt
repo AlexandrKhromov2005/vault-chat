@@ -96,6 +96,8 @@ data class OutgoingEntity(
     val sequence: Long? = null,
     /** Why the server rejected it; set in [FAILED]. */
     val error: String? = null,
+    /** The newest stored sequence of the room when it was queued, to place a failed row in the room list. */
+    @ColumnInfo(name = "after_sequence") val afterSequence: Long = 0,
 ) {
     companion object {
         /** Waiting to be sent, or being sent. */

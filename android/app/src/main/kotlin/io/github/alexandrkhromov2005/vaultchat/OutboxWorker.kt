@@ -25,17 +25,22 @@ class OutboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     companion object {
-        private const val NAME = "outbox"
+        internal const val NAME = "outbox"
 
         // WorkManager stops a job after 10 minutes.
         private const val BUDGET_MS = 8 * 60 * 1000L
 
-        /** Starts the job unless one is waiting or running already. */
+        /**
+         * Starts the job, replacing one that waits (for a network, or for its
+         * backoff after retries) or runs: a running job may already have seen
+         * an empty queue. Cancelling it is safe, since sending runs in the
+         * session's scope and repeats with the same key.
+         */
         fun schedule(context: Context) {
             val request = OneTimeWorkRequestBuilder<OutboxWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(NAME, ExistingWorkPolicy.KEEP, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(NAME, ExistingWorkPolicy.REPLACE, request)
         }
     }
 }

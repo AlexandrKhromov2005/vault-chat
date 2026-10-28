@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,8 +15,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -24,6 +28,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.IOException
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -31,7 +36,8 @@ class OutboxTest {
     private val me = "00000000-0000-4000-8000-0000000000aa"
     private val peer = "00000000-0000-4000-8000-0000000000bb"
     private val server = FakeChatServer(me)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Like ChatSession's scope: a failed task is swallowed.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
     private val network = MutableStateFlow<Any?>(Unit)
     private val keys = AtomicInteger()
     private lateinit var database: ChatDatabase
@@ -72,12 +78,160 @@ class OutboxTest {
 
     private fun sends() = server.calls().filter { it.startsWith("send ") }
 
+    private suspend fun within(ms: Long, condition: suspend () -> Boolean): Boolean =
+        withTimeoutOrNull(ms) { while (!condition()) delay(20); true } ?: false
+
+    private fun sql(statement: String) = database.openHelper.writableDatabase.execSQL(statement)
+
+    // Review of 2440b66. Each of these failed on it.
+
+    /**
+     * Stage 3 accepts that a listing during which more than a page of rooms
+     * moves deletes some as unlisted, since the next sync brings them and
+     * their history back. The queue exists only on this device: a room with
+     * unsent messages is deleted only once the server confirms it is gone.
+     */
+    @Test
+    fun aRoomMissedByAListingKeepsItsQueue() = runBlocking {
+        // Listed as R6 R5 | R4 R3 | R2 R1 with two rooms per page.
+        val rooms = (1..6).map { server.addChannel(it) }
+        val target = rooms[0]
+        sync = ChatSync(dao, me, server.requests, scope, System::currentTimeMillis, ChatSync.Limits(roomPage = 2))
+        assertNull(sync.syncNow())
+        network.value = null
+        outbox().send(target, "pending")
+
+        // After the second page, the target and then two rooms of the first
+        // page get messages: the last page and the first page read again both
+        // miss the target, and the listing is complete.
+        val armed = AtomicBoolean(true)
+        val pages = AtomicInteger()
+        server.afterRoomPage = {
+            if (armed.get() && pages.incrementAndGet() == 2) {
+                armed.set(false)
+                server.post(target, sender = peer)
+                server.post(rooms[5], sender = peer)
+                server.post(rooms[4], sender = peer)
+            }
+        }
+        assertNull(sync.syncNow())
+        assertNull(sync.syncNow())
+        assertNotNull(dao.room(target))
+
+        assertEquals(listOf("pending"), queue(target).map { it.text })
+    }
+
+    /** A database failure while starting rooms must not end sending for the life of the process. */
+    @Test
+    fun aDatabaseErrorWhileStartingRoomsDoesNotStopSending() = runBlocking {
+        val room = loadedChannel(1)
+        sql("ALTER TABLE outbox RENAME TO outbox_unavailable")
+        val outbox = outbox()
+        delay(300)
+        sql("ALTER TABLE outbox_unavailable RENAME TO outbox")
+
+        outbox.send(room, "hello")
+        outbox.kick()
+
+        assertTrue(within(3_000) { server.sent(room).isNotEmpty() })
+    }
+
+    /** Nor may one between two sends leave the room marked as being sent. */
+    @Test
+    fun aDatabaseErrorBetweenSendsDoesNotStickTheRoom() = runBlocking {
+        val room = loadedChannel(1)
+        val failing = AtomicBoolean(true)
+        val attempts = AtomicInteger()
+        server.intercept = { if (it == "send $room" && failing.get()) 503.also { attempts.incrementAndGet() } else null }
+        val outbox = outbox()
+        outbox.send(room, "hello")
+        assertTrue(within(3_000) { attempts.get() >= 1 })
+
+        sql("ALTER TABLE outbox RENAME TO outbox_unavailable")
+        delay(500)
+        sql("ALTER TABLE outbox_unavailable RENAME TO outbox")
+        failing.set(false)
+
+        outbox.send(room, "again")
+        outbox.kick()
+
+        assertTrue(within(3_000) { server.sent(room).map { it.text } == listOf("hello", "again") })
+    }
+
+    /** A failed message is the room's preview only until a newer message is stored. */
+    @Test
+    fun aNewerMessageFromAPeerIsThePreviewNotAnOldFailedOne() = runBlocking {
+        val room = loadedChannel(1)
+        server.intercept = { if (it == "send $room") 400 else null }
+        outbox().send(room, "rejected")
+        eventually { queue(room).singleOrNull()?.state == OutgoingEntity.FAILED }
+        assertEquals("rejected", dao.roomList(me).first().single().pendingText)
+        server.intercept = { null }
+
+        sync.onEvent(Frame.MessageCreated(room, server.post(room, sender = peer, text = "newer")))
+        eventually { dao.storedMessages(room).isNotEmpty() }
+
+        assertNull(dao.roomList(me).first().single().pendingText)
+    }
+
+    /**
+     * A failed send is repeated per room; without a common budget, a Chat
+     * outage with many queued rooms would exceed the Gateway's limit and its
+     * 429 would pause sync too.
+     */
+    @Test
+    fun repeatedFailuresInManyRoomsKeepToTheSendBudget() = runBlocking {
+        val rooms = (1..6).map { loadedChannel(it) }
+        server.intercept = { if (it.startsWith("send ")) 503 else null }
+        val outbox = Outbox(
+            dao, me, server.requests, sync, scope, network,
+            newId = { key(keys.incrementAndGet()) },
+            backoff = { Backoff(10, 20) },
+            budget = RequestBudget(perMinute = 60, burst = 3, clock = System::currentTimeMillis),
+        )
+
+        rooms.forEach { outbox.send(it, "hello") }
+        delay(1_000)
+
+        // Three at once, then one a second.
+        assertTrue(sends().size.toString(), sends().size <= 5)
+    }
+
+    /**
+     * Keys are per sender, but a stored message of mine with the same key and
+     * another text (the server's 409) proves only that this text was not
+     * stored: it must not resolve the failed row.
+     */
+    @Test
+    fun aConflictingStoredMessageDoesNotResolveTheFailedRow() = runBlocking {
+        val room = loadedChannel(1)
+        server.store(room, me, key(1), "other text")
+        assertNull(sync.syncNow())
+        val outbox = outbox()
+        outbox.send(room, "mine")
+        eventually { queue(room).singleOrNull()?.state == OutgoingEntity.FAILED }
+
+        // Any later write of the room runs the resolution.
+        sync.onEvent(Frame.MessageCreated(room, server.post(room, sender = peer)))
+        eventually { dao.storedMessages(room).size == 2 }
+
+        assertEquals(listOf("mine"), queue(room).map { it.text })
+    }
+
+    /** The composer keeps the text unless it was queued. */
+    @Test
+    fun aMessageForARoomThatIsGoneIsNotReportedAsQueued() = runBlocking {
+        val outbox = outbox()
+
+        assertFalse(outbox.send(server.id(1, 99), "hello"))
+    }
+
     @Test
     fun aMessageIsSentAndShownOnce() = runBlocking {
         val room = loadedChannel(1)
         val outbox = outbox()
 
-        assertNull(outbox.send(room, "hello"))
+        assertTrue(outbox.send(room, "hello"))
 
         eventually { queue(room).isEmpty() }
         assertEquals(listOf("hello"), stored(room))
@@ -384,7 +538,7 @@ class OutboxTest {
         val room = loadedChannel(1)
         val outbox = outbox()
 
-        assertEquals(MessageText.Problem.EMPTY, outbox.send(room, "  "))
+        assertFalse(outbox.send(room, "  "))
 
         assertTrue(queue(room).isEmpty())
     }
