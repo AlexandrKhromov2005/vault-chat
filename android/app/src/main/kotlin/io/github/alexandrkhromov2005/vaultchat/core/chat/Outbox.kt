@@ -246,8 +246,11 @@ class Outbox(
             // If the server stored it after all, sync brings it and resolves the row.
             return fail(row, OutgoingEntity.ERROR_INVALID)
         }
-        dao.markSent(row.roomId, row.clientMessageId, stored.sequence)
+        // Applied first: if that fails, the row is still queued and the send is
+        // repeated with the same key. Marked sent first, a failure here would
+        // leave a sent row that only a later sync resolves.
         sync.receive(stored)
+        dao.markSent(row.roomId, row.clientMessageId, stored.sequence)
         return Outcome.DONE
     }
 

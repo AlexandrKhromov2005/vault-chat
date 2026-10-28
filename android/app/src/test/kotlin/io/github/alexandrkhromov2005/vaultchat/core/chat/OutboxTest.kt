@@ -224,7 +224,8 @@ class OutboxTest {
         failures.join()
         runCatching { sql("ALTER TABLE outbox_x RENAME TO outbox") }
 
-        assertTrue(within(20_000) { rooms.all { queue(it).isEmpty() } })
+        val emptied = within(20_000) { rooms.all { queue(it).isEmpty() } }
+        assertTrue(rooms.flatMap { queue(it) }.joinToString { "${it.text}:${it.state}:${it.sequence}" }, emptied)
         for (room in rooms) {
             assertEquals((1..25).map { "m$it" }, server.sent(room).map { it.text })
         }
@@ -251,6 +252,34 @@ class OutboxTest {
 
         val sent = server.sent(room).size
         assertTrue("sent within 2 s: $sent", sent <= 2 * Outbox.SEND_BURST + 1)
+    }
+
+    /**
+     * A database failure while the answer is applied must not leave the row
+     * sent but never resolved: nothing but a later sync would resolve it.
+     * Seen once in the stress test above on 73ea811.
+     */
+    @Test
+    fun aFailureWhileApplyingTheAnswerDoesNotStrandTheRow() = runBlocking {
+        val room = loadedChannel(1)
+        val broken = AtomicBoolean(true)
+        server.afterSend = {
+            if (broken.compareAndSet(true, false)) {
+                sql("ALTER TABLE rooms RENAME TO rooms_unavailable")
+                scope.launch {
+                    delay(300)
+                    sql("ALTER TABLE rooms_unavailable RENAME TO rooms")
+                }
+            }
+        }
+        val outbox = outbox()
+
+        outbox.send(room, "hello")
+
+        val emptied = within(5_000) { queue(room).isEmpty() }
+        assertTrue(queue(room).joinToString { "${it.state}:${it.sequence}" } + " " + server.calls(), emptied)
+        assertEquals(listOf("hello"), stored(room))
+        assertEquals(1, server.sent(room).size)
     }
 
     /** The rooms one sync asks about are bounded; later syncs take the rest. */

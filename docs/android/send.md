@@ -227,6 +227,8 @@ JVM tests with Robolectric (Room) and a fake Gateway that stores messages by
     order, and the queue empties.
 21. A queue of 40 messages written offline goes within the send budget when
     a network appears.
+22. A database failure while the answer is applied leaves the row queued,
+    and the repeat resolves it.
 
 Not covered by automated tests: Compose screens (there is no Compose UI test
 setup yet), checked by hand on a device.
@@ -282,11 +284,12 @@ failing their check, the others would wait. Both are theoretical.
 ## Review of 6e3a890
 
 The fixes of the second round were confirmed, including how `repeat` is
-counted. One finding, whose regression failed on 6e3a890:
+counted. One finding, and one more from running the stress test again; both regressions failed before their fix:
 
 | Finding | Test | Resolution |
 |---|---|---|
 | `takeNow` never waits, and every row after a success is a first attempt: a queue written offline went out at once (40 in 2 s), with sync's burst beyond the Gateway's, so only its `429` limited it | `aQueueWrittenOfflineIsDrainedWithinTheSendBudget` | First attempts use `RequestBudget.takeWithinDebt`: at once within the burst in debt, then they wait |
+| Found while running the stress test again: the row was marked sent before the answer was applied; a database failure in between left a sent row that only a later sync resolves | `aFailureWhileApplyingTheAnswerDoesNotStrandTheRow` | The answer is applied first; if that fails, the row is still queued and the send repeats with the same key |
 
 Not changed: a row resolved by its echo during a backoff makes the next row
 count as a repeat, and so does a database failure before an attempt. Both
