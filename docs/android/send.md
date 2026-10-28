@@ -260,8 +260,9 @@ Not changed:
   outbox and the pager are separate streams. The database shows it once.
 - **Text lost with the room.** `404` after the server confirms it, or
   `member.removed` for this user, deletes the room and its unsent rows,
-  like a session that expires. Keeping text without its room needs a place
-  to show it; until then this is a decision to confirm.
+  like a session that expires. Accepted on 2026-10-28, as in Telegram and
+  Signal: there is nowhere left to send it. Keeping text without its room
+  needs a place to show it and is revisited if drafts get a screen.
 
 ## Review of 3b14540 and 77910a0
 
