@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -23,6 +25,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
 	handlermocks "github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler/mocks"
 	middlewaremocks "github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware/mocks"
+	gatewaylimit "github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/ratelimit"
 )
@@ -176,7 +179,11 @@ func TestConcurrentFailedLoginsCannotOutrunTheAddressQuota(t *testing.T) {
 }
 
 func TestRefreshBehindOneAddress(t *testing.T) {
-	f := newNATFixture(t, func(d *router.Deps) { d.RefreshLimiter = unavailableCredentialLimiter{} })
+	f := newNATFixture(t, func(d *router.Deps) {
+		d.RefreshLimiter = unavailableCredentialLimiter{}
+		// The address bucket of the API must not be the one that answers.
+		d.Limiter = ratelimit.NewMemoryLimiter(time.Minute, 1000, 4096)
+	})
 	f.auth.EXPECT().RefreshToken(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, in *authv1.RefreshTokenRequest, _ ...grpc.CallOption) (*authv1.RefreshTokenResponse, error) {
 			if in.GetRefreshToken() == "valid" {
@@ -192,8 +199,9 @@ func TestRefreshBehindOneAddress(t *testing.T) {
 	for i := range 30 {
 		require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/refresh", `{"refresh_token":"forged"}`).Code, "forgery %d", i)
 	}
-	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/refresh", `{"refresh_token":"forged"}`).Code,
-		"the local bucket holds while Redis is down")
+	w := f.post("/api/v1/auth/refresh", `{"refresh_token":"forged"}`)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, "the local bucket holds while Redis is down")
+	require.Equal(t, "30", w.Header().Get("X-RateLimit-Limit"), "the refresh bucket answers")
 }
 
 func TestCredentialAddressQuotaFailsClosed(t *testing.T) {
@@ -214,4 +222,54 @@ func TestCredentialQuotasAreConfigurable(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/login", loginBody(2)).Code)
 	require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/refresh", `{"refresh_token":"r"}`).Code)
 	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/refresh", `{"refresh_token":"r"}`).Code)
+}
+
+func TestEmailChangeGuessesAreLimitedPerAccount(t *testing.T) {
+	f := newNATFixture(t)
+	f.validator.EXPECT().ValidateToken(mock.Anything, mock.Anything).
+		Return(&authv1.ValidateTokenResponse{Valid: true, UserId: "u-1"}, nil)
+	f.auth.EXPECT().RequestEmailChange(mock.Anything, mock.Anything).Return(nil, wrongPassword)
+	change := func(i int) int {
+		body := fmt.Sprintf(`{"password":"guess-%d","new_email":"new%d@example.test"}`, i, i)
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/email/change/request", strings.NewReader(body))
+		r.RemoteAddr = natAddr
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Authorization", "Bearer stolen")
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r)
+		return w.Code
+	}
+	// The request checks the account password; a new address per attempt
+	// must not open a new bucket.
+	for i := range 5 {
+		require.Equal(t, http.StatusUnauthorized, change(i), "attempt %d", i)
+	}
+	require.Equal(t, http.StatusTooManyRequests, change(5))
+}
+
+// TestSharedQuotasRefundThroughRedis runs the production limiters: if the
+// shared buckets stopped returning tokens, the address would be back to ten
+// logins a minute.
+func TestSharedQuotasRefundThroughRedis(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	shared := func(perMinute, burst uint32) *gatewaylimit.RedisLimiter {
+		l, err := gatewaylimit.NewRedisLimiter(client, perMinute, burst)
+		require.NoError(t, err)
+		return l
+	}
+	f := newNATFixture(t, func(d *router.Deps) {
+		d.Limiter = shared(1, 30)
+		d.AuthLimiter, d.AuthIPLimiter, d.RefreshLimiter = shared(5, 5), shared(1, 10), shared(1, 30)
+	})
+	f.auth.EXPECT().Login(mock.Anything, mock.Anything).Return(&authv1.LoginResponse{UserId: "u"}, nil)
+	f.auth.EXPECT().RefreshToken(mock.Anything, mock.Anything).Return(&authv1.RefreshTokenResponse{UserId: "u"}, nil)
+	for i := range 40 {
+		require.Equal(t, http.StatusOK, f.post("/api/v1/auth/login", loginBody(i)).Code, "login %d", i)
+		require.Equal(t, http.StatusOK, f.post("/api/v1/auth/refresh", `{"refresh_token":"r"}`).Code, "refresh %d", i)
+	}
+	for _, key := range []string{"rate:ip:198.51.100.20", "rate:auth-ip:ip:198.51.100.20", "rate:refresh-ip:ip:198.51.100.20"} {
+		require.True(t, server.Exists(key), key)
+	}
 }
