@@ -8,12 +8,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
@@ -114,4 +118,100 @@ func TestAuthenticatedUsersBehindOneAddressAreLimitedPerUser(t *testing.T) {
 		codes[get("forged")]++
 	}
 	require.Equal(t, map[int]int{http.StatusUnauthorized: 30, http.StatusTooManyRequests: 10}, codes)
+}
+
+// wrongPassword is how Auth answers a failed login.
+var wrongPassword = status.Error(codes.Unauthenticated, "invalid credentials")
+
+func TestGuessingOneAccountStaysAtFiveAttemptsPerAddress(t *testing.T) {
+	f := newNATFixture(t)
+	f.auth.EXPECT().Login(mock.Anything, mock.Anything).Return(nil, wrongPassword)
+	for i := range 5 {
+		require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/login", loginBody(0)).Code, "attempt %d", i)
+	}
+	// Changing the case of the email does not open a new bucket.
+	w := f.post("/api/v1/auth/login", `{"email":"USER0@example.test","password":"guess"}`)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.NotEmpty(t, w.Header().Get("Retry-After"))
+	require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/login", loginBody(1)).Code, "other accounts are unaffected")
+}
+
+func TestFailedLoginsFromOneAddressAreLimitedAcrossAccounts(t *testing.T) {
+	f := newNATFixture(t)
+	f.auth.EXPECT().Login(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, in *authv1.LoginRequest, _ ...grpc.CallOption) (*authv1.LoginResponse, error) {
+			if in.GetPassword() == "correct" {
+				return &authv1.LoginResponse{UserId: "u"}, nil
+			}
+			return nil, wrongPassword
+		})
+	for i := range 10 {
+		// Logging into own accounts between guesses returns only the
+		// tokens of those logins.
+		known := fmt.Sprintf(`{"email":"own%d@example.test","password":"correct"}`, i)
+		require.Equal(t, http.StatusOK, f.post("/api/v1/auth/login", known).Code)
+		require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/login", loginBody(i)).Code, "guess %d", i)
+	}
+	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/login", loginBody(10)).Code)
+	// Tokens are taken before the outcome is known, so the address now
+	// waits for a refill even for a correct password.
+	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/login", `{"email":"own0@example.test","password":"correct"}`).Code)
+}
+
+func TestConcurrentFailedLoginsCannotOutrunTheAddressQuota(t *testing.T) {
+	f := newNATFixture(t)
+	var reached atomic.Int32
+	f.auth.EXPECT().Login(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *authv1.LoginRequest, ...grpc.CallOption) (*authv1.LoginResponse, error) {
+			reached.Add(1)
+			time.Sleep(10 * time.Millisecond)
+			return nil, wrongPassword
+		})
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Go(func() { f.post("/api/v1/auth/login", loginBody(i)) })
+	}
+	wg.Wait()
+	require.Equal(t, int32(10), reached.Load())
+}
+
+func TestRefreshBehindOneAddress(t *testing.T) {
+	f := newNATFixture(t, func(d *router.Deps) { d.RefreshLimiter = unavailableCredentialLimiter{} })
+	f.auth.EXPECT().RefreshToken(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, in *authv1.RefreshTokenRequest, _ ...grpc.CallOption) (*authv1.RefreshTokenResponse, error) {
+			if in.GetRefreshToken() == "valid" {
+				return &authv1.RefreshTokenResponse{UserId: "u"}, nil
+			}
+			return nil, status.Error(codes.Unauthenticated, "invalid refresh token")
+		})
+	// Without Redis, successful refreshes are neither refused nor limited
+	// by the address quota.
+	for i := range 60 {
+		require.Equal(t, http.StatusOK, f.post("/api/v1/auth/refresh", `{"refresh_token":"valid"}`).Code, "refresh %d", i)
+	}
+	for i := range 30 {
+		require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/refresh", `{"refresh_token":"forged"}`).Code, "forgery %d", i)
+	}
+	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/refresh", `{"refresh_token":"forged"}`).Code,
+		"the local bucket holds while Redis is down")
+}
+
+func TestCredentialAddressQuotaFailsClosed(t *testing.T) {
+	f := newNATFixture(t, func(d *router.Deps) { d.AuthIPLimiter = unavailableCredentialLimiter{} })
+	require.Equal(t, http.StatusServiceUnavailable, f.post("/api/v1/auth/login", loginBody(0)).Code)
+	require.Equal(t, http.StatusServiceUnavailable, f.post("/api/v1/auth/register", `{}`).Code)
+}
+
+func TestCredentialQuotasAreConfigurable(t *testing.T) {
+	f := newNATFixture(t, func(d *router.Deps) {
+		d.AuthIPRateLimitPerMinute, d.AuthIPRateLimitBurst = 1, 2
+		d.RefreshRateLimitPerMinute, d.RefreshRateLimitBurst = 1, 1
+	})
+	f.auth.EXPECT().Login(mock.Anything, mock.Anything).Return(nil, wrongPassword)
+	f.auth.EXPECT().RefreshToken(mock.Anything, mock.Anything).Return(nil, status.Error(codes.Unauthenticated, "invalid"))
+	require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/login", loginBody(0)).Code)
+	require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/login", loginBody(1)).Code)
+	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/login", loginBody(2)).Code)
+	require.Equal(t, http.StatusUnauthorized, f.post("/api/v1/auth/refresh", `{"refresh_token":"r"}`).Code)
+	require.Equal(t, http.StatusTooManyRequests, f.post("/api/v1/auth/refresh", `{"refresh_token":"r"}`).Code)
 }

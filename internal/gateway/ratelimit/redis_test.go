@@ -125,3 +125,40 @@ func TestRedisLimiter_Allow(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestRedisLimiter_Refund(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns a taken token up to the burst", func(t *testing.T) {
+		limiter, _, _ := newTestLimiter(t, 2)
+		for range 2 {
+			res, err := limiter.Allow(ctx, "auth-ip:10.0.0.1")
+			require.NoError(t, err)
+			require.True(t, res.Allowed)
+		}
+		require.NoError(t, limiter.Refund(ctx, "auth-ip:10.0.0.1"))
+		res, err := limiter.Allow(ctx, "auth-ip:10.0.0.1")
+		require.NoError(t, err)
+		require.True(t, res.Allowed)
+		require.Equal(t, 0, res.Remaining)
+
+		for range 5 {
+			require.NoError(t, limiter.Refund(ctx, "auth-ip:10.0.0.1"))
+		}
+		res, err = limiter.Allow(ctx, "auth-ip:10.0.0.1")
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Remaining, "refunds stop at the burst")
+	})
+
+	t.Run("does not create a missing bucket", func(t *testing.T) {
+		limiter, server, _ := newTestLimiter(t, 2)
+		require.NoError(t, limiter.Refund(ctx, "auth-ip:10.0.0.1"))
+		require.False(t, server.Exists("rate:auth-ip:10.0.0.1"))
+	})
+
+	t.Run("redis failure is reported", func(t *testing.T) {
+		limiter, server, _ := newTestLimiter(t, 1)
+		server.Close()
+		require.Error(t, limiter.Refund(ctx, "auth-ip:10.0.0.1"))
+	})
+}
