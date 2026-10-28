@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Vault Chat</string>
+
+    <string name="login_subtitle">Вход в аккаунт</string>
+    <string name="login_submit">Войти</string>
+    <string name="login_to_register">Регистрация по приглашению</string>
+    <string name="session_expired">Сессия завершена. Войдите снова.</string>
+    <string name="login_request_confirmation">Отправить письмо ещё раз</string>
+    <string name="notice_confirm_email">Аккаунт создан. Подтвердите email по ссылке из письма, затем войдите.</string>
+    <string name="notice_confirmation_requested">Если данные подходят, письмо со ссылкой придёт на указанный email.</string>
+
+    <string name="register_title">Регистрация</string>
+    <string name="register_subtitle">Нужно приглашение от администратора сервера.</string>
+    <string name="register_submit">Создать аккаунт</string>
+    <string name="register_to_login">Уже есть аккаунт</string>
+
+    <string name="field_server">Сервер</string>
+    <string name="field_email">Email</string>
+    <string name="field_password">Пароль</string>
+    <string name="field_username">Имя пользователя</string>
+    <string name="field_invitation">Код приглашения</string>
+    <string name="hint_invitation">64 символа из приглашения</string>
+    <string name="hint_username">3–32 символа: латиница, цифры, _ и -, первая — буква</string>
+    <string name="hint_password">8–128 символов, хотя бы одна буква и одна цифра</string>
+    <string name="password_show">Показать</string>
+    <string name="password_hide">Скрыть</string>
+
+    <string name="server_empty">Укажите адрес сервера.</string>
+    <string name="server_malformed">Не похоже на адрес сервера.</string>
+    <string name="server_cleartext">Нужен адрес с https://.</string>
+    <string name="server_credentials">Адрес не должен содержать имя пользователя и пароль.</string>
+    <string name="server_path">Укажите только адрес сервера, без пути и параметров.</string>
+
+    <string name="error_network">Нет связи с сервером. Проверьте адрес и подключение.</string>
+    <string name="error_invalid_response">Сервер ответил не так, как ожидалось. Проверьте адрес сервера.</string>
+    <string name="error_rate_limited">Слишком много попыток. Подождите немного и повторите.</string>
+    <string name="error_rate_limited_for">Слишком много попыток. Повторите через %1$d с.</string>
+    <string name="error_unavailable">Сервис временно недоступен. Повторите позже.</string>
+    <string name="error_credentials">Неверный email или пароль.</string>
+    <string name="error_email_unconfirmed">Подтвердите email по ссылке из письма, затем войдите. Если письма нет, его можно отправить ещё раз.</string>
+    <string name="error_invitation">Приглашение недействительно, истекло или выдано на другой email.</string>
+    <string name="error_forbidden">Недостаточно прав.</string>
+    <string name="error_username_taken">Это имя пользователя уже занято.</string>
+    <string name="error_invalid_email">Некорректный email.</string>
+    <string name="error_invalid_username">Имя пользователя: 3–32 символа, латиница, цифры, _ и -, первая — буква.</string>
+    <string name="error_invalid_password">Пароль: 8–128 символов, хотя бы одна буква и одна цифра.</string>
+    <string name="error_invalid_input">Проверьте введённые данные.</string>
+    <string name="error_registered">Аккаунт создан, но войти не удалось: %1$s Войдите на экране входа.</string>
+    <string name="error_storage">Не удалось сохранить вход на этом устройстве. Освободите место и повторите.</string>
+    <string name="error_unexpected">Что-то пошло не так (HTTP %1$d).</string>
+
+    <string name="logout">Выйти</string>
+    <string name="retry">Повторить</string>
+    <string name="menu">Меню</string>
+    <string name="back">Назад</string>
+
+    <string name="connection_updating">Обновление…</string>
+    <string name="connection_connecting">Подключение…</string>
+    <string name="connection_no_network">Нет сети</string>
+    <string name="connection_unreachable">Нет связи с сервером</string>
+
+    <string name="rooms_title">Чаты</string>
+    <string name="rooms_empty">Здесь появятся ваши диалоги и каналы.</string>
+    <string name="room_kind_direct">Личный диалог</string>
+    <string name="room_kind_channel">Канал</string>
+    <string name="room_kind_private_channel">Закрытый канал</string>
+    <string name="room_kind_other">Комната</string>
+    <string name="preview_own">Вы: %1$s</string>
+    <string name="preview_attachment">Вложение</string>
+    <string name="unread_description">Непрочитанных: %1$d</string>
+
+    <string name="conversation_empty">Сообщений пока нет.</string>
+    <string name="history_offline">Не удалось загрузить сообщения: нет связи с сервером.</string>
+    <string name="history_failed">Не удалось загрузить сообщения.</string>
+    <string name="sender_you">Вы</string>
+    <string name="sender_deleted">Удалённый пользователь</string>
+    <string name="sender_unknown">Участник</string>
+    <string name="day_today">Сегодня</string>
+    <string name="day_yesterday">Вчера</string>
+    <string name="composer_hint">Сообщение</string>
+    <string name="composer_send">Отправить</string>
+    <string name="composer_too_long">%1$d / %2$d</string>
+    <string name="composer_invalid">Текст содержит недопустимые символы.</string>
+    <string name="message_queued">Отправляется</string>
+    <string name="message_sent">Отправлено</string>
+    <string name="message_failed">Не отправлено</string>
+    <string name="message_failed_no_access">Не отправлено: нет доступа к комнате</string>
+    <string name="message_failed_rejected">Не отправлено: сервер отклонил сообщение</string>
+    <string name="message_actions">Действия с сообщением</string>
+    <string name="message_retry">Отправить ещё раз</string>
+    <string name="message_copy">Скопировать</string>
+    <string name="message_delete">Удалить</string>
+    <string name="logout_title">Выйти из аккаунта?</string>
+    <string name="logout_cancel">Отмена</string>
+    <plurals name="logout_unsent">
+        <item quantity="one">%1$d сообщение не отправлено и будет удалено с устройства.</item>
+        <item quantity="few">%1$d сообщения не отправлены и будут удалены с устройства.</item>
+        <item quantity="many">%1$d сообщений не отправлены и будут удалены с устройства.</item>
+        <item quantity="other">%1$d сообщения не отправлены и будут удалены с устройства.</item>
+    </plurals>
+    <plurals name="attachments">
+        <item quantity="one">%1$d вложение</item>
+        <item quantity="few">%1$d вложения</item>
+        <item quantity="many">%1$d вложений</item>
+        <item quantity="other">%1$d вложения</item>
+    </plurals>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds talk to the Gateway over HTTPS only and trust the system
+     store. The Let's Encrypt chain of the IP certificate ends in a cross-sign
+     by ISRG Root X1, which the system store has had since Android 7.1.1. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
