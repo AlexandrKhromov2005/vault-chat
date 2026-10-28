@@ -90,9 +90,11 @@ text is compared too: a stored message with the same key and another text
 through separate observers, which see one transaction one after the other.
 `Handoff` (ui/chat/Handoff.kt) keeps the database's rule on screen:
 
-- a row that leaves the queue while queued or sent stays shown, with a tick,
-  until its stored copy is loaded, for at most 2 s; a failed row that leaves
-  (deleted or queued again under a new key) goes at once;
+- a row that leaves the queue stays shown, with a tick, until its stored
+  copy is loaded, for at most 2 s: it leaves when its message is stored, a
+  failed row too when sync finds that the server stored it after all. A
+  failed row that the user deleted or queued again under a new key goes at
+  once;
 - a row whose stored copy (same key and text) is loaded is hidden;
 - an own stored message takes its row's list key, `c<client_message_id>`, so
   the list keeps the item in place instead of removing one and inserting
@@ -104,7 +106,11 @@ Queue rows and stored own messages share one frame and keep the status
 icon's place, so the hand-over changes only the icon. A message sent within
 0.5 s never shows its clock. While the list is at its very bottom, a new
 message pushes the older ones up (`requestScrollToItem`) instead of
-appearing below the screen; items animate their appearance and moves.
+appearing below the screen; a little above it, a new stored message is
+followed while the newest one is in view, also with outgoing rows below
+the view. Items animate their appearance and moves. The list draws stored
+rows from the same paging snapshot the keys were taken from, so a page that
+arrives between composition and layout cannot pair a message with its row.
 
 Rows are shown below all stored messages of the room, in queue order. The
 last row is the room's preview in the room list if it is queued or sent, or
@@ -250,12 +256,14 @@ JVM tests with Robolectric (Room) and a fake Gateway that stores messages by
 22. A database failure while the answer is applied leaves the row queued,
     and the repeat resolves it.
 23. Hand-over on screen (Compose on Robolectric): a row that leaves the queue
-    before the history reloads stays shown once; a stored copy that arrives
-    before the queue clears is shown once; a rejected text beside the stored
-    message holding its key, and two stored messages sharing a key, are all
-    shown without a duplicate list key.
-24. `Handoff`: lingering and its end, failed rows going at once, order,
-    hiding, keys, the clock's delay.
+    before the history reloads stays shown once, a failed one that sync
+    resolves too; a stored copy that arrives before the queue clears is
+    shown once; a rejected text beside the stored message holding its key,
+    and two stored messages sharing a key, are all shown without a duplicate
+    list key; a new message is followed with a failed row below the view; a
+    row's menu opens beside the whole bubble.
+24. `Handoff`: lingering and its end, failed rows the user dismissed going at
+    once, order, hiding, keys, the clock's delay.
 
 Not covered by automated tests: scrolling, animations and the rest of the
 screens, checked by hand on a device.
@@ -335,3 +343,26 @@ page all end with one message; the end of a room's sender racing a new
 message loses no wake; another member cannot resolve this user's rows; the
 queue does not leak between sessions; answers are classified as Gateway maps
 gRPC codes; `MessageText` matches the Go validator.
+
+## Review of 380cec8 and 9c0e9b8
+
+Three findings; each regression failed before its fix:
+
+| Finding | Test | Resolution |
+|---|---|---|
+| Following new messages was keyed to the bottom item, so with a failed or long queued row below the view a new stored message stayed below the screen | `newMessageIsFollowedWhileAFailedRowIsBelowTheView` | Followed again on a change of the newest stored message, while it or the one it pushed up is in view; the bottom key only keeps the list pinned |
+| A failed row that sync resolved (the server stored it after an invalid answer) left at once, the same jump on a rarer path | `failedRowThatSyncResolvesStaysUntilItsCopyLoads` | Every row that leaves lingers, except a failed row the user deleted or queued again under a new key |
+| The menu of a row was anchored to the bubble's content inside its padding and covered the bubble | `menuOpensBesideTheWholeBubble` | The menu is beside the bubble in a box again |
+
+The reviewer's residual risk, without a reproduction: a page that arrives
+between composition and layout could, for one frame, show a stored message
+next to its still visible row (the keys stay unique). The list now draws
+stored rows from the composition's snapshot.
+
+Not changed: a queued row that leaves because its room was deleted shows a
+tick for up to 2 s, while the screen closes anyway.
+
+Checked without a defect: unique keys whatever the server sends, the pinned
+scroll request, the read mark, lingering rows and the queue's actions, menu
+semantics inside a cleared bubble, the transitions' order of screens in a
+pop and in predictive back.

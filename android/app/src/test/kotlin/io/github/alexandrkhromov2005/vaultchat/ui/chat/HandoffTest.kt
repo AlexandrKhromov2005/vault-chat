@@ -43,11 +43,31 @@ class HandoffTest {
     }
 
     @Test
-    fun failedRowThatLeavesGoesAtOnce() {
+    fun failedRowTheUserDismissedGoesAtOnce() {
         // Deleted by the user, or queued again under a new key after a conflict.
         val failed = row("a", 1, OutgoingEntity.FAILED)
         val requeued = row("b", 2)
-        assertEquals(listOf(OutgoingRow(requeued)), Handoff.next(listOf(OutgoingRow(failed)), listOf(requeued), now = 5))
+        assertEquals(
+            listOf(OutgoingRow(requeued)),
+            Handoff.next(listOf(OutgoingRow(failed)), listOf(requeued), now = 5, dismissed = setOf("a")),
+        )
+    }
+
+    @Test
+    fun failedRowThatSyncResolvesLingers() {
+        // The server stored it after all.
+        val failed = row("a", 1, OutgoingEntity.FAILED)
+        assertEquals(listOf(OutgoingRow(failed, leftAt = 5)), Handoff.next(listOf(OutgoingRow(failed)), emptyList(), now = 5))
+    }
+
+    @Test
+    fun rowRetriedUnderItsKeyLingersWhenStored() {
+        // Dismissed while failed, then queued again and stored.
+        val queued = row("a", 1)
+        assertEquals(
+            listOf(OutgoingRow(queued, leftAt = 5)),
+            Handoff.next(listOf(OutgoingRow(queued)), emptyList(), now = 5, dismissed = setOf("a")),
+        )
     }
 
     @Test

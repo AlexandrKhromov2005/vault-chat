@@ -6,16 +6,26 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.test.core.app.ApplicationProvider
+import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -63,8 +73,12 @@ class ConversationListTest {
             ),
         )
 
-    private fun outgoing(cid: String, text: String, state: String, sequence: Long? = null) =
-        OutgoingEntity(cid, roomId, me, position = 1, text = text, createdAt = now + 5, state = state, sequence = sequence)
+    private fun outgoing(cid: String, text: String, state: String, sequence: Long? = null, error: String? = null) =
+        OutgoingEntity(cid, roomId, me, position = 1, text = text, createdAt = now + 5, state = state, sequence = sequence, error = error)
+
+    /** Bob's messages 1..[count], newest first, under [extra]. */
+    private fun history(count: Int, extra: ChatRow? = null): PagingData<ChatRow> =
+        PagingData.from(listOfNotNull(extra) + (count downTo 1).map { stored(it.toLong(), bob, "cid-$it", "line $it.") })
 
     private fun show() {
         compose.setContent {
@@ -78,6 +92,14 @@ class ConversationListTest {
 
     private fun shown(text: String): Int =
         compose.onAllNodes(hasContentDescription(text, substring = true)).fetchSemanticsNodes().size
+
+    // Not clipped to the list, unlike boundsInRoot.
+    private fun bounds(text: String): Rect =
+        compose.onNode(hasContentDescription(text, substring = true)).fetchSemanticsNode().let { Rect(it.positionInRoot, it.size.toSize()) }
+
+    private fun SemanticsNode.onScreen() = Rect(positionOnScreen, size.toSize())
+
+    private fun listBounds(): Rect = compose.onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
 
     @Test
     fun messageThatLeavesTheQueueBeforeTheHistoryShowsItStaysOnScreen() {
@@ -128,5 +150,45 @@ class ConversationListTest {
 
         assertEquals(2, shown("twice"))
         assertEquals(1, shown("handoff"))
+    }
+
+    @Test
+    fun failedRowThatSyncResolvesStaysUntilItsCopyLoads() {
+        // The server stored it after all, though its answer was invalid.
+        queue.value = listOf(outgoing("cid-5", "handoff", OutgoingEntity.FAILED, error = OutgoingEntity.ERROR_INVALID))
+        show()
+
+        queue.value = emptyList()
+        compose.waitForIdle()
+        assertEquals("shown while the history reloads", 1, shown("handoff"))
+    }
+
+    @Test
+    fun newMessageIsFollowedWhileAFailedRowIsBelowTheView() {
+        queue.value = listOf(outgoing("cid-f", "failed row", OutgoingEntity.FAILED, error = OutgoingEntity.ERROR_NO_ACCESS))
+        pages.value = history(30)
+        show()
+        // The newest stored message at the bottom edge, the failed row below it.
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        compose.waitForIdle()
+
+        pages.value = history(30, stored(31, bob, "cid-31", "fresh"))
+        compose.waitForIdle()
+        assertTrue("fully in view", bounds("fresh").bottom <= listBounds().bottom)
+    }
+
+    @Test
+    fun menuOpensBesideTheWholeBubble() {
+        queue.value = listOf(outgoing("cid-5", "handoff", OutgoingEntity.FAILED, error = OutgoingEntity.ERROR_NO_ACCESS))
+        show()
+        val bubble = compose.onNode(hasContentDescription("handoff", substring = true)).fetchSemanticsNode().onScreen()
+        compose.onNode(hasContentDescription("handoff", substring = true)).performClick()
+        compose.waitForIdle()
+        val retry = ApplicationProvider.getApplicationContext<Context>().getString(R.string.message_retry)
+        compose.onNodeWithText(retry).fetchSemanticsNode()
+        // The popup is a window of its own, smaller than the screen's; it may open above or below the bubble.
+        val menu = compose.onAllNodes(isRoot()).fetchSemanticsNodes().map { it.onScreen() }.minBy { it.width * it.height }
+        assertTrue("$menu overlaps $bubble", menu.bottom <= bubble.top || menu.top >= bubble.bottom)
+        assertTrue("$menu not at an edge of $bubble", menu.left == bubble.left || menu.right == bubble.right)
     }
 }

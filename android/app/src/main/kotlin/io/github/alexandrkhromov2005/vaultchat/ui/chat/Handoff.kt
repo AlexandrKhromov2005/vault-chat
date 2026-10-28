@@ -33,17 +33,23 @@ object Handoff {
 
     /**
      * The rows to show after the queue became [queue]: its rows, plus rows
-     * that left it while queued or sent, until [LINGER_MS] after they left. A
-     * failed row that leaves was deleted or queued again under a new key by
-     * the user and goes at once.
+     * that left it, until [LINGER_MS] after they left: a row leaves when its
+     * message is stored, a failed one too if the server stored it after all.
+     * A failed row in [dismissed] was deleted or queued again under a new key
+     * by the user and goes at once.
      */
-    fun next(previous: List<OutgoingRow>, queue: List<OutgoingEntity>, now: Long): List<OutgoingRow> {
+    fun next(
+        previous: List<OutgoingRow>,
+        queue: List<OutgoingEntity>,
+        now: Long,
+        dismissed: Set<String> = emptySet(),
+    ): List<OutgoingRow> {
         val queued = queue.mapTo(HashSet()) { it.clientMessageId }
         val leaving = previous.mapNotNull { row ->
             when {
                 row.clientMessageId in queued -> null
                 row.leftAt != null -> row.takeIf { now - row.leftAt < LINGER_MS }
-                row.entity.state == OutgoingEntity.FAILED -> null
+                row.entity.state == OutgoingEntity.FAILED && row.clientMessageId in dismissed -> null
                 else -> row.copy(leftAt = now)
             }
         }
@@ -88,15 +94,18 @@ object Handoff {
 }
 
 /** The queue as [Handoff.next] shows it, updated again when a row stops lingering. */
-fun Flow<List<OutgoingEntity>>.handedOver(now: () -> Long): Flow<List<OutgoingRow>> = flow {
+fun Flow<List<OutgoingEntity>>.handedOver(
+    dismissed: () -> Set<String> = { emptySet() },
+    now: () -> Long,
+): Flow<List<OutgoingRow>> = flow {
     var shown = emptyList<OutgoingRow>()
     val updates = transformLatest { queue ->
-        shown = Handoff.next(shown, queue, now())
+        shown = Handoff.next(shown, queue, now(), dismissed())
         emit(shown)
         while (true) {
             val leftAt = shown.mapNotNull { it.leftAt }.minOrNull() ?: break
             delay((leftAt + Handoff.LINGER_MS - now()).coerceAtLeast(1))
-            shown = Handoff.next(shown, queue, now())
+            shown = Handoff.next(shown, queue, now(), dismissed())
             emit(shown)
         }
     }

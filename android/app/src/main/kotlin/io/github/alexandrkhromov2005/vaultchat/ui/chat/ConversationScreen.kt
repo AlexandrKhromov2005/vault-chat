@@ -92,6 +92,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -169,7 +170,7 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
      * history, or failed, and those that just left the queue (Handoff).
      */
     val outgoing: StateFlow<List<OutgoingRow>> = chat.outbox.outgoing(roomId)
-        .handedOver { SystemClock.elapsedRealtime() }
+        .handedOver(dismissed = { dismissed }) { SystemClock.elapsedRealtime() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     /**
@@ -189,9 +190,18 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
         }
     }
 
-    fun retry(clientMessageId: String) = outboxWork { chat.outbox.retry(clientMessageId) }
+    // Failed rows the user deleted or queued again; they leave the screen at once.
+    private val dismissed = ConcurrentHashMap.newKeySet<String>()
 
-    fun delete(clientMessageId: String) = outboxWork { chat.outbox.delete(clientMessageId) }
+    fun retry(clientMessageId: String) {
+        dismissed += clientMessageId
+        outboxWork { chat.outbox.retry(clientMessageId) }
+    }
+
+    fun delete(clientMessageId: String) {
+        dismissed += clientMessageId
+        outboxWork { chat.outbox.delete(clientMessageId) }
+    }
 
     private fun outboxWork(work: suspend () -> Unit) {
         viewModelScope.launch {
@@ -398,7 +408,7 @@ internal fun Messages(
     // At the very bottom the list stays there when a message arrives, so that
     // it pushes the older ones up instead of appearing below the screen.
     val bottom = shown.lastOrNull()?.let { Handoff.key(it, claims) }
-        ?: if (rows.itemCount > 0) rows.peek(0)?.let { Handoff.key(it, claims) } else null
+        ?: snapshot.firstOrNull()?.let { Handoff.key(it, claims) }
     val pinned by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
     val seenBottom = remember { SeenKey(bottom) }
     SideEffect {
@@ -407,13 +417,14 @@ internal fun Messages(
             if (pinned) listState.requestScrollToItem(0)
         }
     }
-    // Otherwise follow new messages while the newest one, or the one it pushed up, is in view.
-    LaunchedEffect(bottom) {
-        if (!pinned && (inView(0) || inView(1))) listState.animateScrollToItem(0)
+    // Otherwise follow new stored messages while the newest one, or the one
+    // it pushed up, is in view, also with outgoing rows below the view.
+    val newest = snapshot.firstOrNull()?.key
+    LaunchedEffect(newest) {
+        if (!pinned && (inView(shownCount) || inView(shownCount + 1))) listState.animateScrollToItem(0)
     }
     // The room is read once its newest message is on screen, not while the
     // reader is scrolled up in the history.
-    val newest = if (rows.itemCount > 0) rows.peek(0)?.key else null
     val atNewest by remember { derivedStateOf { inView(shownCount) } }
     LifecycleResumeEffect(newest, atNewest) {
         if (newest != null && atNewest) onNewestSeen()
@@ -429,7 +440,7 @@ internal fun Messages(
         if (lastQueued != null && (previous == null || lastQueued > previous)) listState.animateScrollToItem(0)
     }
 
-    if (rows.itemCount == 0 && shown.isEmpty()) {
+    if (snapshot.isEmpty() && shown.isEmpty()) {
         when {
             refresh is LoadState.Loading || rows.loadState.mediator?.refresh is LoadState.Loading -> Centered(Modifier.fillMaxSize()) {
                 CircularProgressIndicator()
@@ -451,7 +462,7 @@ internal fun Messages(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Bubbles leave a margin on the other side, as in other messengers.
         val bubbleWidth = maxWidth * BUBBLE_WIDTH
-        MessageList(rows, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete)
+        MessageList(rows, snapshot, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete)
     }
 }
 
@@ -460,6 +471,7 @@ private class SeenKey(var key: Any?)
 @Composable
 private fun MessageList(
     rows: LazyPagingItems<ChatRow>,
+    snapshot: List<ChatRow?>,
     outgoing: List<OutgoingRow>,
     claims: Map<String, MessageEntity>,
     listState: LazyListState,
@@ -482,10 +494,14 @@ private fun MessageList(
         items(outgoing.asReversed(), key = { Handoff.key(it, claims) }) { row ->
             OutgoingBubble(row, bubbleWidth, onRetry, onDelete, Modifier.animateItem())
         }
-        items(count = rows.itemCount, key = { index -> rows.peek(index)?.let { Handoff.key(it, claims) } ?: index }) { index ->
-            when (val row = rows[index]) {
+        // Stored rows come from the snapshot [claims] were taken from, so a
+        // page that arrives before the next composition cannot show a
+        // message next to its outgoing row; reading [rows] loads more.
+        items(count = snapshot.size, key = { index -> snapshot[index]?.let { Handoff.key(it, claims) } ?: index }) { index ->
+            if (index < rows.itemCount) rows[index]
+            when (val row = snapshot[index]) {
                 is ChatRow.Message -> {
-                    val older = if (index + 1 < rows.itemCount) rows.peek(index + 1) else null
+                    val older = snapshot.getOrNull(index + 1)
                     val message = row.item.message
                     // A sender's name heads each run of their messages in channels.
                     val continues = older is ChatRow.Message && older.item.message.senderId == message.senderId &&
@@ -556,6 +572,8 @@ private fun MessageFrame(
     maxWidth: Dp,
     modifier: Modifier = Modifier,
     bubble: Modifier = Modifier,
+    // Anchored to the whole bubble, such as its menu.
+    beside: @Composable () -> Unit = {},
     below: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -563,15 +581,18 @@ private fun MessageFrame(
         modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = if (own) Alignment.End else Alignment.Start,
     ) {
-        Column(
-            Modifier
-                .widthIn(max = maxWidth)
-                .clip(BubbleShape)
-                .background(if (own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
-                .then(bubble)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            content = content,
-        )
+        Box {
+            Column(
+                Modifier
+                    .widthIn(max = maxWidth)
+                    .clip(BubbleShape)
+                    .background(if (own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .then(bubble)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                content = content,
+            )
+            beside()
+        }
         below()
     }
 }
@@ -689,6 +710,35 @@ private fun OutgoingBubble(
         bubble = Modifier
             .clickable(onClickLabel = actions) { menu = true }
             .clearAndSetSemantics { contentDescription = description },
+        beside = {
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (failure != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.message_retry)) },
+                        onClick = {
+                            menu = false
+                            onRetry(row.clientMessageId)
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.message_copy)) },
+                    onClick = {
+                        menu = false
+                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, entity.text))) }
+                    },
+                )
+                if (failure != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.message_delete)) },
+                        onClick = {
+                            menu = false
+                            onDelete(row.clientMessageId)
+                        },
+                    )
+                }
+            }
+        },
         below = {
             if (failure != null) {
                 Text(
@@ -703,33 +753,6 @@ private fun OutgoingBubble(
     ) {
         Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
         Footer(time, own = true, if (delivery == Delivery.QUEUED && !slow) null else delivery, Modifier.align(Alignment.End))
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            if (failure != null) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.message_retry)) },
-                    onClick = {
-                        menu = false
-                        onRetry(row.clientMessageId)
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.message_copy)) },
-                onClick = {
-                    menu = false
-                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, entity.text))) }
-                },
-            )
-            if (failure != null) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.message_delete)) },
-                    onClick = {
-                        menu = false
-                        onDelete(row.clientMessageId)
-                    },
-                )
-            }
-        }
     }
 }
 
