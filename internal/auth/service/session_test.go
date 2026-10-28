@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -49,8 +50,10 @@ func TestService_RefreshToken(t *testing.T) {
 			Rotate(mock.Anything, sessionID, mock.MatchedBy(func(s *domain.Session) bool {
 				return s.ID == *nextID && s.ID != sessionID && s.UserID == "user-1" &&
 					s.ExpiresAt.Equal(refreshExpiresAt)
-			})).
-			Return(nil)
+			}), service.DefaultRefreshRetryWindow).
+			RunAndReturn(func(_ context.Context, _ string, next *domain.Session, _ time.Duration) (*domain.Session, error) {
+				return next, nil
+			})
 
 		pair, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.NoError(t, err)
@@ -104,10 +107,55 @@ func TestService_RefreshToken(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
+	t.Run("retry within the window reissues the pair for the successor session", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		fx.tokens.EXPECT().Validate("refresh").Return(refreshClaims(), nil)
+		fx.repo.EXPECT().GetByID(mock.Anything, "user-1").Return(user, nil)
+		// The successor ends before a token issued now would.
+		successor := &domain.Session{ID: "2b9f3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d", UserID: "user-1",
+			ExpiresAt: refreshExpiresAt.Add(-time.Minute)}
+		var boundTo []string
+		fx.tokens.EXPECT().
+			IssueAccessToken(user.ID, user.Email, user.Username, mock.Anything).
+			RunAndReturn(func(_, _, _ string, sessionIDs ...string) (string, time.Time, error) {
+				boundTo = append(boundTo, sessionIDs...)
+				return "access-" + sessionIDs[0], time.Now().Add(15 * time.Minute), nil
+			})
+		fx.tokens.EXPECT().
+			IssueRefreshToken(mock.Anything, user.ID, user.Email, user.Username).
+			RunAndReturn(func(id, _, _, _ string) (string, time.Time, error) {
+				return "refresh-" + id, refreshExpiresAt, nil
+			})
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, service.DefaultRefreshRetryWindow).
+			Return(successor, nil)
+
+		pair, err := fx.svc.RefreshToken(context.Background(), "refresh")
+		require.NoError(t, err)
+		require.Equal(t, "access-"+successor.ID, pair.AccessToken)
+		require.Equal(t, "refresh-"+successor.ID, pair.RefreshToken)
+		require.Equal(t, successor.ExpiresAt, pair.RefreshExpiresAt)
+		require.Equal(t, successor.ID, boundTo[len(boundTo)-1])
+		fx.sessions.AssertNotCalled(t, "RevokeAllForUser", mock.Anything, mock.Anything)
+	})
+
+	t.Run("the retry window is configurable", func(t *testing.T) {
+		fx := newServiceFixture(t)
+		svc, err := service.NewService(fx.repo, fx.sessions, service.NewArgon2idHasher(fastParams), fx.tokens,
+			slog.Default(), service.WithRefreshRetryWindow(0))
+		require.NoError(t, err)
+		expectRotation(fx)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, time.Duration(0)).
+			Return(nil, repository.ErrSessionReused)
+		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(1, nil)
+
+		_, err = svc.RefreshToken(context.Background(), "refresh")
+		require.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
 	t.Run("unknown or expired session", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrNotFound)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, mock.Anything).Return(nil, repository.ErrNotFound)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.ErrorIs(t, err, service.ErrInvalidToken)
@@ -116,7 +164,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("logged-out session is rejected without touching other sessions", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionRevoked)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, mock.Anything).Return(nil, repository.ErrSessionRevoked)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.ErrorIs(t, err, service.ErrInvalidToken)
@@ -125,7 +173,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("reuse of a rotated token revokes every session of the user", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionReused)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, mock.Anything).Return(nil, repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(3, nil)
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
@@ -135,7 +183,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("failure to contain token reuse is reported as an internal error", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything).Return(repository.ErrSessionReused)
+		fx.sessions.EXPECT().Rotate(mock.Anything, sessionID, mock.Anything, mock.Anything).Return(nil, repository.ErrSessionReused)
 		fx.sessions.EXPECT().RevokeAllForUser(mock.Anything, "user-1").Return(0, errors.New("connection reset"))
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
@@ -146,7 +194,7 @@ func TestService_RefreshToken(t *testing.T) {
 	t.Run("repository failure is wrapped", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		expectRotation(fx)
-		fx.sessions.EXPECT().Rotate(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("connection reset"))
+		fx.sessions.EXPECT().Rotate(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("connection reset"))
 
 		_, err := fx.svc.RefreshToken(context.Background(), "refresh")
 		require.Error(t, err)

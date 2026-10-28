@@ -48,7 +48,7 @@ func TestEmailVerificationPolicyCoversExistingAndNewSessions(t *testing.T) {
 	require.True(t, active)
 	next := &domain.Session{ID: uuid.NewString(), UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}
 	require.ErrorIs(t, blocked.Create(ctx, next), repository.ErrSessionRevoked)
-	require.ErrorIs(t, blocked.Rotate(ctx, s.ID, next), repository.ErrSessionRevoked)
+	require.ErrorIs(t, rotate(ctx, blocked, s.ID, next), repository.ErrSessionRevoked)
 	_, err = pool.Exec(ctx, "UPDATE users SET email_verification_required=true WHERE id=$1::uuid", u.ID)
 	require.NoError(t, err)
 	// Stored strict policy cannot be bypassed by disabling mail delivery/config.

@@ -23,7 +23,7 @@ func TestRotatedRefreshFromOldCredentialEpochCannotRevokeNewSessions(t *testing.
 	old := newTestSession(user.ID, time.Hour)
 	require.NoError(t, sessions.Create(ctx, old))
 	rotated := newTestSession(user.ID, time.Hour)
-	require.NoError(t, sessions.Rotate(ctx, old.ID, rotated))
+	require.NoError(t, rotate(ctx, sessions, old.ID, rotated))
 
 	// Recovery revokes both old refresh rows and advances the credential epoch.
 	proof := emailAction(user, "reset")
