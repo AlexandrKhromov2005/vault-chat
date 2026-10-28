@@ -281,3 +281,31 @@ func TestPushTokens_RuntimeRoleRunsTheRevocationTrigger(t *testing.T) {
 	require.NoError(t, repo.RevokeFamily(ctx, user.ID, login.ID))
 	require.Empty(t, pushTokens(t, pool, user.ID))
 }
+
+func TestPushTargets_OnlyActiveLogins(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	ctx := context.Background()
+	active, expired, stale := newLogin(t, repo, user.ID), newLogin(t, repo, user.ID), newLogin(t, repo, user.ID)
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, active.ID, "fcm", "token-active"))
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, expired.ID, "fcm", "token-expired"))
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, stale.ID, "fcm", "token-stale"))
+	_, err := pool.Exec(ctx, `UPDATE sessions SET expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1::uuid`, expired.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE sessions SET credential_version=credential_version+1 WHERE id=$1::uuid`, stale.ID)
+	require.NoError(t, err)
+
+	tokens, err := repo.PushTargets(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"token-active"}, tokens)
+	other := newTestUser()
+	require.NoError(t, repository.NewUserRepository(pool).Create(ctx, other))
+	tokens, err = repo.PushTargets(ctx, other.ID)
+	require.NoError(t, err)
+	require.Empty(t, tokens)
+
+	require.NoError(t, repo.DeletePushToken(ctx, "token-active"))
+	require.NoError(t, repo.DeletePushToken(ctx, "token-active"), "deleting twice is harmless")
+	tokens, err = repo.PushTargets(ctx, user.ID)
+	require.NoError(t, err)
+	require.Empty(t, tokens)
+}

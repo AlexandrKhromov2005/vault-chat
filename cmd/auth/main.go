@@ -121,6 +121,11 @@ func run() error {
 	}
 	stopMail := startMailWorker(ctx, mailWorker)
 	defer stopMail()
+	stopPush, err := startPush(ctx, cfg, sessions, redisClient, metrics, logger)
+	if err != nil {
+		return fmt.Errorf("configure push notifications: %w", err)
+	}
+	defer stopPush()
 
 	listener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
