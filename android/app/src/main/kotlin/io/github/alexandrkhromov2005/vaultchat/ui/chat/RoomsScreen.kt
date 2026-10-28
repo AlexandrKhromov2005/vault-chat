@@ -20,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,6 +106,7 @@ fun RoomsScreen(
     logout: suspend () -> Unit,
     appScope: CoroutineScope,
     openRoom: (String) -> Unit,
+    newChat: () -> Unit,
 ) {
     val model = viewModel { RoomsViewModel(chat, logout, appScope) }
     val rooms by model.rooms.collectAsStateWithLifecycle()
@@ -120,6 +122,11 @@ fun RoomsScreen(
                     AccountMenu(username, server, onLogout = { if (unsent > 0) confirmLogout = true else model.logout() })
                 },
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = newChat) {
+                Icon(painterResource(R.drawable.ic_edit), contentDescription = stringResource(R.string.new_chat))
+            }
         },
     ) { padding ->
         PullToRefreshBox(

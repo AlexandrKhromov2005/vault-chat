@@ -93,3 +93,18 @@ data class MessagePage(val messages: List<MessageDto>, @SerialName("next_cursor"
 
 @Serializable
 data class PublicProfile(@SerialName("user_id") val userId: String, val username: String)
+
+@Serializable
+data class UserPage(val users: List<PublicProfile>)
+
+@Serializable
+data class OpenDirectRequest(@SerialName("peer_user_id") val peerUserId: String)
+
+@Serializable
+data class CreateChannelRequest(val name: String, val private: Boolean)
+
+@Serializable
+data class MemberDto(@SerialName("user_id") val userId: String, @SerialName("joined_at") val joinedAt: String)
+
+@Serializable
+data class MemberPage(val members: List<MemberDto>, @SerialName("next_cursor") val nextCursor: String)

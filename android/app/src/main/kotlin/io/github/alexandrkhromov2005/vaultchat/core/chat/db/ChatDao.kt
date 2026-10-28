@@ -276,6 +276,49 @@ abstract class ChatDao {
         return true
     }
 
+    // Rosters (docs/android/rooms.md).
+
+    @Query(
+        "SELECT mb.user_id, p.username, (p.user_id IS NOT NULL) AS known FROM members mb " +
+            "LEFT JOIN profiles p ON p.user_id = mb.user_id WHERE mb.room_id = :roomId ORDER BY mb.user_id",
+    )
+    abstract fun members(roomId: String): Flow<List<MemberItem>>
+
+    @Query("SELECT * FROM rosters WHERE room_id = :roomId")
+    abstract fun rosterFlow(roomId: String): Flow<RosterEntity?>
+
+    @Query("SELECT user_id FROM members WHERE room_id = :roomId ORDER BY user_id")
+    abstract suspend fun memberIds(roomId: String): List<String>
+
+    @Query("DELETE FROM members WHERE room_id = :roomId")
+    protected abstract suspend fun deleteMembers(roomId: String)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    protected abstract suspend fun insertMembers(members: List<MemberEntity>)
+
+    @Upsert
+    protected abstract suspend fun upsertRoster(roster: RosterEntity)
+
+    /** Adds a member to a stored roster; a room without one stays without. */
+    @Query(
+        "INSERT OR IGNORE INTO members (room_id, user_id, joined_at) " +
+            "SELECT :roomId, :userId, NULL WHERE EXISTS (SELECT 1 FROM rosters WHERE room_id = :roomId)",
+    )
+    abstract suspend fun addMember(roomId: String, userId: String)
+
+    @Query("DELETE FROM members WHERE room_id = :roomId AND user_id = :userId")
+    abstract suspend fun removeMember(roomId: String, userId: String)
+
+    /** Replaces the stored roster of a room; false if the room is not stored. */
+    @Transaction
+    open suspend fun storeRoster(roomId: String, members: List<MemberEntity>, complete: Boolean): Boolean {
+        if (room(roomId) == null) return false
+        deleteMembers(roomId)
+        members.chunked(500).forEach { insertMembers(it) }
+        upsertRoster(RosterEntity(roomId, complete))
+        return true
+    }
+
     private suspend fun write(roomId: String, update: Timeline.Update) {
         if (update.replace) deleteMessages(roomId)
         upsertTimeline(update.timeline)

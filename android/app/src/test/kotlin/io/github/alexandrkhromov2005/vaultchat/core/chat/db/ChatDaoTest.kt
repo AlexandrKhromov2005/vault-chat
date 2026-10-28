@@ -159,4 +159,25 @@ class ChatDaoTest {
         assertEquals(10, item.unread)
         assertEquals(true, item.unreadMore)
     }
+
+    @Test
+    fun aRosterGoesWithItsRoomButSurvivesAListing() = runBlocking {
+        dao.storeRoomList(listOf(room(1), room(2)), complete = true)
+        dao.storeRoster("room-1", listOf(MemberEntity("room-1", me, 1), MemberEntity("room-1", peer, 2)), complete = true)
+
+        // A listing updates the room in place; its roster stays.
+        dao.storeRoomList(listOf(room(1)), complete = true)
+        assertEquals(listOf(me, peer), dao.memberIds("room-1"))
+
+        // An event adds only to a stored roster.
+        dao.addMember("room-2", peer)
+        dao.storeRoomList(listOf(room(1), room(2)), complete = true)
+        dao.addMember("room-2", peer)
+        assertTrue(dao.memberIds("room-2").isEmpty())
+
+        dao.deleteRooms(listOf("room-1"))
+        assertTrue(dao.memberIds("room-1").isEmpty())
+        assertNull(dao.rosterFlow("room-1").first())
+        assertTrue(!dao.storeRoster("room-1", emptyList(), complete = true))
+    }
 }

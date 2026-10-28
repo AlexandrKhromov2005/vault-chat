@@ -3,6 +3,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.net
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.SocketEffect
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -102,6 +103,47 @@ class GatewayCallTest {
         val error = failure { api.login(LoginRequest("a@example.org", "password1")) }
         assertEquals(0, error.status)
         assertEquals(ApiException.NETWORK, error.code)
+    }
+
+    private val room = """{"room_id":"00000000-0000-4000-8000-000000000001","kind":"channel","name":"news",""" +
+        """"owner_id":"00000000-0000-4000-8000-0000000000aa","private":false,"created_at":"2026-10-27T12:00:00Z"}"""
+
+    /** A pooled connection that the server drops after reading the next request, without answering it. */
+    private fun dropAfterNextRequest() {
+        server.enqueue(MockResponse.Builder().code(200).body("""{"users":[]}""").build())
+        runBlocking { call { api.searchUsers("Bearer t", "bo", 20) } }
+        server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())
+        server.enqueue(MockResponse.Builder().code(201).body(room).build())
+    }
+
+    @Test
+    fun okHttpRepeatsARequestWhoseConnectionBroke() = runBlocking {
+        // The behaviour NotRepeatable guards against: an ordinary request is
+        // sent again, so a create would run twice.
+        dropAfterNextRequest()
+        call { api.openDirect("Bearer t", OpenDirectRequest("00000000-0000-4000-8000-0000000000bb")) }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun aNotRepeatableRequestIsSentOnce() {
+        dropAfterNextRequest()
+        val error = failure { api.createChannel("Bearer t", CreateChannelRequest("news", private = false), NotRepeatable) }
+        assertEquals(ApiException.NETWORK, error.code)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun theCreateBodyIsSentAsJson() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(201).body(room).build())
+        call { api.createChannel("Bearer t", CreateChannelRequest("news", private = false), NotRepeatable) }
+        assertEquals("""{"name":"news","private":false}""", server.takeRequest().body?.utf8())
+    }
+
+    @Test
+    fun noContentBecomesAUnitBody() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(204).build())
+        assertEquals(Unit, call { api.leave("Bearer t", "00000000-0000-4000-8000-000000000001").noContent() }.body)
     }
 
     private fun <T : Any> failure(request: suspend () -> retrofit2.Response<T>): ApiException = runBlocking {

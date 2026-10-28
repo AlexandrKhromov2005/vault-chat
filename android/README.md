@@ -77,6 +77,11 @@ Messages are queued in the same database before they are sent (`Outbox`),
 in order within a room and with a retry key that the server deduplicates;
 a WorkManager job (`OutboxWorker`) sends what is left when the app is not on
 screen. See [docs/android/send.md](../docs/android/send.md).
+
+`Membership` finds users, opens dialogs, creates channels and keeps the
+rosters of channels whose members screen was opened; the owner adds and
+removes members, others can leave. Creating a channel is never repeated,
+not even by OkHttp. See [docs/android/rooms.md](../docs/android/rooms.md).
 The schema of each database version is exported to `app/schemas` for
 migration tests; there is no migration yet because no version has been
 released.

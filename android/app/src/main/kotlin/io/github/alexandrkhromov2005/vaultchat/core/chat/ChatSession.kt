@@ -92,6 +92,8 @@ class ChatSession(
         budget = RequestBudget(Outbox.SENDS_PER_MINUTE, Outbox.SEND_BURST, deps.elapsed),
     )
 
+    val membership = Membership(dao, me, sync)
+
     val realtime = Realtime(
         userId = me,
         tokens = object : AccessTokens {

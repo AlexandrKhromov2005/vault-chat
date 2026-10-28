@@ -42,19 +42,28 @@ object MessageText {
     /** The length the server counts: Unicode code points. */
     fun length(text: String): Int = text.codePointCount(0, text.length)
 
-    // Go's unicode.IsControl: C0, DEL and C1.
-    private fun isControl(codePoint: Int) = codePoint < 0x20 || codePoint in 0x7f..0x9f
-
-    // Go's unicode.IsSpace, which strings.TrimSpace uses.
-    private fun isSpace(codePoint: Int) = when (codePoint) {
-        '\t'.code, '\n'.code, 0x0b, 0x0c, '\r'.code, ' '.code, 0x85, 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 -> true
-        else -> codePoint in 0x2000..0x200a
-    }
-
     private fun utf8Length(codePoint: Int) = when {
         codePoint < 0x80 -> 1
         codePoint < 0x800 -> 2
         codePoint < 0x10000 -> 3
         else -> 4
     }
+}
+
+// Go's unicode.IsControl: C0, DEL and C1.
+internal fun isControl(codePoint: Int) = codePoint < 0x20 || codePoint in 0x7f..0x9f
+
+// Go's unicode.IsSpace, which strings.TrimSpace uses.
+internal fun isSpace(codePoint: Int) = when (codePoint) {
+    '\t'.code, '\n'.code, 0x0b, 0x0c, '\r'.code, ' '.code, 0x85, 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 -> true
+    else -> codePoint in 0x2000..0x200a
+}
+
+/** Removes surrounding whitespace as Go's strings.TrimSpace does. */
+internal fun trimSpace(text: String): String {
+    var start = 0
+    var end = text.length
+    while (start < end && isSpace(text.codePointAt(start))) start += Character.charCount(text.codePointAt(start))
+    while (end > start && isSpace(text.codePointBefore(end))) end -= Character.charCount(text.codePointBefore(end))
+    return text.substring(start, end)
 }

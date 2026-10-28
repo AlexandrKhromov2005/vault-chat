@@ -9,12 +9,19 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -82,7 +89,7 @@ class ChatSync(
      * Whether the user waits for a request; otherwise whether it keeps the
      * stored data correct, or only fills in names.
      */
-    private enum class Priority { USER, BACKGROUND, PROFILE }
+    internal enum class Priority { USER, BACKGROUND, PROFILE }
 
     /** A refresh of a room that live events asked for; see [scheduleRefresh]. */
     private class PendingRefresh(var readThrough: Long?) {
@@ -108,8 +115,17 @@ class ChatSync(
     private val departures = ConcurrentHashMap<String, Long>()
     private val profilesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
+    // How often each room's roster has changed by an event or by the user;
+    // a roster read meanwhile is read again (Membership.loadRoster).
+    private val rosterChanges = ConcurrentHashMap<String, Long>()
+
     private val mutableStatus = MutableStateFlow(SyncStatus(running = false, failure = null))
     val status: StateFlow<SyncStatus> = mutableStatus.asStateFlow()
+
+    private val mutableCompleted = MutableStateFlow(0)
+
+    /** How many syncs have succeeded; events missed before a sync are recovered only by reading again. */
+    val completed: StateFlow<Int> = mutableCompleted.asStateFlow()
 
     // A request during a sync runs one more sync after it.
     private val syncRequests = Channel<Unit>(Channel.CONFLATED)
@@ -202,6 +218,7 @@ class ChatSync(
             ApiException(0, ApiException.LOCAL, "local failure", cause = e)
         }
         mutableStatus.value = SyncStatus(running = false, failure = failure)
+        if (failure == null) mutableCompleted.value++
         if (failure?.status == 429) {
             scope.launch {
                 delay(gate.remaining())
@@ -291,12 +308,79 @@ class ChatSync(
                 }
                 applyCreated(frame.roomId, message)
             }
-            is Frame.MemberAdded -> if (frame.userId == me) addRoom(frame.roomId, readThrough = null)
-            is Frame.MemberGone -> if (frame.userId == me) {
-                departures.merge(frame.roomId, 1L, Long::plus)
-                listLock.withLock { dao.deleteRooms(listOf(frame.roomId)) }
+            is Frame.MemberAdded -> when {
+                frame.userId == me -> addRoom(frame.roomId, readThrough = null)
+                isUuid(frame.userId) -> {
+                    rosterChanged(frame.roomId)
+                    dao.addMember(frame.roomId, frame.userId)
+                }
+            }
+            is Frame.MemberGone -> when {
+                frame.userId == me -> forget(frame.roomId)
+                isUuid(frame.userId) -> {
+                    rosterChanged(frame.roomId)
+                    dao.removeMember(frame.roomId, frame.userId)
+                }
             }
             is Frame.Ready -> Unit
+        }
+    }
+
+    /**
+     * Stores a room that the user has just created or opened at the top of
+     * the list, keeping what is stored of it. It waits for a listing under
+     * way, so that the listing cannot delete it as unlisted.
+     */
+    internal suspend fun storeJoined(room: RoomEntity) {
+        listLock.withLock {
+            // A room as created or opened has no last_message_at; the listing's stays.
+            val stored = dao.room(room.roomId)
+            dao.addRoom(room.copy(lastMessageAt = room.lastMessageAt ?: stored?.lastMessageAt))
+        }
+        room.peerId?.let { loadProfiles(listOf(it)) }
+    }
+
+    /**
+     * Deletes a room the user is no longer a member of, with its messages
+     * and queue. A room read from the server for an earlier event is not
+     * stored afterwards.
+     */
+    internal suspend fun forget(roomId: String) {
+        departures.merge(roomId, 1L, Long::plus)
+        listLock.withLock { dao.deleteRooms(listOf(roomId)) }
+    }
+
+    /** How often the roster of [roomId] has changed; see [rosterChanged]. */
+    internal fun rosterVersion(roomId: String): Long = rosterChanges[roomId] ?: 0
+
+    /** Records a change of a roster before it is written, so that a read under way starts again. */
+    internal fun rosterChanged(roomId: String) {
+        rosterChanges.merge(roomId, 1L, Long::plus)
+    }
+
+    /**
+     * Reads the profiles of the users that [visible] shows on screen, once
+     * it has stood still for [VISIBLE_SETTLE_MS]. A change cancels the
+     * requests still waiting for the budget, and so does cancelling the
+     * caller, so rows scrolled past and closed screens cost nothing. Runs
+     * until cancelled. It runs in a screen, so nothing but cancellation
+     * escapes it: a name that could not be read is read when the rows on
+     * screen change or the screen opens again.
+     */
+    @OptIn(FlowPreview::class)
+    suspend fun followVisibleProfiles(visible: Flow<List<String>>) {
+        visible.distinctUntilChanged().debounce(VISIBLE_SETTLE_MS).collectLatest { userIds ->
+            val unknown = try {
+                unknownProfiles(userIds)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database failure; the next change tries again.
+                return@collectLatest
+            }
+            coroutineScope {
+                unknown.forEach { launchProfile(it) }
+            }
         }
     }
 
@@ -457,7 +541,7 @@ class ChatSync(
      * Runs a request for one room. A 404 means the user is no longer a
      * member: the room is deleted and null returned.
      */
-    private suspend fun <T> forRoom(roomId: String, request: suspend () -> T): T? = try {
+    internal suspend fun <T> forRoom(roomId: String, request: suspend () -> T): T? = try {
         request()
     } catch (e: ApiException) {
         if (e.status != 404) throw e
@@ -475,29 +559,48 @@ class ChatSync(
      * are retried the next time the profile is needed.
      */
     private suspend fun loadProfiles(userIds: List<String>) {
-        val wanted = userIds.distinct().filter { it != me && isUuid(it) }
-        if (wanted.isEmpty()) return
-        val known = wanted.chunked(500).flatMap { dao.knownProfiles(it) }.toSet()
-        for (userId in wanted) {
-            if (userId in known || !profilesInFlight.add(userId)) continue
-            scope.launch {
-                try {
-                    val profile = try {
-                        request(Priority.PROFILE) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
-                    } catch (e: ApiException) {
-                        if (e.status != 404) return@launch
-                        ProfileEntity(userId, null)
-                    }
-                    dao.upsertProfiles(listOf(profile))
-                } finally {
-                    profilesInFlight.remove(userId)
-                }
+        unknownProfiles(userIds).forEach { scope.launchProfile(it) }
+    }
+
+    /**
+     * Reads a profile unless it is being read already. The job starts even
+     * if it is cancelled first, so that its mark is always released; a
+     * cancelled one sends nothing.
+     */
+    private fun CoroutineScope.launchProfile(userId: String) {
+        if (!profilesInFlight.add(userId)) return
+        launch(start = CoroutineStart.ATOMIC) {
+            try {
+                if (isActive) loadProfile(userId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database failure; the name is read the next time it is needed.
+            } finally {
+                profilesInFlight.remove(userId)
             }
         }
     }
 
+    private suspend fun unknownProfiles(userIds: List<String>): List<String> {
+        val wanted = userIds.distinct().filter { it != me && isUuid(it) }
+        if (wanted.isEmpty()) return emptyList()
+        val known = wanted.chunked(500).flatMap { dao.knownProfiles(it) }.toSet()
+        return wanted.filter { it !in known }
+    }
+
+    private suspend fun loadProfile(userId: String) {
+        val profile = try {
+            request(Priority.PROFILE) { user(it, userId) }.let { ProfileEntity(userId, it.username) }
+        } catch (e: ApiException) {
+            if (e.status != 404) return
+            ProfileEntity(userId, null)
+        }
+        dao.upsertProfiles(listOf(profile))
+    }
+
     /** Sends a request within the budget; a 429 pauses every request. */
-    private suspend fun <T : Any> request(
+    internal suspend fun <T : Any> request(
         priority: Priority,
         call: suspend GatewayApi.(authorization: String) -> Response<T>,
     ): T {
@@ -526,5 +629,8 @@ class ChatSync(
         /** Rooms a sync loads or catches up at the same time. */
         const val CONCURRENT_ROOMS = 2
         const val EVENT_BUFFER = 1024
+
+        /** How long the rows on screen must stay the same before their names are read. */
+        const val VISIBLE_SETTLE_MS = 300L
     }
 }

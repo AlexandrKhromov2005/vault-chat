@@ -115,6 +115,42 @@ data class OutgoingEntity(
     }
 }
 
+/**
+ * A member of a room whose roster is stored ([RosterEntity]). [joinedAt] is
+ * null for a member known only from an event or from the user's own change.
+ */
+@Entity(
+    tableName = "members",
+    primaryKeys = ["room_id", "user_id"],
+    foreignKeys = [ForeignKey(RoomEntity::class, ["room_id"], ["room_id"], onDelete = ForeignKey.CASCADE)],
+)
+data class MemberEntity(
+    @ColumnInfo(name = "room_id") val roomId: String,
+    @ColumnInfo(name = "user_id") val userId: String,
+    @ColumnInfo(name = "joined_at") val joinedAt: Long?,
+)
+
+/**
+ * A room whose members are stored (docs/android/rooms.md). Without a row the
+ * roster has not been read. [complete] is false when the room had more
+ * members than one read takes.
+ */
+@Entity(
+    tableName = "rosters",
+    foreignKeys = [ForeignKey(RoomEntity::class, ["room_id"], ["room_id"], onDelete = ForeignKey.CASCADE)],
+)
+data class RosterEntity(
+    @PrimaryKey @ColumnInfo(name = "room_id") val roomId: String,
+    val complete: Boolean,
+)
+
+/** A member with their name, for the members screen. */
+data class MemberItem(
+    @ColumnInfo(name = "user_id") val userId: String,
+    @ColumnInfo(name = "username") val username: String?,
+    @ColumnInfo(name = "known") val known: Boolean,
+)
+
 /** A public profile; [username] is null for an account that no longer exists. */
 @Entity(tableName = "profiles")
 data class ProfileEntity(

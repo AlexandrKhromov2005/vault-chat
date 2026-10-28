@@ -12,11 +12,15 @@ import java.security.MessageDigest
  * sessions are deleted by [ChatDatabases.deleteAllExcept].
  */
 @Database(
-    entities = [RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class, OutgoingEntity::class],
+    entities = [
+        RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class, OutgoingEntity::class,
+        MemberEntity::class, RosterEntity::class,
+    ],
     // 2: times in microseconds instead of milliseconds.
     // 3: the outgoing queue.
     // 4: the newest sequence when an outgoing row was queued.
-    version = 4,
+    // 5: rosters of rooms.
+    version = 5,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun dao(): ChatDao
