@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import io.github.alexandrkhromov2005.vaultchat.AppContainer
 import io.github.alexandrkhromov2005.vaultchat.BuildConfig
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import io.github.alexandrkhromov2005.vaultchat.ui.ScreenTransitions
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -24,7 +25,14 @@ fun AuthFlow(container: AppContainer, reason: SessionState.Reason) {
         AuthViewModel(container.session, container.settings, container.allowLocalCleartext, BuildConfig.DEFAULT_SERVER)
     }
     val navController = rememberNavController()
-    NavHost(navController, startDestination = LoginRoute) {
+    NavHost(
+        navController,
+        startDestination = LoginRoute,
+        enterTransition = ScreenTransitions.enter,
+        exitTransition = ScreenTransitions.exit,
+        popEnterTransition = ScreenTransitions.popEnter,
+        popExitTransition = ScreenTransitions.popExit,
+    ) {
         composable<LoginRoute> {
             LoginScreen(
                 model = model,

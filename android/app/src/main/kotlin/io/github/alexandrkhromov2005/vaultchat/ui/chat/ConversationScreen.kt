@@ -1,12 +1,14 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
 import android.content.ClipData
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +40,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +51,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -82,12 +86,15 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
 import io.github.alexandrkhromov2005.vaultchat.core.chat.MAX_TEXT_CODE_POINTS
 import io.github.alexandrkhromov2005.vaultchat.core.chat.MessageText
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -158,8 +165,15 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
     val oldest: StateFlow<Long?> = chat.timeline(roomId).map { it?.oldest }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
-    /** Messages of this room that are queued, sent but not yet in the stored history, or failed. */
-    val outgoing: StateFlow<List<OutgoingEntity>> = chat.outbox.outgoing(roomId)
+    // Failed rows the user deleted or queued again; they leave the screen at once.
+    private val dismissed = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Messages of this room that are queued, sent but not yet in the stored
+     * history, or failed, and those that just left the queue (Handoff).
+     */
+    val outgoing: StateFlow<List<OutgoingRow>> = chat.outbox.outgoing(roomId)
+        .handedOver(dismissed) { SystemClock.elapsedRealtime() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     /**
@@ -179,9 +193,15 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
         }
     }
 
-    fun retry(clientMessageId: String) = outboxWork { chat.outbox.retry(clientMessageId) }
+    fun retry(clientMessageId: String) {
+        dismissed += clientMessageId
+        outboxWork { chat.outbox.retry(clientMessageId) }
+    }
 
-    fun delete(clientMessageId: String) = outboxWork { chat.outbox.delete(clientMessageId) }
+    fun delete(clientMessageId: String) {
+        dismissed += clientMessageId
+        outboxWork { chat.outbox.delete(clientMessageId) }
+    }
 
     private fun outboxWork(work: suspend () -> Unit) {
         viewModelScope.launch {
@@ -364,9 +384,9 @@ private const val COMPOSER_LINES = 6
 private const val COUNTER_FROM_END = 200
 
 @Composable
-private fun Messages(
+internal fun Messages(
     rows: LazyPagingItems<ChatRow>,
-    outgoing: List<OutgoingEntity>,
+    outgoing: List<OutgoingRow>,
     me: String,
     channel: Boolean,
     onNewestSeen: () -> Unit,
@@ -375,27 +395,44 @@ private fun Messages(
 ) {
     val listState = rememberLazyListState()
     val refresh = rows.loadState.refresh
+    // Own messages whose stored copy is loaded are shown from the history only.
+    val snapshot = rows.itemSnapshotList
+    val claims = remember(snapshot, me) { Handoff.claims(snapshot, me) }
+    val shown = remember(outgoing, claims) { Handoff.visible(outgoing, claims) }
     // Outgoing messages are the first items; the newest stored one follows
     // them. Long outgoing messages may fill the screen, so what is in view is
     // read from the layout, not from the first index.
-    val outgoingCount by rememberUpdatedState(outgoing.size)
+    val shownCount by rememberUpdatedState(shown.size)
     fun inView(index: Int) = listState.layoutInfo.visibleItemsInfo.any { it.index == index }
 
-    // Follow new messages while the newest one, or the one it pushed up, is in view.
-    val newest = if (rows.itemCount > 0) rows.peek(0)?.key else null
+    // At the very bottom the list stays there when a message arrives, so that
+    // it pushes the older ones up instead of appearing below the screen.
+    val bottom = shown.lastOrNull()?.let { Handoff.key(it, claims) }
+        ?: snapshot.firstOrNull()?.let { Handoff.key(it, claims) }
+    val pinned by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
+    val seenBottom = remember { SeenKey(bottom) }
+    SideEffect {
+        if (bottom != seenBottom.key) {
+            seenBottom.key = bottom
+            if (pinned) listState.requestScrollToItem(0)
+        }
+    }
+    // Otherwise follow new stored messages while the newest one, or the one
+    // it pushed up, is in view, also with outgoing rows below the view.
+    val newest = snapshot.firstOrNull()?.key
     LaunchedEffect(newest) {
-        if (inView(outgoingCount) || inView(outgoingCount + 1)) listState.animateScrollToItem(0)
+        if (!pinned && (inView(shownCount) || inView(shownCount + 1))) listState.animateScrollToItem(0)
     }
     // The room is read once its newest message is on screen, not while the
     // reader is scrolled up in the history.
-    val atNewest by remember { derivedStateOf { inView(outgoingCount) } }
+    val atNewest by remember { derivedStateOf { inView(shownCount) } }
     LifecycleResumeEffect(newest, atNewest) {
         if (newest != null && atNewest) onNewestSeen()
         onPauseOrDispose { }
     }
     // A message the user has just queued (or queued again) is brought into
     // view; one leaving the queue moves nothing.
-    val lastQueued = outgoing.maxOfOrNull { it.position }
+    val lastQueued = outgoing.filter { it.leftAt == null }.maxOfOrNull { it.entity.position }
     var seenQueued by remember { mutableStateOf(lastQueued) }
     LaunchedEffect(lastQueued) {
         val previous = seenQueued
@@ -403,7 +440,7 @@ private fun Messages(
         if (lastQueued != null && (previous == null || lastQueued > previous)) listState.animateScrollToItem(0)
     }
 
-    if (rows.itemCount == 0 && outgoing.isEmpty()) {
+    if (snapshot.isEmpty() && shown.isEmpty()) {
         when {
             refresh is LoadState.Loading || rows.loadState.mediator?.refresh is LoadState.Loading -> Centered(Modifier.fillMaxSize()) {
                 CircularProgressIndicator()
@@ -425,14 +462,18 @@ private fun Messages(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Bubbles leave a margin on the other side, as in other messengers.
         val bubbleWidth = maxWidth * BUBBLE_WIDTH
-        MessageList(rows, outgoing, listState, me, channel, bubbleWidth, onRetry, onDelete)
+        MessageList(rows, snapshot, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete)
     }
 }
+
+private class SeenKey(var key: Any?)
 
 @Composable
 private fun MessageList(
     rows: LazyPagingItems<ChatRow>,
-    outgoing: List<OutgoingEntity>,
+    snapshot: List<ChatRow?>,
+    outgoing: List<OutgoingRow>,
+    claims: Map<String, MessageEntity>,
     listState: LazyListState,
     me: String,
     channel: Boolean,
@@ -448,14 +489,19 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     ) {
         // Outgoing messages come after every stored one, in queue order; the
-        // layout is reversed, so the last of them is the first item.
-        items(outgoing.asReversed(), key = { "o${it.clientMessageId}" }) { row ->
-            OutgoingBubble(row, bubbleWidth, onRetry, onDelete)
+        // layout is reversed, so the last of them is the first item. A
+        // message keeps its key from the queue into the history (Handoff).
+        items(outgoing.asReversed(), key = { Handoff.key(it, claims) }) { row ->
+            OutgoingBubble(row, bubbleWidth, onRetry, onDelete, Modifier.animateItem())
         }
-        items(count = rows.itemCount, key = { index -> rows.peek(index)?.key ?: index }) { index ->
-            when (val row = rows[index]) {
+        // Stored rows come from the snapshot [claims] were taken from, so a
+        // page that arrives before the next composition cannot show a
+        // message next to its outgoing row; reading [rows] loads more.
+        items(count = snapshot.size, key = { index -> snapshot[index]?.let { Handoff.key(it, claims) } ?: index }) { index ->
+            if (index < rows.itemCount) rows[index]
+            when (val row = snapshot[index]) {
                 is ChatRow.Message -> {
-                    val older = if (index + 1 < rows.itemCount) rows.peek(index + 1) else null
+                    val older = snapshot.getOrNull(index + 1)
                     val message = row.item.message
                     // A sender's name heads each run of their messages in channels.
                     val continues = older is ChatRow.Message && older.item.message.senderId == message.senderId &&
@@ -465,9 +511,10 @@ private fun MessageList(
                         own = message.senderId == me,
                         showSender = channel && !continues && message.senderId != me,
                         maxWidth = bubbleWidth,
+                        modifier = Modifier.animateItem(),
                     )
                 }
-                is ChatRow.Day -> DayHeading(row.epochDay)
+                is ChatRow.Day -> DayHeading(row.epochDay, Modifier.animateItem())
                 null -> Unit
             }
         }
@@ -504,18 +551,56 @@ private fun LoadError(error: Throwable, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun DayHeading(epochDay: Long) {
+private fun DayHeading(epochDay: Long, modifier: Modifier = Modifier) {
     Text(
         formatDay(epochDay),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).semantics { heading() },
+        modifier = modifier.fillMaxWidth().padding(vertical = 12.dp).semantics { heading() },
     )
 }
 
+/**
+ * The frame of every message. An own message looks the same whether it is
+ * shown from the queue or from the history, so the hand-over between them
+ * changes nothing but its status icon.
+ */
 @Composable
-private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidth: Dp) {
+private fun MessageFrame(
+    own: Boolean,
+    maxWidth: Dp,
+    modifier: Modifier = Modifier,
+    bubble: Modifier = Modifier,
+    // Anchored to the whole bubble, such as its menu.
+    beside: @Composable () -> Unit = {},
+    below: @Composable () -> Unit = {},
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalAlignment = if (own) Alignment.End else Alignment.Start,
+    ) {
+        Box {
+            Column(
+                Modifier
+                    .widthIn(max = maxWidth)
+                    .clip(BubbleShape)
+                    .background(if (own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .then(bubble)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                content = content,
+            )
+            beside()
+        }
+        below()
+    }
+}
+
+private val BubbleShape = RoundedCornerShape(18.dp)
+
+@Composable
+private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
     val message = item.message
     val sender = when {
         own -> stringResource(R.string.sender_you)
@@ -528,55 +613,51 @@ private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidt
     val attachmentText = if (attachments > 0) pluralStringResource(R.plurals.attachments, attachments, attachments) else null
     val description = listOfNotNull(sender, message.text.takeIf { it.isNotEmpty() }, attachmentText, time).joinToString(", ")
 
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = if (own) Arrangement.End else Arrangement.Start,
-    ) {
-        Column(
-            Modifier
-                .widthIn(max = maxWidth)
-                .clearAndSetSemantics { contentDescription = description }
-                .background(
-                    if (own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    RoundedCornerShape(18.dp),
-                )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            val content = if (own) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-            if (showSender) {
-                Text(sender, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
-            if (message.text.isNotEmpty()) {
-                Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
-            }
-            if (attachmentText != null) {
-                Text(attachmentText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Footer(time, if (own) Delivery.SENT else null, Modifier.align(Alignment.End))
+    MessageFrame(own, maxWidth, modifier, bubble = Modifier.clearAndSetSemantics { contentDescription = description }) {
+        val content = if (own) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+        if (showSender) {
+            Text(sender, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
+        if (message.text.isNotEmpty()) {
+            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+        }
+        if (attachmentText != null) {
+            Text(attachmentText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Footer(time, own, if (own) Delivery.SENT else null, Modifier.align(Alignment.End))
     }
 }
 
 /** What the footer of an own message shows. */
 private enum class Delivery { QUEUED, SENT, FAILED }
 
+/**
+ * The time and, for an own message, a status icon. Own messages keep the
+ * icon's place even without one, so that the footer does not change width.
+ */
 @Composable
-private fun Footer(time: String, delivery: Delivery?, modifier: Modifier = Modifier) {
+private fun Footer(time: String, own: Boolean, delivery: Delivery?, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        when (delivery) {
-            Delivery.QUEUED -> StatusIcon(R.drawable.ic_schedule, MaterialTheme.colorScheme.onSurfaceVariant)
-            Delivery.SENT -> StatusIcon(R.drawable.ic_done, MaterialTheme.colorScheme.onSurfaceVariant)
-            Delivery.FAILED -> StatusIcon(R.drawable.ic_error, MaterialTheme.colorScheme.error)
-            null -> Unit
+        if (own) {
+            Box(Modifier.size(STATUS_ICON_SIZE)) {
+                when (delivery) {
+                    Delivery.QUEUED -> StatusIcon(R.drawable.ic_schedule, MaterialTheme.colorScheme.onSurfaceVariant)
+                    Delivery.SENT -> StatusIcon(R.drawable.ic_done, MaterialTheme.colorScheme.onSurfaceVariant)
+                    Delivery.FAILED -> StatusIcon(R.drawable.ic_error, MaterialTheme.colorScheme.error)
+                    null -> Unit
+                }
+            }
         }
     }
 }
 
+private val STATUS_ICON_SIZE = 14.dp
+
 // Decorative: the bubble's description already names the state.
 @Composable
 private fun StatusIcon(icon: Int, tint: Color) {
-    Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+    Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(STATUS_ICON_SIZE))
 }
 
 /**
@@ -584,38 +665,52 @@ private fun StatusIcon(icon: Int, tint: Color) {
  * failed one also to send it again or delete it.
  */
 @Composable
-private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) -> Unit, onDelete: (String) -> Unit) {
-    val delivery = when (row.state) {
-        OutgoingEntity.SENT -> Delivery.SENT
-        OutgoingEntity.FAILED -> Delivery.FAILED
+private fun OutgoingBubble(
+    row: OutgoingRow,
+    maxWidth: Dp,
+    onRetry: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val entity = row.entity
+    val delivery = when {
+        // It left the queue because it is stored.
+        row.leftAt != null -> Delivery.SENT
+        entity.state == OutgoingEntity.SENT -> Delivery.SENT
+        entity.state == OutgoingEntity.FAILED -> Delivery.FAILED
         else -> Delivery.QUEUED
+    }
+    // A message sent at once never shows its clock, as in other messengers.
+    var slow by remember(row.clientMessageId) {
+        mutableStateOf(Handoff.clockDelay(entity.createdAt, System.currentTimeMillis()) == 0L)
+    }
+    if (delivery == Delivery.QUEUED && !slow) {
+        LaunchedEffect(row.clientMessageId) {
+            delay(Handoff.clockDelay(entity.createdAt, System.currentTimeMillis()))
+            slow = true
+        }
     }
     val failure = when {
         delivery != Delivery.FAILED -> null
-        row.error == OutgoingEntity.ERROR_NO_ACCESS -> stringResource(R.string.message_failed_no_access)
+        entity.error == OutgoingEntity.ERROR_NO_ACCESS -> stringResource(R.string.message_failed_no_access)
         else -> stringResource(R.string.message_failed_rejected)
     }
     val state = failure ?: stringResource(if (delivery == Delivery.SENT) R.string.message_sent else R.string.message_queued)
-    val time = formatTime(row.createdAt, LocalLocale.current.platformLocale)
-    val description = listOf(stringResource(R.string.sender_you), row.text, time, state).joinToString(", ")
+    val time = formatTime(entity.createdAt, LocalLocale.current.platformLocale)
+    val description = listOf(stringResource(R.string.sender_you), entity.text, time, state).joinToString(", ")
     var menu by remember { mutableStateOf(false) }
     val actions = stringResource(R.string.message_actions)
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.End) {
-        Box {
-            Column(
-                Modifier
-                    .widthIn(max = maxWidth)
-                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(18.dp))
-                    .clickable(onClickLabel = actions) { menu = true }
-                    .clearAndSetSemantics { contentDescription = description }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                Text(row.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Footer(time, delivery, Modifier.align(Alignment.End))
-            }
+    MessageFrame(
+        own = true,
+        maxWidth = maxWidth,
+        modifier = modifier,
+        bubble = Modifier
+            .clickable(onClickLabel = actions) { menu = true }
+            .clearAndSetSemantics { contentDescription = description },
+        beside = {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 if (failure != null) {
                     DropdownMenuItem(
@@ -630,7 +725,7 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                     text = { Text(stringResource(R.string.message_copy)) },
                     onClick = {
                         menu = false
-                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, row.text))) }
+                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, entity.text))) }
                     },
                 )
                 if (failure != null) {
@@ -643,16 +738,21 @@ private fun OutgoingBubble(row: OutgoingEntity, maxWidth: Dp, onRetry: (String) 
                     )
                 }
             }
-        }
-        if (failure != null) {
-            Text(
-                failure,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                // The bubble's description already says it.
-                modifier = Modifier.padding(top = 2.dp, end = 4.dp).clearAndSetSemantics { },
-            )
-        }
+        },
+        below = {
+            if (failure != null) {
+                Text(
+                    failure,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    // The bubble's description already says it.
+                    modifier = Modifier.padding(top = 2.dp, end = 4.dp).clearAndSetSemantics { },
+                )
+            }
+        },
+    ) {
+        Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Footer(time, own = true, if (delivery == Delivery.QUEUED && !slow) null else delivery, Modifier.align(Alignment.End))
     }
 }
 
