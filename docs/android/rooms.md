@@ -175,3 +175,18 @@ Not changed:
 - **Channel names may contain format characters** such as U+202E, which the
   server accepts. They are shown as plain text, as all names are; whether
   to restrict them is for the server, where every client would benefit.
+
+## Review of 627bcdf
+
+The fixes of the first round were confirmed. Both regressions failed on
+627bcdf before their fix.
+
+| Finding | Test | Resolution |
+|---|---|---|
+| A name request cancelled before it started never released its in-flight mark, so that name was never read again in the session | `aNameWhoseRequestWasCancelledBeforeItStartedIsReadLater` | The request always starts and releases its mark; a cancelled one sends nothing. The background path shares it |
+| Reading names moved into the screen, where a database failure escaped and crashed the app | `aDatabaseFailureWhileReadingNamesDoesNotEscape` | Failures stay inside; a later change or sync reads the name |
+
+Not changed: a name the screen marked in flight is skipped by a background
+read at the same moment; if the screen then scrolls on and cancels it, the
+background caller does not ask again until its next call (the next sync,
+opening the room, or the row on screen again).

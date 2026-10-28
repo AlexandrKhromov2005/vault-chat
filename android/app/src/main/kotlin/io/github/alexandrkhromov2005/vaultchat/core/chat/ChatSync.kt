@@ -9,6 +9,8 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -361,22 +363,23 @@ class ChatSync(
      * it has stood still for [VISIBLE_SETTLE_MS]. A change cancels the
      * requests still waiting for the budget, and so does cancelling the
      * caller, so rows scrolled past and closed screens cost nothing. Runs
-     * until cancelled.
+     * until cancelled. It runs in a screen, so nothing but cancellation
+     * escapes it: a name that could not be read is read on a later change
+     * or sync.
      */
     @OptIn(FlowPreview::class)
     suspend fun followVisibleProfiles(visible: Flow<List<String>>) {
         visible.distinctUntilChanged().debounce(VISIBLE_SETTLE_MS).collectLatest { userIds ->
+            val unknown = try {
+                unknownProfiles(userIds)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database failure; the next change tries again.
+                return@collectLatest
+            }
             coroutineScope {
-                for (userId in unknownProfiles(userIds)) {
-                    if (!profilesInFlight.add(userId)) continue
-                    launch {
-                        try {
-                            loadProfile(userId)
-                        } finally {
-                            profilesInFlight.remove(userId)
-                        }
-                    }
-                }
+                unknown.forEach { launchProfile(it) }
             }
         }
     }
@@ -556,14 +559,25 @@ class ChatSync(
      * are retried the next time the profile is needed.
      */
     private suspend fun loadProfiles(userIds: List<String>) {
-        for (userId in unknownProfiles(userIds)) {
-            if (!profilesInFlight.add(userId)) continue
-            scope.launch {
-                try {
-                    loadProfile(userId)
-                } finally {
-                    profilesInFlight.remove(userId)
-                }
+        unknownProfiles(userIds).forEach { scope.launchProfile(it) }
+    }
+
+    /**
+     * Reads a profile unless it is being read already. The job starts even
+     * if it is cancelled first, so that its mark is always released; a
+     * cancelled one sends nothing.
+     */
+    private fun CoroutineScope.launchProfile(userId: String) {
+        if (!profilesInFlight.add(userId)) return
+        launch(start = CoroutineStart.ATOMIC) {
+            try {
+                if (isActive) loadProfile(userId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database failure; the name is read the next time it is needed.
+            } finally {
+                profilesInFlight.remove(userId)
             }
         }
     }
