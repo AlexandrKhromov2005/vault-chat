@@ -35,8 +35,9 @@ proves possession of a credential gives back the per-address token it took.
 | Refresh per address (`refresh-ip:<addr>`) | 30/min, burst 30 | refresh | refresh `200` | local bucket only |
 
 The *subject* is a SHA-256 of the lower-cased `email` (login, registration,
-email and recovery requests), `new_email` (email change request) or `token`
-(confirmations). Bodies that are not JSON or carry none of these fields share
+email and recovery requests) or of the `token` (confirmations). The email
+change request is authenticated and checks the caller's password, so its
+subject is the caller's account, not the `new_email` it names. Bodies that are not JSON or carry none of these fields share
 the subject `-`, so malformed traffic keeps a single strict bucket per
 address. Credential and refresh buckets are enforced both in process memory
 and in Redis, as before. Settings: `GATEWAY_AUTH_RATE_LIMIT_*` keep their
@@ -47,8 +48,9 @@ Why this keeps brute force bounded:
 
 - Guessing one account's password: at most 5 attempts per minute per address
   at Gateway, shared by all Gateway instances through Redis, and at most 5 per
-  minute per account across all addresses in Auth (unchanged). Successful
-  logins are not refunded in these buckets.
+  minute per account across all addresses in each Auth process (unchanged;
+  this bucket is per process). Successful logins are not refunded in these
+  buckets.
 - Spraying passwords over many accounts from one address: every failed
   attempt keeps its token in `auth-ip`, so an address gets 10 failures per
   minute (before: 5 attempts, successful or not). A spray succeeds rarely, so
@@ -87,8 +89,11 @@ and per-subject buckets.
 - Local tables: 4096 addresses per credential and refresh bucket, 16384
   address/subject pairs. A full table refuses new keys (`429`) rather than
   evicting quotas; only full buckets are removed.
-- A refund is one more Redis call per successful request, bounded by the Redis
-  client timeouts (250 ms) and run after the response status is known.
+- A refund is one more Redis call per successful request, bounded by 250 ms
+  like the Redis client calls. For authenticated requests it runs after the
+  token is validated and before the handler; for login, registration and
+  refresh after the handler, before the response is flushed. A slow Redis
+  can therefore add up to 250 ms to such a request.
 
 ## Failure behavior
 
@@ -112,7 +117,8 @@ Unit and router tests, `internal/gateway/...`:
 3. Eleven failed logins for different accounts from one address: the eleventh
    gets `429`; successful logins in between do not restore a failed token.
 4. Twenty concurrent failed logins from one address: at most ten reach Auth.
-5. Malformed or missing bodies share the strict `-` subject.
+5. Malformed or missing bodies share the strict `-` subject; email change
+   requests naming a new address each time stay in the caller's bucket.
 6. Refresh: many successful refreshes from one address are admitted; the
    thirty-first failure in a minute gets `429`; refresh keeps working on its
    local bucket when Redis fails.

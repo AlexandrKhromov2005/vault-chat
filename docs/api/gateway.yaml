@@ -22,7 +22,8 @@ info:
     key. Login, registration, public email/recovery requests, all email proof
     confirmations and authenticated email-change requests have two additional
     quotas, enforced both locally and in Redis: per IP/network and subject
-    (the case-insensitive `email` or `new_email`, or the `token`; default
+    (the case-insensitive `email`, the `token`, or for the authenticated
+    email change the caller's account; default
     5/minute, burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`_BURST`) and per
     IP/network (default 10/minute, burst 10;
     `GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE`/`_BURST`). A successful login or

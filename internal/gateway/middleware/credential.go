@@ -17,7 +17,8 @@ const noSubject = "-"
 type subjectKey struct{}
 
 // CaptureCredentialSubject reads what a credential request is about (an email
-// or an email proof) from its body, then replays the body. A body that cannot
+// or an email proof) from its body, then replays the body. Behind
+// Authenticate the subject is the caller's account instead. A body that cannot
 // be read in full, because it is too large or late, goes with its read error
 // straight to unreadable, the route's handler: it answers 413 or 408 without
 // a backend call, so later limits have nothing to protect.
@@ -31,7 +32,13 @@ func CaptureCredentialSubject(unreadable http.Handler) func(http.Handler) http.H
 				return
 			}
 			r.Body = readCloser{bytes.NewReader(body), r.Body}
-			ctx := context.WithValue(r.Context(), subjectKey{}, credentialSubject(body))
+			subject := credentialSubject(body)
+			if identity, ok := IdentityFromContext(r.Context()); ok {
+				// An authenticated request checks the caller's own password,
+				// so the account is the subject, whatever the body names.
+				subject = hashSubject("user:" + identity.UserID)
+			}
+			ctx := context.WithValue(r.Context(), subjectKey{}, subject)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -43,9 +50,8 @@ func CaptureCredentialSubject(unreadable http.Handler) func(http.Handler) http.H
 // there.
 func credentialSubject(body []byte) string {
 	var fields struct {
-		Email    string `json:"email"`
-		NewEmail string `json:"new_email"`
-		Token    string `json:"token"`
+		Email string `json:"email"`
+		Token string `json:"token"`
 	}
 	if json.Unmarshal(body, &fields) != nil {
 		return noSubject
@@ -54,13 +60,15 @@ func credentialSubject(body []byte) string {
 	switch {
 	case fields.Email != "":
 		subject = "email:" + strings.ToLower(fields.Email)
-	case fields.NewEmail != "":
-		subject = "email:" + strings.ToLower(fields.NewEmail)
 	case fields.Token != "":
 		subject = "token:" + fields.Token
 	default:
 		return noSubject
 	}
+	return hashSubject(subject)
+}
+
+func hashSubject(subject string) string {
 	sum := sha256.Sum256([]byte(subject))
 	return hex.EncodeToString(sum[:])
 }

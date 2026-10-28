@@ -148,8 +148,9 @@ func withCharge(r *http.Request, name string, c charge) *http.Request {
 	return r
 }
 
-// refundTimeout bounds a refund that runs after the request budget is spent.
-const refundTimeout = time.Second
+// refundTimeout bounds a refund, which also runs after the request budget
+// is spent; it matches the Redis client timeouts.
+const refundTimeout = 250 * time.Millisecond
 
 // Refund gives back the tokens the request took under each name, at most
 // once. A failed refund only leaves the client with less quota.
