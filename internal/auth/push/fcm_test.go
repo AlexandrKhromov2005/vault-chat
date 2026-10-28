@@ -140,8 +140,13 @@ func TestFCMMapsProviderAnswers(t *testing.T) {
 		body    string
 		invalid bool
 	}{
-		"unregistered":       {http.StatusNotFound, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true},
-		"sender mismatch":    {http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED","details":[{"errorCode":"SENDER_ID_MISMATCH"}]}}`, true},
+		"unregistered": {http.StatusNotFound, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true},
+		// A service account of another project is a configuration error: the
+		// tokens are still valid for the app's own project.
+		"sender mismatch": {http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED","details":[{"errorCode":"SENDER_ID_MISMATCH"}]}}`, false},
+		// A proxy or wrong endpoint answering 404 must not delete every token.
+		"plain not found":    {http.StatusNotFound, `not found`, false},
+		"404 without code":   {http.StatusNotFound, `{"error":{"status":"NOT_FOUND"}}`, false},
 		"invalid argument":   {http.StatusBadRequest, `{"error":{"status":"INVALID_ARGUMENT"}}`, false},
 		"quota":              {http.StatusTooManyRequests, `{"error":{"status":"RESOURCE_EXHAUSTED"}}`, false},
 		"unavailable":        {http.StatusServiceUnavailable, `not json`, false},
