@@ -10,6 +10,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.alexandrkhromov2005.vaultchat.AppContainer
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import io.github.alexandrkhromov2005.vaultchat.ui.ScreenTransitions
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -42,7 +43,14 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
             launchSingleTop = true
         }
     }
-    NavHost(navController, startDestination = RoomsRoute) {
+    NavHost(
+        navController,
+        startDestination = RoomsRoute,
+        enterTransition = ScreenTransitions.enter,
+        exitTransition = ScreenTransitions.exit,
+        popEnterTransition = ScreenTransitions.popEnter,
+        popExitTransition = ScreenTransitions.popExit,
+    ) {
         composable<RoomsRoute> {
             RoomsScreen(
                 chat = chat,
