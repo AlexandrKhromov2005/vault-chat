@@ -10,7 +10,6 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.RoomDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -22,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -364,8 +364,8 @@ class ChatSync(
      * requests still waiting for the budget, and so does cancelling the
      * caller, so rows scrolled past and closed screens cost nothing. Runs
      * until cancelled. It runs in a screen, so nothing but cancellation
-     * escapes it: a name that could not be read is read on a later change
-     * or sync.
+     * escapes it: a name that could not be read is read when the rows on
+     * screen change or the screen opens again.
      */
     @OptIn(FlowPreview::class)
     suspend fun followVisibleProfiles(visible: Flow<List<String>>) {

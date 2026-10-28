@@ -184,9 +184,11 @@ The fixes of the first round were confirmed. Both regressions failed on
 | Finding | Test | Resolution |
 |---|---|---|
 | A name request cancelled before it started never released its in-flight mark, so that name was never read again in the session | `aNameWhoseRequestWasCancelledBeforeItStartedIsReadLater` | The request always starts and releases its mark; a cancelled one sends nothing. The background path shares it |
-| Reading names moved into the screen, where a database failure escaped and crashed the app | `aDatabaseFailureWhileReadingNamesDoesNotEscape` | Failures stay inside; a later change or sync reads the name |
+| Reading names moved into the screen, where a database failure escaped and crashed the app | `aDatabaseFailureWhileReadingNamesDoesNotEscape` | Failures stay inside; the name is read when the rows on screen change or the screen opens again |
 
 Not changed: a name the screen marked in flight is skipped by a background
 read at the same moment; if the screen then scrolls on and cancels it, the
 background caller does not ask again until its next call (the next sync,
 opening the room, or the row on screen again).
+
+The third round, on df8e174, confirmed both fixes and found nothing new.
