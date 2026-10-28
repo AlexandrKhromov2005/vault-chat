@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 3,
-    "identityHash": "000ec28fc89a23f0527566e354d32b38",
+    "identityHash": "20a2ced8e4293415224d903bf73d9c6c",
     "entities": [
       {
         "tableName": "rooms",
@@ -225,7 +225,7 @@
       },
       {
         "tableName": "outbox",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_message_id` TEXT NOT NULL, `room_id` TEXT NOT NULL, `sender_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `text` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `state` TEXT NOT NULL, `sequence` INTEGER, `error` TEXT, `after_sequence` INTEGER NOT NULL, PRIMARY KEY(`client_message_id`), FOREIGN KEY(`room_id`) REFERENCES `rooms`(`room_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_message_id` TEXT NOT NULL, `room_id` TEXT NOT NULL, `sender_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `text` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `state` TEXT NOT NULL, `sequence` INTEGER, `error` TEXT, PRIMARY KEY(`client_message_id`), FOREIGN KEY(`room_id`) REFERENCES `rooms`(`room_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "clientMessageId",
@@ -278,12 +278,6 @@
             "fieldPath": "error",
             "columnName": "error",
             "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "afterSequence",
-            "columnName": "after_sequence",
-            "affinity": "INTEGER",
-            "notNull": true
           }
         ],
         "primaryKey": {
@@ -330,7 +324,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '000ec28fc89a23f0527566e354d32b38')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '20a2ced8e4293415224d903bf73d9c6c')"
     ]
   }
 }

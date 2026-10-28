@@ -9,10 +9,13 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -30,6 +33,8 @@ import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.random.Random
 
 @RunWith(RobolectricTestRunner::class)
 class OutboxTest {
@@ -119,6 +124,109 @@ class OutboxTest {
         assertNotNull(dao.room(target))
 
         assertEquals(listOf("pending"), queue(target).map { it.text })
+    }
+
+    // Review of 3b14540.
+
+    private fun unbudgetedOutbox() = Outbox(
+        dao, me, server.requests, sync, scope, network,
+        newId = { key(keys.incrementAndGet()) },
+        backoff = { Backoff(20, 100) },
+        budget = RequestBudget(600_000, 1_000, System::currentTimeMillis),
+    )
+
+    /**
+     * Rooms that wait for a permit while two sends are under way must not send
+     * inside the pause a 429 to one of them starts; only the other send already
+     * under way may land in it. Failed on 3b14540.
+     */
+    @Test
+    fun roomsWaitingForAPermitDoNotSendDuringA429Pause() = runBlocking {
+        val rooms = (1..6).map { loadedChannel(it) }
+        network.value = null
+        val outbox = unbudgetedOutbox()
+        rooms.forEach { outbox.send(it, "hello") }
+
+        val pausedAt = AtomicLong(0)
+        val inPause = AtomicInteger()
+        server.intercept = { call ->
+            if (!call.startsWith("send ")) {
+                null
+            } else {
+                val now = System.currentTimeMillis()
+                // The fake answers 429 with Retry-After: 1.
+                if (pausedAt.compareAndSet(0, now)) {
+                    Thread.sleep(50)
+                    429
+                } else if (now - pausedAt.get() < 900) {
+                    inPause.incrementAndGet()
+                    429
+                } else {
+                    null
+                }
+            }
+        }
+        network.value = Unit
+
+        assertTrue(within(10_000) { rooms.all { server.sent(it).isNotEmpty() } })
+        assertTrue("sends inside the pause: ${inPause.get()}", inPause.get() <= 1)
+    }
+
+    /**
+     * Messages the user writes in quick succession are not held by the send
+     * budget: first attempts draw on it without waiting, repeats wait. Failed
+     * on 3b14540.
+     */
+    @Test
+    fun quickMessagesAreNotHeldByTheSendBudget() = runBlocking {
+        val room = loadedChannel(1)
+        val outbox = Outbox(
+            dao, me, server.requests, sync, scope, network,
+            newId = { key(keys.incrementAndGet()) },
+            budget = RequestBudget(perMinute = 60, burst = 3, clock = System::currentTimeMillis),
+        )
+
+        repeat(8) { outbox.send(room, "ok $it") }
+
+        assertTrue(within(1_500) { server.sent(room).size == 8 })
+    }
+
+    /**
+     * sendRoom and sendNext under concurrent queuing, lost answers, 503s and
+     * database failures: every message arrives once, in queue order per room,
+     * and the queue empties.
+     */
+    @Test
+    fun sendingStaysInOrderAndOnceThroughFailures() = runBlocking {
+        val rooms = (1..3).map { loadedChannel(it) }
+        val random = Random(7)
+        server.intercept = { call -> if (call.startsWith("send ") && synchronized(random) { random.nextInt(5) } == 0) 503 else null }
+        server.afterSend = { if (synchronized(random) { random.nextInt(8) } == 0) throw IOException("lost") }
+        val outbox = unbudgetedOutbox()
+
+        val failures = scope.launch {
+            repeat(15) {
+                delay(60)
+                runCatching { sql("ALTER TABLE outbox RENAME TO outbox_x") }
+                delay(15)
+                runCatching { sql("ALTER TABLE outbox_x RENAME TO outbox") }
+            }
+        }
+        rooms.map { room ->
+            scope.async {
+                for (i in 1..25) {
+                    while (!runCatching { outbox.send(room, "m$i") }.getOrDefault(false)) delay(5)
+                    if (i % 5 == 0) delay(synchronized(random) { random.nextLong(1, 30) })
+                }
+            }
+        }.awaitAll()
+        failures.join()
+        runCatching { sql("ALTER TABLE outbox_x RENAME TO outbox") }
+
+        assertTrue(within(20_000) { rooms.all { queue(it).isEmpty() } })
+        for (room in rooms) {
+            assertEquals((1..25).map { "m$it" }, server.sent(room).map { it.text })
+        }
     }
 
     /** The rooms one sync asks about are bounded; later syncs take the rest. */
@@ -229,8 +337,9 @@ class OutboxTest {
         rooms.forEach { outbox.send(it, "hello") }
         delay(1_000)
 
-        // Three at once, then one a second.
-        assertTrue(sends().size.toString(), sends().size <= 5)
+        // Each room's first attempt goes at once and runs the budget into debt;
+        // repeats wait it out (238 sends on 2440b66).
+        assertTrue(sends().size.toString(), sends().size <= rooms.size + 1)
     }
 
     /**

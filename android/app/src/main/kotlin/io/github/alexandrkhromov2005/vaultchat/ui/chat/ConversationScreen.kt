@@ -311,7 +311,10 @@ private fun Composer(onSend: (String, (Boolean) -> Unit) -> Unit) {
                         hint,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 2.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                        // Announced when it explains why the text cannot be sent,
+                        // not on every key press near the limit.
+                        modifier = Modifier.padding(start = 16.dp, top = 2.dp)
+                            .then(if (problem != null) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier),
                     )
                 }
             }

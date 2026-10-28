@@ -15,7 +15,8 @@ import java.security.MessageDigest
     entities = [RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class, OutgoingEntity::class],
     // 2: times in microseconds instead of milliseconds.
     // 3: the outgoing queue.
-    version = 3,
+    // 4: the newest sequence when an outgoing row was queued.
+    version = 4,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun dao(): ChatDao

@@ -158,17 +158,20 @@ class Outbox(
      */
     private suspend fun sendRoom(roomId: String) {
         val delays = backoff()
+        // Whether the next attempt repeats one that did not end its row.
+        var repeat = false
         while (true) {
             // A kick during the attempt, such as a new network, also cuts the backoff after it short.
             val seen = kicks.value
             val outcome = try {
-                sendNext(roomId)
+                sendNext(roomId, repeat)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // A database failure; the row stays queued.
                 Outcome.RETRY
             }
+            repeat = outcome == Outcome.RETRY || outcome == Outcome.PAUSED
             when (outcome) {
                 Outcome.EMPTY -> return
                 Outcome.DONE -> delays.reset()
@@ -180,7 +183,12 @@ class Outbox(
         }
     }
 
-    private suspend fun sendNext(roomId: String): Outcome {
+    /**
+     * Sends the room's next row. A first attempt draws on the budget without
+     * waiting, as the user is waiting for it, and may run it into debt that
+     * repeats then wait out; a [repeat] waits for a token.
+     */
+    private suspend fun sendNext(roomId: String, repeat: Boolean): Outcome {
         val row = dao.nextQueued(roomId)
         if (row == null) {
             synchronized(sending) { sending.remove(roomId) }
@@ -197,9 +205,17 @@ class Outbox(
             return Outcome.EMPTY
         }
         network.first { it != null }
+        awaitPause()
+        if (repeat) budget.take() else budget.takeNow()
+        return permits.withPermit {
+            // A 429 may have started a pause while this room waited for a permit.
+            awaitPause()
+            attempt(row)
+        }
+    }
+
+    private suspend fun awaitPause() {
         while (gate.remaining() > 0) delay(gate.remaining())
-        budget.take()
-        return permits.withPermit { attempt(row) }
     }
 
     private enum class Outcome { EMPTY, DONE, RETRY, PAUSED }

@@ -62,8 +62,9 @@ Checked in the code, not only in the documentation:
 room), `sender_id`, `position` (queue order), `text`, `created_at` (local
 time in microseconds like the server's times, for display), `state`,
 `sequence`, `error` and `after_sequence` (the room's newest stored sequence
-when the row was queued). The table came with database version 3; without a
-released version the old schema is dropped and rebuilt.
+when the row was queued). The table came with database version 3 and
+`after_sequence` with version 4; without a released version the old schema
+is dropped and rebuilt.
 
 | State | Meaning | Shown as |
 |---|---|---|
@@ -106,8 +107,11 @@ event for this user deletes the room at once, queue included.
   moment and B were sent before A's retry, B would get the lower sequence
   for everyone. A `FAILED` row does not block the rows after it; retried, it
   goes to the end of the queue.
-- Rooms are independent; at most 2 sends are under way at once, and all
-  sends, repeats included, keep to a budget of 30 a minute (burst 10).
+- Rooms are independent; at most 2 sends are under way at once. Sends keep
+  to a budget of 30 a minute (burst 10): a row's first attempt takes from it
+  without waiting, as the user is waiting for it, and may run it into debt
+  of at most the burst; repeats wait for a token. A send that waited for a
+  permit looks at the `429` pause again before it goes.
 - A send starts when a message is queued, when a network appears, after the
   WebSocket's `ready`, when the app comes to the foreground and when its
   backoff has passed. The first four also cut a running backoff short.
@@ -155,7 +159,7 @@ network constraint already runs within minutes.
 
 | Budget | Value | Why |
 |---|---|---|
-| Gateway rate limit per user and IP | 120/min, burst 30 (server default), shared with sync | Sync keeps to 60/min, burst 15, and sending to 30/min, burst 10 (two `RequestBudget`s), so that together they stay inside it even when every queued room repeats during an outage |
+| Gateway rate limit per user and IP | 120/min, burst 30 (server default), shared with sync | Sync keeps to 60/min, burst 15, and repeated sends to 30/min, burst 10 (two `RequestBudget`s), so that together they stay inside it even when every queued room repeats during an outage; first attempts are not delayed but count, at most 10 into debt |
 | Concurrent sends | 2, one per room | Rooms do not wait for each other |
 | `429` pause | 1 s to 5 minutes | A `Retry-After` of 0 cannot make a busy loop, nor a bogus one stop the app for hours |
 | Backoff of a room | 1 s doubling to 60 s, with jitter | Resets after a success |
@@ -214,6 +218,11 @@ JVM tests with Robolectric (Room) and a fake Gateway that stores messages by
     floor and a cap.
 18. A stored message with the same key and another text does not resolve a
     failed row; a newer stored message replaces a failed row as the preview.
+19. Rooms waiting for a permit do not send inside a `429` pause; quick
+    messages are not held by the send budget.
+20. Stress: three rooms of 25 messages queued at once, with 503s, lost
+    answers and brief database failures: every message arrives once and in
+    order, and the queue empties.
 
 Not covered by automated tests: Compose screens (there is no Compose UI test
 setup yet), checked by hand on a device.
@@ -248,7 +257,31 @@ Not changed:
   like a session that expires. Keeping text without its room needs a place
   to show it; until then this is a decision to confirm.
 
-Checked without a defect: echo before and after the answer, lost answers,
+## Review of 3b14540 and 77910a0
+
+The fixes of the first round were confirmed. Both regressions failed on
+77910a0 before their fix.
+
+| Finding | Test | Resolution |
+|---|---|---|
+| Rooms that waited for a permit sent inside the pause a `429` had started (the check moved out of the permit in 3b14540) | `roomsWaitingForAPermitDoNotSendDuringA429Pause` | The pause is checked again inside the permit |
+| The send budget delayed quick first messages by about 2 s each after the tenth | `quickMessagesAreNotHeldByTheSendBudget` | First attempts take a token without waiting; repeats wait |
+| 3b14540 changed the schema without a new version: installing 2440b66 and then it would fail Room's integrity check | none (installation order) | Version 4; `3.json` is again 2440b66's schema |
+| The counter's live region announced every key press near the limit | none (Compose) | Announced only when it explains why the text cannot be sent |
+
+Not changed: a configuration change during the few milliseconds of queuing
+clears the old composer state while the restored text stays, so sending it
+again queues a second message with a new key. The order of
+`roomsWithUnsent` is not defined; if more than 10 unlisted rooms kept
+failing their check, the others would wait. Both are theoretical.
+
+Checked without a defect in the second round: no second sender for a room
+(the reviewer's stress test above); one delayed restart per failed start of
+rooms; `confirmUnlisted` outside the list lock and within the background
+budget; `PREVIEWED`; `REPLACE` with a running job; the background job's
+budget.
+
+Checked without a defect in the first round: echo before and after the answer, lost answers,
 catch-up during a send, killed processes and blocks reset to their latest
 page all end with one message; the end of a room's sender racing a new
 message loses no wake; another member cannot resolve this user's rows; the
