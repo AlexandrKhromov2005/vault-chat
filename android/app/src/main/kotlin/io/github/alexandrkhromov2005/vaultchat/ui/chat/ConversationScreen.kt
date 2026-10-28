@@ -165,12 +165,15 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
     val oldest: StateFlow<Long?> = chat.timeline(roomId).map { it?.oldest }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
+    // Failed rows the user deleted or queued again; they leave the screen at once.
+    private val dismissed = ConcurrentHashMap.newKeySet<String>()
+
     /**
      * Messages of this room that are queued, sent but not yet in the stored
      * history, or failed, and those that just left the queue (Handoff).
      */
     val outgoing: StateFlow<List<OutgoingRow>> = chat.outbox.outgoing(roomId)
-        .handedOver(dismissed = { dismissed }) { SystemClock.elapsedRealtime() }
+        .handedOver(dismissed) { SystemClock.elapsedRealtime() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     /**
@@ -189,9 +192,6 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
             onResult(queued)
         }
     }
-
-    // Failed rows the user deleted or queued again; they leave the screen at once.
-    private val dismissed = ConcurrentHashMap.newKeySet<String>()
 
     fun retry(clientMessageId: String) {
         dismissed += clientMessageId

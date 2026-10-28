@@ -93,19 +93,24 @@ object Handoff {
         (CLOCK_AFTER_MS - (now - createdAt / 1000)).coerceIn(0, CLOCK_AFTER_MS)
 }
 
-/** The queue as [Handoff.next] shows it, updated again when a row stops lingering. */
+/**
+ * The queue as [Handoff.next] shows it, updated again when a row stops
+ * lingering. A key leaves [dismissed] once its row is back in the queue
+ * other than failed, so that a later failure is not taken as dismissed.
+ */
 fun Flow<List<OutgoingEntity>>.handedOver(
-    dismissed: () -> Set<String> = { emptySet() },
+    dismissed: MutableSet<String> = mutableSetOf(),
     now: () -> Long,
 ): Flow<List<OutgoingRow>> = flow {
     var shown = emptyList<OutgoingRow>()
     val updates = transformLatest { queue ->
-        shown = Handoff.next(shown, queue, now(), dismissed())
+        queue.forEach { if (it.state != OutgoingEntity.FAILED) dismissed -= it.clientMessageId }
+        shown = Handoff.next(shown, queue, now(), dismissed)
         emit(shown)
         while (true) {
             val leftAt = shown.mapNotNull { it.leftAt }.minOrNull() ?: break
             delay((leftAt + Handoff.LINGER_MS - now()).coerceAtLeast(1))
-            shown = Handoff.next(shown, queue, now(), dismissed())
+            shown = Handoff.next(shown, queue, now(), dismissed)
             emit(shown)
         }
     }

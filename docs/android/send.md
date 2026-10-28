@@ -359,6 +359,13 @@ between composition and layout could, for one frame, show a stored message
 next to its still visible row (the keys stay unique). The list now draws
 stored rows from the composition's snapshot.
 
+The second round found no defect. Its one remark: a key the user dismissed
+stayed dismissed, so a row retried under it that failed again and was then
+found stored by sync left at once. A key now leaves the dismissed set once
+its row is back in the queue other than failed
+(`rowRetriedUnderItsKeyThatFailsAgainIsNotDismissed`, failed before the
+change).
+
 Not changed: a queued row that leaves because its room was deleted shows a
 tick for up to 2 s, while the screen closes anyway.
 

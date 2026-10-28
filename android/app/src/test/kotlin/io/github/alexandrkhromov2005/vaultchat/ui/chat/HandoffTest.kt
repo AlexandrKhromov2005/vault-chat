@@ -146,4 +146,24 @@ class HandoffTest {
         assertEquals(emptyList<OutgoingRow>(), seen.last())
         job.cancel()
     }
+
+    @Test
+    fun rowRetriedUnderItsKeyThatFailsAgainIsNotDismissed() = runTest {
+        // Retried by the user, rejected again, then found stored by sync.
+        val failed = row("a", 1, OutgoingEntity.FAILED)
+        val queue = MutableStateFlow(listOf(failed))
+        val dismissed = mutableSetOf("a")
+        val seen = mutableListOf<List<OutgoingRow>>()
+        val job = launch { queue.handedOver(dismissed) { testScheduler.currentTime }.toList(seen) }
+        runCurrent()
+        queue.value = listOf(row("a", 2))
+        runCurrent()
+        assertEquals(emptySet<String>(), dismissed)
+        queue.value = listOf(row("a", 2, OutgoingEntity.FAILED))
+        runCurrent()
+        queue.value = emptyList()
+        runCurrent()
+        assertEquals(listOf(OutgoingRow(row("a", 2, OutgoingEntity.FAILED), leftAt = 0)), seen.last())
+        job.cancel()
+    }
 }
