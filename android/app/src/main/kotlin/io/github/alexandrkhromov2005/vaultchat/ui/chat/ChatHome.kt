@@ -50,6 +50,8 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
         exitTransition = ScreenTransitions.exit,
         popEnterTransition = ScreenTransitions.popEnter,
         popExitTransition = ScreenTransitions.popExit,
+        predictivePopEnterTransition = ScreenTransitions.gestureEnter,
+        predictivePopExitTransition = ScreenTransitions.gestureExit,
     ) {
         composable<RoomsRoute> {
             RoomsScreen(

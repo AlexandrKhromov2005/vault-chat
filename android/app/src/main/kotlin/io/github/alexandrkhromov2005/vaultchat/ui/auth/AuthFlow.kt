@@ -32,6 +32,8 @@ fun AuthFlow(container: AppContainer, reason: SessionState.Reason) {
         exitTransition = ScreenTransitions.exit,
         popEnterTransition = ScreenTransitions.popEnter,
         popExitTransition = ScreenTransitions.popExit,
+        predictivePopEnterTransition = ScreenTransitions.gestureEnter,
+        predictivePopExitTransition = ScreenTransitions.gestureExit,
     ) {
         composable<LoginRoute> {
             LoginScreen(
