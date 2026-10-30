@@ -103,6 +103,10 @@
     <string name="message_retry">Отправить ещё раз</string>
     <string name="message_copy">Скопировать</string>
     <string name="message_delete">Удалить</string>
+    <string name="channel_messages">Сообщения</string>
+    <string name="channel_sync">Синхронизация</string>
+    <string name="notification_hidden">Новое сообщение</string>
+    <string name="notification_syncing">Проверка новых сообщений</string>
     <string name="file_loading">Вложение загружается</string>
     <string name="file_unavailable">Файл недоступен</string>
     <string name="file_failed">Не удалось загрузить файл. Нажмите, чтобы повторить.</string>

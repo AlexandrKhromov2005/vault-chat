@@ -116,6 +116,10 @@ interface GatewayApi {
         @Path("user_id") userId: String,
     ): Response<Unit>
 
+    /** Binds this login's push token; answers 204 (docs/push.md). */
+    @PUT("api/v1/push/token")
+    suspend fun registerPushToken(@Header("Authorization") authorization: String, @Body body: PushTokenRequest): Response<Unit>
+
     @DELETE("api/v1/rooms/{room_id}/members/me")
     suspend fun leave(@Header("Authorization") authorization: String, @Path("room_id") roomId: String): Response<Unit>
 

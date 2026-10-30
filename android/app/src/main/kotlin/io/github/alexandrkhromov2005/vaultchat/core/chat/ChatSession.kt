@@ -60,6 +60,9 @@ interface ChatSessionDeps {
 
     /** Makes sure queued messages are sent even if the app leaves the screen (OutboxWorker). */
     fun scheduleBackgroundSend() {}
+
+    /** Shows new messages as notifications (Notifier). */
+    fun postNotices(notices: List<RoomNotice>) {}
 }
 
 /**
@@ -112,6 +115,8 @@ class ChatSession(
     )
 
     val membership = Membership(dao, me, sync)
+
+    val notifier = Notifier(dao, me, deps.foreground, deps::postNotices, scope)
 
     val realtime = Realtime(
         userId = me,

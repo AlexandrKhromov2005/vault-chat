@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.core.content.edit
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessionDeps
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessions
+import io.github.alexandrkhromov2005.vaultchat.core.chat.RoomNotice
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
 import io.github.alexandrkhromov2005.vaultchat.core.net.Gateway
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
@@ -18,6 +19,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.system.NetworkMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import okhttp3.WebSocket
@@ -83,7 +85,16 @@ class AppContainer(private val context: Context) {
         override fun scheduleBackgroundSend() {
             OutboxWorker.schedule(context)
         }
+
+        override fun postNotices(notices: List<RoomNotice>) {
+            Notifications.post(context, notices)
+        }
     }, appScope).also { it.follow(session.state) }
+
+    val push = Push(context, session, appScope)
+
+    /** A room to open, from a tapped notification; ChatHome consumes it. */
+    val openRoom = MutableStateFlow<String?>(null)
 }
 
 /** Preferences that are not secret. */
@@ -94,7 +105,13 @@ class Settings(context: Context) {
         get() = preferences.getString(KEY_LAST_SERVER, null)
         set(value) = preferences.edit { putString(KEY_LAST_SERVER, value) }
 
+    /** Whether the app asked for the notification permission once. */
+    var notificationsAsked: Boolean
+        get() = preferences.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
+        set(value) = preferences.edit { putBoolean(KEY_NOTIFICATIONS_ASKED, value) }
+
     private companion object {
         const val KEY_LAST_SERVER = "last_server"
+        const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
     }
 }

@@ -114,6 +114,10 @@ data class MemberDto(@SerialName("user_id") val userId: String, @SerialName("joi
 @Serializable
 data class MemberPage(val members: List<MemberDto>, @SerialName("next_cursor") val nextCursor: String)
 
+/** A device's push token (docs/push.md). */
+@Serializable
+data class PushTokenRequest(val provider: String, val token: String)
+
 /** A file's metadata (`File` in docs/api/gateway.yaml). */
 @Serializable
 data class FileDto(

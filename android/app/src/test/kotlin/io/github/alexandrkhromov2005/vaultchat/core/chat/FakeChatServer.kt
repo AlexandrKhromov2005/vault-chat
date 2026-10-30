@@ -13,6 +13,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.MessagePage
 import io.github.alexandrkhromov2005.vaultchat.core.net.NotRepeatable
 import io.github.alexandrkhromov2005.vaultchat.core.net.OpenDirectRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.PublicProfile
+import io.github.alexandrkhromov2005.vaultchat.core.net.PushTokenRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.RefreshTokenRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.RegisterRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.Registration
@@ -488,4 +489,7 @@ class FakeChatServer(val me: String) : GatewayApi {
     override suspend fun logout(body: RefreshTokenRequest): Response<Unit> = throw UnsupportedOperationException()
 
     override suspend fun me(authorization: String): Response<User> = throw UnsupportedOperationException()
+
+    override suspend fun registerPushToken(authorization: String, body: PushTokenRequest): Response<Unit> =
+        throw UnsupportedOperationException()
 }

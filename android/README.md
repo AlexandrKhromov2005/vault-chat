@@ -61,6 +61,13 @@ or the environment:
 Publish the SHA-256 of the APK and of the signing certificate with each
 release (`apksigner verify --print-certs app-release.apk`).
 
+## Push
+
+Push needs a Firebase project set in `~/.gradle/gradle.properties`
+(`vaultchat.firebase.appId`, `apiKey`, `projectId`, `senderId`); see
+[docs/android/push.md](../docs/android/push.md). Without it the app
+synchronises every 15 minutes in the background instead.
+
 Robolectric runs the database and sync tests on the JVM with Android 15
 (`src/test/resources/robolectric.properties`); its first run downloads that
 Android image from Maven Central.

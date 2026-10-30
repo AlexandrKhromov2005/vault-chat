@@ -21,6 +21,12 @@ val defaultServer = providers.gradleProperty("vaultchat.defaultServer").orElse("
     }
 }
 
+// The Firebase project for push (docs/android/push.md), kept outside the
+// repository like the signing key. Without it the build has no push.
+fun firebaseValue(name: String): String = providers.gradleProperty("vaultchat.firebase.$name").orElse("").get().also {
+    require(Regex("[A-Za-z0-9:._-]*").matches(it)) { "vaultchat.firebase.$name has unexpected characters" }
+}
+
 android {
     namespace = "io.github.alexandrkhromov2005.vaultchat"
     compileSdk = 37
@@ -33,6 +39,11 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+
+        buildConfigField("String", "FIREBASE_APP_ID", "\"${firebaseValue("appId")}\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${firebaseValue("apiKey")}\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${firebaseValue("projectId")}\"")
+        buildConfigField("String", "FIREBASE_SENDER_ID", "\"${firebaseValue("senderId")}\"")
     }
 
     signingConfigs {
@@ -116,6 +127,8 @@ dependencies {
     implementation(libs.paging.runtime)
     implementation(libs.paging.compose)
     implementation(libs.coil.compose)
+    implementation(libs.firebase.messaging)
+    implementation(libs.kotlinx.coroutines.play.services)
     ksp(libs.room.compiler)
     debugImplementation(libs.compose.ui.tooling)
 

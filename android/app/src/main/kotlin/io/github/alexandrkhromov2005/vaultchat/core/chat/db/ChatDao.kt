@@ -337,6 +337,18 @@ abstract class ChatDao {
     )
     abstract fun members(roomId: String): Flow<List<MemberItem>>
 
+    @Query(NOTICES)
+    abstract fun noticesFlow(me: String): Flow<List<NoticeItem>>
+
+    @Query(NOTICES)
+    abstract suspend fun notices(me: String): List<NoticeItem>
+
+    @Query(
+        "INSERT INTO notified (room_id, sequence) SELECT :roomId, :sequence WHERE EXISTS (SELECT 1 FROM rooms WHERE room_id = :roomId) " +
+            "ON CONFLICT (room_id) DO UPDATE SET sequence = MAX(sequence, excluded.sequence)",
+    )
+    abstract suspend fun markNotified(roomId: String, sequence: Long)
+
     @Query("SELECT * FROM files WHERE file_id = :fileId")
     abstract fun file(fileId: String): Flow<FileEntity?>
 
@@ -403,6 +415,15 @@ abstract class ChatDao {
         // server clocks differ, so sequences decide, not times.
         const val PREVIEWED = "o.room_id = r.room_id AND (o.state != 'failed' OR o.after_sequence >= COALESCE(t.newest, 0)) " +
             "ORDER BY o.position DESC LIMIT 1"
+
+        // Unread messages of others that no notification has shown, oldest first.
+        const val NOTICES = "SELECT m.room_id, m.sequence, m.sender_id, p.username AS sender_name, m.text, m.attachments, " +
+            "m.created_at, r.kind AS room_kind, r.name AS room_name, rp.username AS peer_name FROM messages m " +
+            "JOIN timelines t ON t.room_id = m.room_id JOIN rooms r ON r.room_id = m.room_id " +
+            "LEFT JOIN notified n ON n.room_id = m.room_id LEFT JOIN profiles p ON p.user_id = m.sender_id " +
+            "LEFT JOIN profiles rp ON rp.user_id = r.peer_id " +
+            "WHERE m.sender_id != :me AND m.sequence > t.last_read AND m.sequence > COALESCE(n.sequence, 0) " +
+            "ORDER BY m.room_id, m.sequence LIMIT 200"
 
         const val ROOM_LIST = "SELECT r.*, p.username AS peer_name, m.text AS last_text, m.sender_id AS last_sender_id, " +
             "m.attachments AS last_attachments, m.created_at AS last_created_at, " +

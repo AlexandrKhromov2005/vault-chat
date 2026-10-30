@@ -237,6 +237,34 @@ data class RoomListItem(
     @ColumnInfo(name = "pending_files") val pendingFiles: Int = 0,
 )
 
+/**
+ * The newest message of a room that a notification has shown (Notifier), so
+ * that no message is shown twice. Messages up to the room's last read one
+ * are never shown.
+ */
+@Entity(
+    tableName = "notified",
+    foreignKeys = [ForeignKey(RoomEntity::class, ["room_id"], ["room_id"], onDelete = ForeignKey.CASCADE)],
+)
+data class NotifiedEntity(
+    @PrimaryKey @ColumnInfo(name = "room_id") val roomId: String,
+    val sequence: Long,
+)
+
+/** A message that a notification has not shown yet, with what the notification needs. */
+data class NoticeItem(
+    @ColumnInfo(name = "room_id") val roomId: String,
+    val sequence: Long,
+    @ColumnInfo(name = "sender_id") val senderId: String,
+    @ColumnInfo(name = "sender_name") val senderName: String?,
+    val text: String,
+    val attachments: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "room_kind") val roomKind: String,
+    @ColumnInfo(name = "room_name") val roomName: String?,
+    @ColumnInfo(name = "peer_name") val peerName: String?,
+)
+
 /** A message with its sender's name. */
 data class MessageItem(
     @Embedded val message: MessageEntity,

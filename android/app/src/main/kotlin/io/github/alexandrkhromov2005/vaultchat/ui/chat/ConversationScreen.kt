@@ -88,6 +88,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import io.github.alexandrkhromov2005.vaultchat.Notifications
 import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
@@ -360,6 +361,8 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
     LaunchedEffect(room) {
         if (room == RoomView.Gone) onBack()
     }
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(roomId) { Notifications.cancel(appContext, roomId) }
     // A reset drops the older history the pager has already seen to its end;
     // it must start over to page through it again.
     val oldest by model.oldest.collectAsStateWithLifecycle()

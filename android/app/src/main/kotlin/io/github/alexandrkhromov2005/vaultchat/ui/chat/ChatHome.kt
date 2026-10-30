@@ -1,7 +1,15 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -9,6 +17,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.alexandrkhromov2005.vaultchat.AppContainer
+import io.github.alexandrkhromov2005.vaultchat.Settings
+import io.github.alexandrkhromov2005.vaultchat.SyncWorker
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
 import io.github.alexandrkhromov2005.vaultchat.ui.ScreenTransitions
 import kotlinx.serialization.Serializable
@@ -43,6 +53,20 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
             launchSingleTop = true
         }
     }
+    // A room from a tapped notification.
+    val pendingRoom by container.openRoom.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingRoom) {
+        val roomId = pendingRoom ?: return@LaunchedEffect
+        container.openRoom.value = null
+        navController.navigate(ConversationRoute(roomId)) {
+            popUpTo<RoomsRoute>()
+            launchSingleTop = true
+        }
+    }
+    NotificationPermission(container.settings)
+    // The fallback for lost pushes; it ends at once once nobody is signed in.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { SyncWorker.schedulePeriodic(context.applicationContext) }
     NavHost(
         navController,
         startDestination = RoomsRoute,
@@ -110,4 +134,15 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
 /** Pops [entry] if it is on top, so that pressing back twice pops only it. */
 private fun NavHostController.popOwn(entry: NavBackStackEntry) {
     if (currentBackStackEntry?.id == entry.id) popBackStack()
+}
+
+/** Asks once for the permission to show notifications (Android 13 and later). */
+@Composable
+private fun NotificationPermission(settings: Settings) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || settings.notificationsAsked) return
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        settings.notificationsAsked = true
+        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 }
