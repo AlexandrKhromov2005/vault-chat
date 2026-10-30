@@ -241,4 +241,38 @@ class MessageFilesTest {
         assertEquals(listOf<String?>(id(4)), source.retried)
         assertTrue(compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.CustomActions)).fetchSemanticsNodes().size == 1)
     }
+
+    /** The tops of the bubble described by [text], frame by frame, while a room opens. */
+    private fun topsWhileOpening(text: String, rows: List<ChatRow>): List<Float> {
+        val pages = MutableStateFlow(PagingData.from(rows))
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            CompositionLocalProvider(LocalFileSource provides source) {
+                Messages(pages.collectAsLazyPagingItems(), emptyList(), me, channel = true, onNewestSeen = {}, onRetry = {}, onDelete = {})
+            }
+        }
+        return (0 until 60).mapNotNull {
+            compose.mainClock.advanceTimeByFrame()
+            compose.onAllNodes(hasContentDescription(text, substring = true)).fetchSemanticsNodes().singleOrNull()?.positionInRoot?.y
+        }
+    }
+
+    private fun pictureRows(withFiles: Boolean): List<ChatRow> {
+        val mine = file(1, "mine.png", "image/png").copy(ownerId = me)
+        val his = file(2, "his.png", "image/png")
+        source.metadata.value = mapOf(mine.fileId to FileState.Known(mine), his.fileId to FileState.Known(his))
+        fun row(sequence: Long, sender: String, text: String, picture: FileEntity) = ChatRow.Message(
+            MessageItem(MessageEntity(roomId, sequence, "m-$sequence", sender, "cid-$sequence", text, attachments = picture.fileId, createdAt = now + sequence), "bob", true),
+            if (withFiles) mapOf(picture.fileId to picture) else emptyMap(),
+        )
+        // Newest first: his picture is at the bottom, mine above it.
+        return listOf(row(2, bob, "his", his), row(1, me, "mine", mine))
+    }
+
+    @Test
+    fun picturesReadWithTheirPageDoNotMoveWhenTheRoomOpens() {
+        val tops = topsWhileOpening("mine", pictureRows(withFiles = true))
+        assertTrue(tops.isNotEmpty())
+        assertEquals("the older picture stays where it first shows", setOf(tops.first()), tops.toSet())
+    }
 }

@@ -9,6 +9,7 @@ import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.TimelineEntity
@@ -179,6 +180,10 @@ class ChatSession(
         remoteMediator = MessagesMediator(sync, roomId),
         pagingSourceFactory = { dao.messages(roomId) },
     ).flow
+
+    /** The stored metadata of those of [fileIds] that have it. */
+    suspend fun storedFiles(fileIds: List<String>): Map<String, FileEntity> =
+        fileIds.mapNotNull { dao.fileRow(it) }.associateBy { it.fileId }
 
     /**
      * Keeps the database open until the returned handle is closed. Screens

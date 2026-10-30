@@ -97,6 +97,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.MessageText
 import io.github.alexandrkhromov2005.vaultchat.core.chat.StagedFile
 import io.github.alexandrkhromov2005.vaultchat.core.chat.Staging
 import io.github.alexandrkhromov2005.vaultchat.core.chat.UploadProgress
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
@@ -127,7 +128,12 @@ import kotlinx.coroutines.withContext
 sealed interface ChatRow {
     val key: String
 
-    data class Message(val item: MessageItem) : ChatRow {
+    /**
+     * A stored message with the metadata of its files read with its page,
+     * so that its bubble has its size from the first frame: one growing
+     * after it is shown pushes the older messages, animated.
+     */
+    data class Message(val item: MessageItem, val files: Map<String, FileEntity> = emptyMap()) : ChatRow {
         override val key: String get() = "m${item.message.sequence}"
     }
 
@@ -171,7 +177,7 @@ class ConversationViewModel(
 
     val rows: Flow<PagingData<ChatRow>> = chat.messages(roomId)
         .map { page ->
-            page.map { ChatRow.Message(it) as ChatRow }
+            page.map { ChatRow.Message(it, chat.storedFiles(it.message.attachmentIds)) as ChatRow }
                 .insertSeparators { newer, older ->
                     // A heading above the oldest message of each day; the list is
                     // newest first, so it goes after that message.
@@ -695,6 +701,7 @@ private fun MessageList(
                         message.createdAt - older.item.message.createdAt < GROUP_WINDOW_MICROS
                     Bubble(
                         row.item,
+                        row.files,
                         own = message.senderId == me,
                         showSender = channel && !continues && message.senderId != me,
                         maxWidth = bubbleWidth,
@@ -787,7 +794,7 @@ private fun MessageFrame(
 private val BubbleShape = RoundedCornerShape(18.dp)
 
 @Composable
-private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
+private fun Bubble(item: MessageItem, stored: Map<String, FileEntity>, own: Boolean, showSender: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
     val message = item.message
     val sender = when {
         own -> stringResource(R.string.sender_you)
@@ -799,7 +806,7 @@ private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidt
     val attachments = message.attachmentCount
     val attachmentText = if (attachments > 0) pluralStringResource(R.plurals.attachments, attachments, attachments) else null
     val description = listOfNotNull(sender, message.text.takeIf { it.isNotEmpty() }, attachmentText, time).joinToString(", ")
-    val files = rememberMessageFiles(message.roomId, message.attachmentIds)
+    val files = rememberMessageFiles(message.roomId, message.attachmentIds, stored)
     // The bubble speaks as one; its files are opened through its actions.
     val fileActions = fileAccessibilityActions(files)
 

@@ -68,13 +68,17 @@ internal data class MessageFile(val fileId: String, val state: FileState, val lo
 /** The staged copy of a file waiting for its upload; [progress] while it is being uploaded. */
 internal data class LocalFile(val file: File, val name: String, val kind: FileKind, val size: Long, val progress: Float?, val waiting: Boolean)
 
-/** The metadata of a message's files as far as it is known, in the message's order. */
+/**
+ * The metadata of a message's files as far as it is known, in the message's
+ * order; [stored] is what was read with the message.
+ */
 @Composable
-internal fun rememberMessageFiles(roomId: String, fileIds: List<String>): List<MessageFile> {
+internal fun rememberMessageFiles(roomId: String, fileIds: List<String>, stored: Map<String, FileEntity> = emptyMap()): List<MessageFile> {
     val source = LocalFileSource.current
     return fileIds.map { fileId ->
         key(fileId) {
-            val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(source.known(fileId) ?: FileState.Loading)
+            val initial = stored[fileId]?.let { FileState.Known(it) } ?: source.known(fileId) ?: FileState.Loading
+            val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(initial)
             MessageFile(fileId, state)
         }
     }
