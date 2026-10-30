@@ -66,6 +66,15 @@ interface FileSource {
 
     fun retry(fileId: String? = null)
 
+    /**
+     * What this process already knows of [fileId], to show at once instead
+     * of a frame of loading while [metadata] reads the database.
+     */
+    fun known(fileId: String): FileState.Known? = null
+
+    /** Like [known], for the content of [file]: its copy, if one was ready. */
+    fun ready(file: FileEntity): ContentState.Ready? = null
+
     /** The local copy of a picked file of a queued message. */
     fun staged(name: String): File
 }
@@ -95,12 +104,19 @@ class Attachments(
     // Files the server answered 404 for; not asked again until the user taps one.
     private val unavailable = ConcurrentHashMap.newKeySet<String>()
 
+    // What was already shown, so that a bubble shown again, such as an own
+    // message moving from the queue to the history, keeps its size. The
+    // flows still check the database and the cache.
+    private val knownFiles = ConcurrentHashMap<String, FileEntity>()
+    private val readyFiles = ConcurrentHashMap<String, File>()
+
     // Bumped to try failed loads again.
     private val retries = MutableStateFlow(0L)
 
     /** The metadata of [fileId], a file of a message in [roomId], loaded if it is not stored. */
     override fun metadata(roomId: String, fileId: String): Flow<FileState> = dao.file(fileId).transformLatest { row ->
         if (row != null) {
+            knownFiles[fileId] = row
             emit(FileState.Known(row))
             return@transformLatest
         }
@@ -123,6 +139,7 @@ class Attachments(
             val attempt = retries.value
             val cached = withContext(Dispatchers.IO) { cache.get(file.fileId, localName(file), file.size) }
             if (cached != null) {
+                readyFiles[file.fileId] = cached
                 emit(ContentState.Ready(cached))
                 return@flow
             }
@@ -141,13 +158,21 @@ class Attachments(
                     emit(it)
                 }
                 downloads.remove(file.fileId, shared)
-                if (last is ContentState.Ready) return@flow
+                (last as? ContentState.Ready)?.let {
+                    readyFiles[file.fileId] = it.file
+                    return@flow
+                }
             }
             retries.first { it != attempt }
         }
     }.distinctUntilChanged()
 
     override fun staged(name: String): File = staging.file(name)
+
+    override fun known(fileId: String): FileState.Known? = knownFiles[fileId]?.let { FileState.Known(it) }
+
+    override fun ready(file: FileEntity): ContentState.Ready? =
+        readyFiles[file.fileId]?.let { ContentState.Ready(it) }
 
     /** Tries failed loads again; a tap on an unavailable file asks the server again too. */
     override fun retry(fileId: String?) {

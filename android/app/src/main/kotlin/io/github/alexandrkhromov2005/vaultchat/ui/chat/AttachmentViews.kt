@@ -54,10 +54,15 @@ import java.io.File
 /**
  * A file of a message and what is known of it. A file of a queued message
  * that is not uploaded yet has no ID; it is shown from its [local] copy.
+ * An uploaded one has the [kind] it was picked as while its metadata loads,
+ * so that it keeps its place in the bubble.
  */
-internal data class MessageFile(val fileId: String, val state: FileState, val local: LocalFile? = null) {
+internal data class MessageFile(val fileId: String, val state: FileState, val local: LocalFile? = null, val kind: FileKind? = null) {
     val isImage: Boolean
-        get() = local?.kind?.isImage ?: (state is FileState.Known && FileKind.of(state.file.contentType).isImage)
+        get() = local?.kind?.isImage
+            ?: (state as? FileState.Known)?.let { FileKind.of(it.file.contentType).isImage }
+            ?: kind?.isImage
+            ?: false
 }
 
 /** The staged copy of a file waiting for its upload; [progress] while it is being uploaded. */
@@ -69,7 +74,7 @@ internal fun rememberMessageFiles(roomId: String, fileIds: List<String>): List<M
     val source = LocalFileSource.current
     return fileIds.map { fileId ->
         key(fileId) {
-            val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(FileState.Loading)
+            val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(source.known(fileId) ?: FileState.Loading)
             MessageFile(fileId, state)
         }
     }
@@ -92,8 +97,8 @@ internal fun rememberOutgoingFiles(
         val fileId = file.fileId
         if (fileId != null) {
             key(fileId) {
-                val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(FileState.Loading)
-                MessageFile(fileId, state)
+                val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(source.known(fileId) ?: FileState.Loading)
+                MessageFile(fileId, state, kind = FileKind.of(file.type))
             }
         } else {
             val progress = upload?.takeIf { it.position == file.position && it.total > 0 }?.let { it.sent.toFloat() / it.total }
@@ -163,6 +168,8 @@ private fun Thumbnail(file: MessageFile, modifier: Modifier) {
     when {
         local != null -> LocalThumbnail(local, modifier)
         known != null -> ImageThumbnail(known, modifier)
+        // Its metadata is loading: the same place, empty.
+        else -> Box(modifier.clip(CornerShape).background(MaterialTheme.colorScheme.surfaceVariant))
     }
 }
 
@@ -195,7 +202,7 @@ private fun UploadProgressRing(progress: Float?) {
 private fun ImageThumbnail(file: FileEntity, modifier: Modifier) {
     val source = LocalFileSource.current
     val actions = LocalFileActions.current
-    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(ContentState.Loading(0, file.size))
+    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(source.ready(file) ?: ContentState.Loading(0, file.size))
     val state = content
     Box(
         modifier
@@ -226,14 +233,29 @@ private fun ImageThumbnail(file: FileEntity, modifier: Modifier) {
  */
 @Composable
 internal fun DecodedImage(file: File, kind: FileKind, scale: ContentScale, modifier: Modifier = Modifier) {
-    val decodable by produceState<Boolean?>(null, file, kind) {
+    // A copy checked before is shown at once and checked again meanwhile;
+    // copies are never rewritten under their name.
+    val decodable by produceState(if (Checked.contains(file, kind)) true else null, file, kind) {
         value = kind.isImage && withContext(Dispatchers.IO) { hasSignature(file, kind) }
+        if (value == true) Checked.add(file, kind)
     }
     when (decodable) {
         true -> AsyncImage(model = file, contentDescription = null, contentScale = scale, modifier = modifier.testTag(DECODED_TAG))
         false -> Box(modifier.testTag(BROKEN_TAG), contentAlignment = Alignment.Center) { FileIcon(R.drawable.ic_broken_image) }
         null -> Unit
     }
+}
+
+/** Copies whose signature was checked recently. */
+private object Checked {
+    private const val MAX = 256
+    private val files = object : LinkedHashMap<String, Unit>(MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>) = size > MAX
+    }
+
+    fun contains(file: File, kind: FileKind) = synchronized(files) { files.containsKey("$kind:${file.path}") }
+
+    fun add(file: File, kind: FileKind) = synchronized(files) { files["$kind:${file.path}"] = Unit }
 }
 
 internal const val DECODED_TAG = "decoded image"
@@ -364,6 +386,6 @@ private fun LocalFileRow(local: LocalFile, modifier: Modifier) {
 @Composable
 private fun BusyProgress(file: FileEntity) {
     val source = LocalFileSource.current
-    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(ContentState.Loading(0, file.size))
+    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(source.ready(file) ?: ContentState.Loading(0, file.size))
     (content as? ContentState.Loading)?.let { Progress(it) }
 }

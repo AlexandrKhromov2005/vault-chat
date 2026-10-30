@@ -43,7 +43,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 @Composable
 fun ImageViewer(file: FileEntity, actions: FileActions) {
     val source = LocalFileSource.current
-    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(ContentState.Loading(0, file.size))
+    val content by remember(source, file.fileId) { source.content(file) }.collectAsState(source.ready(file) ?: ContentState.Loading(0, file.size))
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val transform = rememberTransformableState { zoom, pan, _ ->
