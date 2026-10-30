@@ -222,9 +222,14 @@ class AttachmentsTest {
     fun contentThatDoesNotEndIsCutAtTheFilesSize() = runBlocking {
         val dto = server.addFile(roomId, 1, "hello".toByteArray())
         val file = attachments().let { known(it, dto.fileId) }
+        // It ends after a MiB, so that a download that is not cut fails
+        // this test instead of filling the disk.
+        var served = 0L
         val endless = object : Source {
             override fun read(sink: Buffer, byteCount: Long): Long {
+                if (served >= 1024 * 1024) return -1
                 sink.write(ByteArray(byteCount.toInt()))
+                served += byteCount
                 return byteCount
             }
 
@@ -243,6 +248,7 @@ class AttachmentsTest {
             }
         }
         assertTrue(downloaded(attachments(requests), file) is ContentState.Failed)
+        assertTrue("read $served bytes", served < 1024 * 1024)
         assertEquals(emptyList<String>(), cacheDir.resolve(dto.fileId).list().orEmpty().toList())
     }
 
