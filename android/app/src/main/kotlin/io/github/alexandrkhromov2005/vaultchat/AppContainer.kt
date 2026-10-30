@@ -59,6 +59,8 @@ class AppContainer(private val context: Context) {
 
     val settings = Settings(context)
 
+    val updates = Updates(http, settings)
+
     private val foreground = AppForeground()
     private val networkMonitor = NetworkMonitor(context)
 
@@ -110,7 +112,23 @@ class Settings(context: Context) {
         get() = preferences.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
         set(value) = preferences.edit { putBoolean(KEY_NOTIFICATIONS_ASKED, value) }
 
+    /** When GitHub was last asked for a newer release (Updates), and what it had. */
+    var updateCheckedAt: Long
+        get() = preferences.getLong(KEY_UPDATE_CHECKED_AT, 0)
+        set(value) = preferences.edit { putLong(KEY_UPDATE_CHECKED_AT, value) }
+
+    var updateVersion: String?
+        get() = preferences.getString(KEY_UPDATE_VERSION, null)
+        set(value) = preferences.edit { putString(KEY_UPDATE_VERSION, value) }
+
+    var updatePage: String?
+        get() = preferences.getString(KEY_UPDATE_PAGE, null)
+        set(value) = preferences.edit { putString(KEY_UPDATE_PAGE, value) }
+
     private companion object {
+        const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
+        const val KEY_UPDATE_VERSION = "update_version"
+        const val KEY_UPDATE_PAGE = "update_page"
         const val KEY_LAST_SERVER = "last_server"
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
     }

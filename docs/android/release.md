@@ -1,0 +1,58 @@
+# Android client: releases
+
+Stage 8 of the [plan](plan.md). The app is distributed only as a signed APK
+in GitHub Releases.
+
+## Updates
+
+Once a day, when the room list opens, the app reads the repository's
+releases from the GitHub API and offers the newest release tagged
+`android-v<version>` that is newer than the installed `versionName`
+(drafts and prereleases are skipped). It shows a banner whose button opens
+the release page in the browser; the user downloads and installs the APK
+there. The app never downloads or installs anything by itself, and opens
+only pages under `https://github.com/AlexandrKhromov2005/vault-chat/releases/`.
+A failed check waits for the next day. The answer is limited to 1 MiB.
+
+Android installs an update only if it is signed with the same key, so the
+key must never change (see below).
+
+## Making a release
+
+1. **Key, once.** Create the signing key outside the repository and keep a
+   backup of it and its passwords somewhere safe; a lost key means users
+   must uninstall the app (and lose its local data) to get a new one:
+
+   ```sh
+   keytool -genkeypair -v -keystore vaultchat-release.jks -alias vaultchat \
+     -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+   Then set `vaultchat.signing.*` in `~/.gradle/gradle.properties` as in
+   [android/README.md](../../android/README.md), and `vaultchat.defaultServer`
+   and `vaultchat.firebase.*` if wanted.
+2. **Version.** Raise `versionCode` by one and set `versionName` in
+   `android/app/build.gradle.kts`; commit.
+3. **Build and check.**
+
+   ```sh
+   cd android
+   ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+   apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+   sha256sum app/build/outputs/apk/release/app-release.apk
+   ```
+
+4. **Publish.** Tag the commit and attach the APK; put both SHA-256 values
+   (APK and signing certificate) in the notes:
+
+   ```sh
+   gh release create android-v0.1.0 app/build/outputs/apk/release/app-release.apk \
+     --title "Vault Chat for Android 0.1.0" --notes "APK SHA-256: … Certificate SHA-256: …"
+   ```
+
+## Not done yet
+
+- Baseline Profiles and checks on real devices and on the API 26 emulator:
+  no device or emulator was available while building the app. The release
+  build with R8 was built, not run.
+- The first release itself, which needs the signing key.

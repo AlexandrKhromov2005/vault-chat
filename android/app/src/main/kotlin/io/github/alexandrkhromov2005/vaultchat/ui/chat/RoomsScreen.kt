@@ -1,5 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -49,10 +53,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.alexandrkhromov2005.vaultchat.AppUpdate
 import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
@@ -107,6 +113,7 @@ fun RoomsScreen(
     appScope: CoroutineScope,
     openRoom: (String) -> Unit,
     newChat: () -> Unit,
+    update: AppUpdate? = null,
 ) {
     val model = viewModel { RoomsViewModel(chat, logout, appScope) }
     val rooms by model.rooms.collectAsStateWithLifecycle()
@@ -135,12 +142,15 @@ fun RoomsScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             val list = rooms
-            when {
-                list == null -> Unit
-                list.isEmpty() -> EmptyRooms()
-                else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(list, key = { it.room.roomId }) { item ->
-                        RoomRow(item, me = chat.me, onClick = { openRoom(item.room.roomId) })
+            Column(Modifier.fillMaxSize()) {
+                if (update != null) UpdateBanner(update)
+                when {
+                    list == null -> Unit
+                    list.isEmpty() -> EmptyRooms()
+                    else -> LazyColumn(Modifier.fillMaxSize()) {
+                        items(list, key = { it.room.roomId }) { item ->
+                            RoomRow(item, me = chat.me, onClick = { openRoom(item.room.roomId) })
+                        }
                     }
                 }
             }
@@ -155,6 +165,31 @@ fun RoomsScreen(
             },
             onDismiss = { confirmLogout = false },
         )
+    }
+}
+
+/** A newer release; its page opens in the browser, where the APK is downloaded. */
+@Composable
+private fun UpdateBanner(update: AppUpdate) {
+    val context = LocalContext.current
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.update_available, update.version),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, update.page.toUri()))
+                } catch (e: ActivityNotFoundException) {
+                    // No browser: nothing to open the page with.
+                }
+            }) { Text(stringResource(R.string.update_open)) }
+        }
     }
 }
 

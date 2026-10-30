@@ -103,6 +103,8 @@
     <string name="message_retry">Отправить ещё раз</string>
     <string name="message_copy">Скопировать</string>
     <string name="message_delete">Удалить</string>
+    <string name="update_available">Доступна версия %1$s</string>
+    <string name="update_open">Скачать</string>
     <string name="channel_messages">Сообщения</string>
     <string name="channel_sync">Синхронизация</string>
     <string name="notification_hidden">Новое сообщение</string>

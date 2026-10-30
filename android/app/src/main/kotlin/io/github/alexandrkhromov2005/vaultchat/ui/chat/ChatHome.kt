@@ -66,7 +66,11 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
     NotificationPermission(container.settings)
     // The fallback for lost pushes; it ends at once once nobody is signed in.
     val context = LocalContext.current
-    LaunchedEffect(Unit) { SyncWorker.schedulePeriodic(context.applicationContext) }
+    LaunchedEffect(Unit) {
+        SyncWorker.schedulePeriodic(context.applicationContext)
+        container.updates.checkIfDue()
+    }
+    val update by container.updates.update.collectAsStateWithLifecycle()
     NavHost(
         navController,
         startDestination = RoomsRoute,
@@ -86,6 +90,7 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
                 appScope = container.appScope,
                 openRoom = { roomId -> navController.navigate(ConversationRoute(roomId)) { launchSingleTop = true } },
                 newChat = { navController.navigate(NewChatRoute) { launchSingleTop = true } },
+                update = update,
             )
         }
         composable<ConversationRoute> { entry ->
