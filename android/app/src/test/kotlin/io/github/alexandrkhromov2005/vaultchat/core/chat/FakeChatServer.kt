@@ -24,11 +24,16 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.TokenPair
 import io.github.alexandrkhromov2005.vaultchat.core.net.User
 import io.github.alexandrkhromov2005.vaultchat.core.net.UserPage
 import io.github.alexandrkhromov2005.vaultchat.core.net.call
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.ByteString.Companion.encodeUtf8
+import okio.buffer
 import retrofit2.Response
 import java.time.Instant
 import java.util.Collections
@@ -151,7 +156,7 @@ class FakeChatServer(val me: String) : GatewayApi {
 
     /** Stores a message with exactly this key and text, and moves its room to the top. */
     @Synchronized
-    fun store(roomId: String, sender: String, clientMessageId: String, text: String): MessageDto {
+    fun store(roomId: String, sender: String, clientMessageId: String, text: String, attachmentIds: List<String> = emptyList()): MessageDto {
         val list = messages.getValue(roomId)
         val message = MessageDto(
             messageId = id(2, list.size + 1 + roomId.hashCode().and(0xffff) * 1000),
@@ -159,6 +164,7 @@ class FakeChatServer(val me: String) : GatewayApi {
             senderId = sender,
             clientMessageId = clientMessageId,
             text = text,
+            attachmentIds = attachmentIds.ifEmpty { null },
             sequence = list.size + 1L,
             createdAt = tick(),
         )
@@ -228,10 +234,14 @@ class FakeChatServer(val me: String) : GatewayApi {
         intercept("send $roomId")?.let { return error(it) }
         val message = synchronized(this) {
             if (rooms.none { it.roomId == roomId }) return error(404)
+            // Like Chat, every file is checked with Media first, a repeat too.
+            val ids = body.attachmentIds.orEmpty()
+            val foreign = ids.any { id -> files[id]?.first?.let { it.roomId != roomId || it.ownerId != me } ?: true }
+            if (ids.size > 5 || ids.toSet().size != ids.size || foreign) return error(400)
             val existing = messages.getValue(roomId).firstOrNull { it.senderId == me && it.clientMessageId == body.clientMessageId }
             when {
-                existing == null -> store(roomId, me, body.clientMessageId, body.text)
-                existing.text != body.text -> return error(409)
+                existing == null -> store(roomId, me, body.clientMessageId, body.text, ids)
+                existing.text != body.text || existing.attachmentIds.orEmpty() != ids -> return error(409)
                 else -> existing
             }
         }
@@ -395,6 +405,69 @@ class FakeChatServer(val me: String) : GatewayApi {
         val (file, content) = readable(fileId) ?: return error(404)
         return Response.success(contentReply(content).toResponseBody(file.contentType.toMediaType()))
     }
+
+    /** What an upload answers instead of the stored file. */
+    @Volatile
+    var uploadReply: (FileDto) -> FileDto = { it }
+
+    /**
+     * Runs after an upload has been stored, before the answer; throwing an
+     * IOException here loses the answer.
+     */
+    @Volatile
+    var afterUpload: suspend (FileDto) -> Unit = {}
+
+    /** The sink an upload's body is written to; a failing one breaks the connection while it is sent. */
+    @Volatile
+    var uploadSink: () -> okio.Sink = { okio.blackholeSink() }
+
+    private var uploaded = 0
+
+    /** Reads the multipart body as the Gateway does and stores the file unless the body broke off. */
+    override suspend fun uploadFile(authorization: String, roomId: String, body: RequestBody): Response<FileDto> {
+        log += "upload $roomId"
+        intercept("upload $roomId")?.let { return error(it) }
+        val buffer = okio.Buffer()
+        val sink = uploadSink()
+        // Through a tee: what reaches the server, and what the test's sink lets through.
+        val tee = object : okio.ForwardingSink(sink) {
+            override fun write(source: okio.Buffer, byteCount: Long) {
+                source.copyTo(buffer, 0, byteCount)
+                super.write(source, byteCount)
+            }
+        }
+        val out = tee.buffer()
+        // Cancelling the call stops the writing, as OkHttp does by closing the socket.
+        runInterruptible(Dispatchers.IO) {
+            body.writeTo(out)
+            out.flush()
+        }
+        val text = buffer.readByteString()
+        val boundary = body.contentType()!!.parameter("boundary")!!
+        val closing = "\r\n--$boundary--\r\n".encodeUtf8()
+        if (!text.endsWith(closing)) return error(400)
+        val headEnd = text.indexOf("\r\n\r\n".encodeUtf8())
+        val head = text.substring(0, headEnd).utf8()
+        val name = Regex("filename=\"((?:[^\"\\\\]|\\\\.)*)\"").find(head)!!.groupValues[1].replace(Regex("\\\\(.)"), "$1")
+        val content = text.substring(headEnd + 4, text.size - closing.size).toByteArray()
+        val file = synchronized(this) {
+            if (rooms.none { it.roomId == roomId }) return error(404)
+            if (content.isEmpty()) return error(400)
+            uploaded++
+            val type = when {
+                content.size >= 8 && content[0] == 0x89.toByte() && content[1] == 0x50.toByte() -> "image/png"
+                content.size >= 3 && content[0] == 0xff.toByte() && content[1] == 0xd8.toByte() -> "image/jpeg"
+                String(content, 0, minOf(5, content.size)) == "%PDF-" -> "application/pdf"
+                else -> "text/plain; charset=utf-8"
+            }
+            addFile(roomId, 100 + uploaded, content, name, type)
+        }
+        afterUpload(file)
+        return Response.success(201, uploadReply(file))
+    }
+
+    /** Files stored by uploads, in order. */
+    fun uploads(): List<FileDto> = synchronized(this) { files.values.map { it.first }.filter { it.fileId > id(5, 100) }.sortedBy { it.fileId } }
 
     /** Requests as the client sends them, through the same error mapping. */
     val requests = object : ChatRequests {

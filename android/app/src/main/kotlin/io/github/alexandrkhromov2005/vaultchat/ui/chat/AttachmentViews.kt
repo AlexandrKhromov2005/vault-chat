@@ -43,14 +43,25 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.ContentState
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileKind
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileNames
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileState
+import io.github.alexandrkhromov2005.vaultchat.core.chat.UploadProgress
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingFileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.hasSignature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** A file of a message and what is known of it. */
-internal data class MessageFile(val fileId: String, val state: FileState)
+/**
+ * A file of a message and what is known of it. A file of a queued message
+ * that is not uploaded yet has no ID; it is shown from its [local] copy.
+ */
+internal data class MessageFile(val fileId: String, val state: FileState, val local: LocalFile? = null) {
+    val isImage: Boolean
+        get() = local?.kind?.isImage ?: (state is FileState.Known && FileKind.of(state.file.contentType).isImage)
+}
+
+/** The staged copy of a file waiting for its upload; [progress] while it is being uploaded. */
+internal data class LocalFile(val file: File, val name: String, val kind: FileKind, val size: Long, val progress: Float?, val waiting: Boolean)
 
 /** The metadata of a message's files as far as it is known, in the message's order. */
 @Composable
@@ -60,6 +71,34 @@ internal fun rememberMessageFiles(roomId: String, fileIds: List<String>): List<M
         key(fileId) {
             val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(FileState.Loading)
             MessageFile(fileId, state)
+        }
+    }
+}
+
+/**
+ * The files of a queued message: uploaded ones like those of a stored
+ * message, whose metadata and copy the upload stored, so that the hand-over
+ * to the stored message changes nothing; the others from their staged copy.
+ */
+@Composable
+internal fun rememberOutgoingFiles(
+    roomId: String,
+    files: List<OutgoingFileEntity>,
+    upload: UploadProgress?,
+    uploading: Boolean,
+): List<MessageFile> {
+    val source = LocalFileSource.current
+    return files.map { file ->
+        val fileId = file.fileId
+        if (fileId != null) {
+            key(fileId) {
+                val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(FileState.Loading)
+                MessageFile(fileId, state)
+            }
+        } else {
+            val progress = upload?.takeIf { it.position == file.position && it.total > 0 }?.let { it.sent.toFloat() / it.total }
+            val local = LocalFile(source.staged(file.staged), file.name, FileKind.of(file.type), file.size, progress, waiting = uploading)
+            MessageFile("staged:${file.staged}", FileState.Loading, local)
         }
     }
 }
@@ -93,18 +132,18 @@ internal fun fileAccessibilityActions(files: List<MessageFile>): List<CustomAcce
 @Composable
 internal fun MessageFiles(files: List<MessageFile>, maxWidth: Dp) {
     if (files.isEmpty()) return
-    val images = files.mapNotNull { (it.state as? FileState.Known)?.file?.takeIf { file -> FileKind.of(file.contentType).isImage } }
-    val others = files.filterNot { it.state is FileState.Known && FileKind.of(it.state.file.contentType).isImage }
+    val images = files.filter { it.isImage }
+    val others = files.filterNot { it.isImage }
     // The bubble's padding is inside its width.
     val width = min(maxWidth - 24.dp, IMAGE_WIDTH)
     Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(GAP)) {
         if (images.size == 1) {
-            ImageThumbnail(images.single(), Modifier.size(width, IMAGE_HEIGHT))
+            Thumbnail(images.single(), Modifier.size(width, IMAGE_HEIGHT))
         } else {
             val side = (width - GAP) / 2
             images.chunked(2).forEach { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(GAP)) {
-                    pair.forEach { key(it.fileId) { ImageThumbnail(it, Modifier.size(side)) } }
+                    pair.forEach { key(it.fileId) { Thumbnail(it, Modifier.size(side)) } }
                 }
             }
         }
@@ -116,6 +155,41 @@ private val IMAGE_WIDTH = 260.dp
 private val IMAGE_HEIGHT = 200.dp
 private val GAP = 4.dp
 private val CornerShape = RoundedCornerShape(12.dp)
+
+@Composable
+private fun Thumbnail(file: MessageFile, modifier: Modifier) {
+    val local = file.local
+    val known = (file.state as? FileState.Known)?.file
+    when {
+        local != null -> LocalThumbnail(local, modifier)
+        known != null -> ImageThumbnail(known, modifier)
+    }
+}
+
+/** A picture waiting for its upload, with the upload's progress over it. */
+@Composable
+private fun LocalThumbnail(local: LocalFile, modifier: Modifier) {
+    Box(modifier.clip(CornerShape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+        DecodedImage(local.file, local.kind, ContentScale.Crop, Modifier.matchParentSize())
+        if (local.waiting) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                UploadProgressRing(local.progress)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UploadProgressRing(progress: Float?) {
+    if (progress != null) {
+        CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(28.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.inverseOnSurface)
+    } else {
+        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.inverseOnSurface)
+    }
+}
 
 @Composable
 private fun ImageThumbnail(file: FileEntity, modifier: Modifier) {
@@ -183,6 +257,11 @@ private fun FileIcon(icon: Int) {
 /** A file that is not a picture, or one whose metadata is not known yet. */
 @Composable
 private fun FileRow(row: MessageFile, modifier: Modifier) {
+    val local = row.local
+    if (local != null) {
+        LocalFileRow(local, modifier)
+        return
+    }
     val state = row.state
     val source = LocalFileSource.current
     val actions = LocalFileActions.current
@@ -252,6 +331,31 @@ private fun FileRow(row: MessageFile, modifier: Modifier) {
                     },
                 )
             }
+        }
+    }
+}
+
+/** A file waiting for its upload. */
+@Composable
+private fun LocalFileRow(local: LocalFile, modifier: Modifier) {
+    Row(
+        modifier.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                !local.waiting -> FileIcon(R.drawable.ic_description)
+                local.progress != null -> CircularProgressIndicator(progress = { local.progress }, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                else -> CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+            }
+        }
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(FileNames.display(local.name), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(formatSize(local.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

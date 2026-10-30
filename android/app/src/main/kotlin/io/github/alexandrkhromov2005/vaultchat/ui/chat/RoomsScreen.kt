@@ -310,8 +310,11 @@ private fun PendingIcon(state: String?) {
 
 @Composable
 private fun preview(item: RoomListItem, me: String): String {
-    item.pendingText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.let {
-        return stringResource(R.string.preview_own, it)
+    item.pendingText?.let { pending ->
+        // A queued message of files alone has no text.
+        val line = pending.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+            ?: if (item.pendingFiles > 0) stringResource(R.string.preview_attachment) else null
+        if (line != null) return stringResource(R.string.preview_own, line)
     }
     val text = item.lastText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
     val body = when {

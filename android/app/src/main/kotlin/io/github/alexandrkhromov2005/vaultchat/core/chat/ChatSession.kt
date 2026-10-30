@@ -93,18 +93,24 @@ class ChatSession(
 
     val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
 
+    /** Copies of picked files waiting to be sent. */
+    val staging = Staging(files.staging)
+
+    // Downloads and uploads share one budget.
+    private val fileBudget = RequestBudget(Attachments.REQUESTS_PER_MINUTE, Attachments.REQUEST_BURST, deps.elapsed)
+
+    val attachments = Attachments(dao, requests, sync.gate, AttachmentCache(files.cache), staging, scope, fileBudget)
+
     val outbox = Outbox(
         dao, me, requests, sync, scope, deps.network,
         onQueued = deps::scheduleBackgroundSend,
         budget = RequestBudget(Outbox.SENDS_PER_MINUTE, Outbox.SEND_BURST, deps.elapsed),
+        staging = staging,
+        attachments = attachments,
+        uploadBudget = fileBudget,
     )
 
     val membership = Membership(dao, me, sync)
-
-    val attachments = Attachments(
-        dao, requests, sync.gate, AttachmentCache(files.cache), scope,
-        RequestBudget(Attachments.REQUESTS_PER_MINUTE, Attachments.REQUEST_BURST, deps.elapsed),
-    )
 
     val realtime = Realtime(
         userId = me,
@@ -138,6 +144,10 @@ class ChatSession(
     private val ended = AtomicBoolean()
 
     init {
+        // Copies a killed process left behind: a draft, or files of a message
+        // whose room went. Newer ones may be a draft being picked right now.
+        val started = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) { staging.sweep(dao.stagedNames().toSet(), before = started) }
         scope.launch {
             combine(deps.foreground, deps.network) { visible, network -> if (visible) network else null }
                 .distinctUntilChanged()

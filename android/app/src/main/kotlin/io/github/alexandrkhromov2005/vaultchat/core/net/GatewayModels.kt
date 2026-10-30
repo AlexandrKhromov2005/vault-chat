@@ -85,8 +85,13 @@ data class MessageDto(
     @SerialName("created_at") val createdAt: String,
 )
 
+/** [attachmentIds] is left out of a text message, as the server expects. */
 @Serializable
-data class SendMessageRequest(@SerialName("client_message_id") val clientMessageId: String, val text: String)
+data class SendMessageRequest(
+    @SerialName("client_message_id") val clientMessageId: String,
+    val text: String,
+    @SerialName("attachment_ids") val attachmentIds: List<String>? = null,
+)
 
 @Serializable
 data class MessagePage(val messages: List<MessageDto>, @SerialName("next_cursor") val nextCursor: String)

@@ -159,4 +159,15 @@ internal fun FileDto.toEntity(fileId: String, roomId: String): FileEntity {
     )
 }
 
+/**
+ * The metadata of a file this user has just uploaded to [roomId], checked
+ * against what was sent: this user's file of [size] bytes in that room.
+ */
+internal fun FileDto.toUploaded(roomId: String, me: String, size: Long): FileEntity {
+    if (!isUuid(fileId)) throw invalid("file_id is not a UUID")
+    if (ownerId != me) throw invalid("file of another user")
+    if (this.size != size) throw invalid("not the uploaded size")
+    return toEntity(fileId, roomId)
+}
+
 private const val MAX_CONTENT_TYPE_LENGTH = 255

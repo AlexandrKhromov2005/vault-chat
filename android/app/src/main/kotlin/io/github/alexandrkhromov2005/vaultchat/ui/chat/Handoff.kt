@@ -2,10 +2,12 @@ package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingFileEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.transformLatest
 
 /** A row of the outgoing queue as the conversation shows it; [leftAt] is set once it left the queue. */
@@ -116,3 +118,11 @@ fun Flow<List<OutgoingEntity>>.handedOver(
     }
     emitAll(updates)
 }
+
+/**
+ * The files of the queue's rows by message key. A row's files leave the
+ * database with the row; they are kept here, so that a row lingering after
+ * it left the queue still shows them.
+ */
+fun Flow<List<OutgoingFileEntity>>.keptForHandoff(): Flow<Map<String, List<OutgoingFileEntity>>> =
+    runningFold(emptyMap()) { seen, files -> seen + files.groupBy { it.clientMessageId } }

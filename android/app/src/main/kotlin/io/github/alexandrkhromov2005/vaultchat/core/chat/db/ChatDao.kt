@@ -139,8 +139,68 @@ abstract class ChatDao {
     @Query("UPDATE outbox SET state = 'failed', error = :error WHERE client_message_id = :clientMessageId AND state = 'queued'")
     abstract suspend fun markFailed(clientMessageId: String, error: String)
 
-    @Query("DELETE FROM outbox WHERE client_message_id = :clientMessageId AND state = 'failed'")
-    abstract suspend fun deleteFailed(clientMessageId: String)
+    /** Deletes a failed message; returns the staged copies of its files, which are now unreferenced. */
+    @Transaction
+    open suspend fun deleteFailed(clientMessageId: String): List<String> {
+        if (outgoingRow(clientMessageId)?.state != OutgoingEntity.FAILED) return emptyList()
+        val staged = filesOf(clientMessageId).map { it.staged }
+        deleteOutgoing(clientMessageId)
+        return staged
+    }
+
+    /**
+     * Deletes a message that has never been sent: one of its files is not
+     * uploaded. Returns the staged copies of its files, or null if it was
+     * not deleted.
+     */
+    @Transaction
+    open suspend fun deleteUnsent(clientMessageId: String): List<String>? {
+        val row = outgoingRow(clientMessageId) ?: return null
+        val files = filesOf(clientMessageId)
+        if (row.state == OutgoingEntity.SENT || files.none { it.fileId == null }) return null
+        deleteOutgoing(clientMessageId)
+        return files.map { it.staged }
+    }
+
+    @Query("SELECT * FROM outgoing_files WHERE client_message_id = :clientMessageId ORDER BY position")
+    abstract suspend fun filesOf(clientMessageId: String): List<OutgoingFileEntity>
+
+    @Query(
+        "SELECT f.* FROM outgoing_files f JOIN outbox o ON o.client_message_id = f.client_message_id " +
+            "WHERE o.room_id = :roomId ORDER BY o.position, f.position",
+    )
+    abstract fun outgoingFiles(roomId: String): Flow<List<OutgoingFileEntity>>
+
+    @Query("SELECT staged FROM outgoing_files")
+    abstract suspend fun stagedNames(): List<String>
+
+    @Insert
+    protected abstract suspend fun insertOutgoingFiles(files: List<OutgoingFileEntity>)
+
+    /** Called from the upload's writing thread, so it does not suspend. */
+    @Query("UPDATE outgoing_files SET maybe_stored = :maybe WHERE client_message_id = :clientMessageId AND position = :position")
+    abstract fun setMaybeStored(clientMessageId: String, position: Int, maybe: Boolean)
+
+    /** Records an uploaded file; false if its message is gone. */
+    @Query(
+        "UPDATE outgoing_files SET file_id = :fileId, maybe_stored = 0 " +
+            "WHERE client_message_id = :clientMessageId AND position = :position AND file_id IS NULL",
+    )
+    protected abstract suspend fun updateUploaded(clientMessageId: String, position: Int, fileId: String): Int
+
+    suspend fun setUploaded(clientMessageId: String, position: Int, fileId: String): Boolean =
+        updateUploaded(clientMessageId, position, fileId) > 0
+
+    // Changes the key in place, so that the message's files follow it (ON UPDATE CASCADE).
+    @Query(
+        "UPDATE outbox SET client_message_id = :clientMessageId, position = :position, state = 'queued', error = NULL, " +
+            "after_sequence = :afterSequence WHERE client_message_id = :failedId",
+    )
+    protected abstract suspend fun updateRequeued(failedId: String, clientMessageId: String, position: Long, afterSequence: Long)
+
+    // The user decided to upload again what may already be stored.
+    @Query("UPDATE outgoing_files SET maybe_stored = 0 WHERE client_message_id = :clientMessageId")
+    protected abstract suspend fun clearMaybeStored(clientMessageId: String)
 
     /**
      * Deletes the rows of a room that its stored block now shows: those that a
@@ -191,7 +251,7 @@ abstract class ChatDao {
      * of the list; false if the room is not stored.
      */
     @Transaction
-    open suspend fun enqueue(row: OutgoingEntity): Boolean {
+    open suspend fun enqueue(row: OutgoingEntity, files: List<OutgoingFileEntity> = emptyList()): Boolean {
         if (room(row.roomId) == null) return false
         insertOutgoing(
             row.copy(
@@ -202,6 +262,7 @@ abstract class ChatDao {
                 afterSequence = timeline(row.roomId)?.newest ?: 0,
             ),
         )
+        if (files.isNotEmpty()) insertOutgoingFiles(files.map { it.copy(clientMessageId = row.clientMessageId) })
         setActivity(row.roomId, maxActivity() + 1)
         return true
     }
@@ -221,16 +282,8 @@ abstract class ChatDao {
     @Transaction
     open suspend fun requeue(failedId: String, clientMessageId: String): Boolean {
         val row = outgoingRow(failedId)?.takeIf { it.state == OutgoingEntity.FAILED } ?: return false
-        deleteOutgoing(failedId)
-        insertOutgoing(
-            row.copy(
-                clientMessageId = clientMessageId,
-                position = maxPosition() + 1,
-                state = OutgoingEntity.QUEUED,
-                error = null,
-                afterSequence = timeline(row.roomId)?.newest ?: 0,
-            ),
-        )
+        updateRequeued(failedId, clientMessageId, maxPosition() + 1, timeline(row.roomId)?.newest ?: 0)
+        clearMaybeStored(clientMessageId)
         return true
     }
 
@@ -358,7 +411,9 @@ abstract class ChatDao {
             "COALESCE(t.oldest > t.last_read + 1, 0) AS unread_more, " +
             "(SELECT o.text FROM outbox o WHERE " + PREVIEWED + ") AS pending_text, " +
             "(SELECT o.state FROM outbox o WHERE " + PREVIEWED + ") AS pending_state, " +
-            "(SELECT o.created_at FROM outbox o WHERE " + PREVIEWED + ") AS pending_created_at " +
+            "(SELECT o.created_at FROM outbox o WHERE " + PREVIEWED + ") AS pending_created_at, " +
+            "(SELECT COUNT(*) FROM outgoing_files f WHERE f.client_message_id = " +
+            "(SELECT o.client_message_id FROM outbox o WHERE " + PREVIEWED + ")) AS pending_files " +
             "FROM rooms r LEFT JOIN timelines t ON t.room_id = r.room_id " +
             "LEFT JOIN messages m ON m.room_id = r.room_id AND m.sequence = t.newest " +
             "LEFT JOIN profiles p ON p.user_id = r.peer_id"

@@ -114,8 +114,46 @@ data class OutgoingEntity(
         const val ERROR_INVALID = "invalid"
         const val ERROR_NO_ACCESS = "no_access"
         const val ERROR_CONFLICT = "conflict"
+
+        /** An upload whose outcome is unknown (docs/android/attachments.md). */
+        const val ERROR_UPLOAD = "upload"
+
+        /** The server did not accept a file. */
+        const val ERROR_FILE = "file"
     }
 }
+
+/**
+ * A file of a queued message (docs/android/attachments.md), in the order of
+ * its `attachment_ids`. [staged] names the copy in the staging directory;
+ * [fileId] is set once the file is uploaded and never changes after that.
+ * [maybeStored] is set while the server may have stored the file but its
+ * answer has not arrived.
+ */
+@Entity(
+    tableName = "outgoing_files",
+    primaryKeys = ["client_message_id", "position"],
+    foreignKeys = [
+        ForeignKey(
+            OutgoingEntity::class,
+            ["client_message_id"],
+            ["client_message_id"],
+            onDelete = ForeignKey.CASCADE,
+            onUpdate = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class OutgoingFileEntity(
+    @ColumnInfo(name = "client_message_id") val clientMessageId: String,
+    val position: Int,
+    val name: String,
+    /** The type sniffed from the content (FileKind.mime). */
+    val type: String,
+    val size: Long,
+    val staged: String,
+    @ColumnInfo(name = "file_id") val fileId: String? = null,
+    @ColumnInfo(name = "maybe_stored") val maybeStored: Boolean = false,
+)
 
 /**
  * The metadata of a file of a room (docs/android/attachments.md), from an
@@ -196,6 +234,7 @@ data class RoomListItem(
     @ColumnInfo(name = "pending_text") val pendingText: String?,
     @ColumnInfo(name = "pending_state") val pendingState: String?,
     @ColumnInfo(name = "pending_created_at") val pendingCreatedAt: Long?,
+    @ColumnInfo(name = "pending_files") val pendingFiles: Int = 0,
 )
 
 /** A message with its sender's name. */

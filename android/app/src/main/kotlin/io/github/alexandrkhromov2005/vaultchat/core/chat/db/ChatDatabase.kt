@@ -16,13 +16,13 @@ import java.security.MessageDigest
 @Database(
     entities = [
         RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class, OutgoingEntity::class,
-        MemberEntity::class, RosterEntity::class, FileEntity::class,
+        MemberEntity::class, RosterEntity::class, FileEntity::class, OutgoingFileEntity::class,
     ],
     // 2: times in microseconds instead of milliseconds.
     // 3: the outgoing queue.
     // 4: the newest sequence when an outgoing row was queued.
     // 5: rosters of rooms.
-    // 6: metadata of files.
+    // 6: metadata of files, files of queued messages.
     version = 6,
 )
 abstract class ChatDatabase : RoomDatabase() {

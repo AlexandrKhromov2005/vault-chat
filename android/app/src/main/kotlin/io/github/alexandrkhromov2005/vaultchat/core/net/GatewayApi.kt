@@ -1,5 +1,6 @@
 package io.github.alexandrkhromov2005.vaultchat.core.net
 
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
@@ -117,6 +118,14 @@ interface GatewayApi {
 
     @DELETE("api/v1/rooms/{room_id}/members/me")
     suspend fun leave(@Header("Authorization") authorization: String, @Path("room_id") roomId: String): Response<Unit>
+
+    /** Uploads one file (FileUpload); not idempotent, and its body is one-shot. Only through [Gateway.transferApi]. */
+    @POST("api/v1/rooms/{room_id}/files")
+    suspend fun uploadFile(
+        @Header("Authorization") authorization: String,
+        @Path("room_id") roomId: String,
+        @Body body: RequestBody,
+    ): Response<FileDto>
 
     @GET("api/v1/files/{file_id}")
     suspend fun file(@Header("Authorization") authorization: String, @Path("file_id") fileId: String): Response<FileDto>

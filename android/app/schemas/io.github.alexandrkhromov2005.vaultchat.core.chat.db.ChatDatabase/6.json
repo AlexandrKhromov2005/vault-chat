@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "a9e027e238554be1fd31bafbdc44b09c",
+    "identityHash": "91faea7aebaa95b193e6d22e63fe33cb",
     "entities": [
       {
         "tableName": "rooms",
@@ -484,11 +484,84 @@
             ]
           }
         ]
+      },
+      {
+        "tableName": "outgoing_files",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_message_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `size` INTEGER NOT NULL, `staged` TEXT NOT NULL, `file_id` TEXT, `maybe_stored` INTEGER NOT NULL, PRIMARY KEY(`client_message_id`, `position`), FOREIGN KEY(`client_message_id`) REFERENCES `outbox`(`client_message_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "clientMessageId",
+            "columnName": "client_message_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "staged",
+            "columnName": "staged",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileId",
+            "columnName": "file_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "maybeStored",
+            "columnName": "maybe_stored",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "client_message_id",
+            "position"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "outbox",
+            "onDelete": "CASCADE",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "client_message_id"
+            ],
+            "referencedColumns": [
+              "client_message_id"
+            ]
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a9e027e238554be1fd31bafbdc44b09c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '91faea7aebaa95b193e6d22e63fe33cb')"
     ]
   }
 }

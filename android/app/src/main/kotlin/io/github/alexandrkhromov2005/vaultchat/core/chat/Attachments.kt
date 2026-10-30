@@ -65,6 +65,9 @@ interface FileSource {
     fun content(file: FileEntity): Flow<ContentState>
 
     fun retry(fileId: String? = null)
+
+    /** The local copy of a picked file of a queued message. */
+    fun staged(name: String): File
 }
 
 /**
@@ -81,6 +84,7 @@ class Attachments(
     private val requests: ChatRequests,
     private val gate: RateGate,
     private val cache: AttachmentCache,
+    private val staging: Staging,
     private val scope: CoroutineScope,
     private val budget: RequestBudget,
 ) : FileSource {
@@ -143,14 +147,22 @@ class Attachments(
         }
     }.distinctUntilChanged()
 
+    override fun staged(name: String): File = staging.file(name)
+
     /** Tries failed loads again; a tap on an unavailable file asks the server again too. */
     override fun retry(fileId: String?) {
         if (fileId != null) unavailable.remove(fileId)
         retries.update { it + 1 }
     }
 
-    /** Stores metadata from an upload's answer. */
-    suspend fun remember(file: FileEntity): Boolean = dao.storeFile(file)
+    /** Stores the metadata of a file this user uploaded and moves its [local] copy into the cache. */
+    suspend fun adopt(file: FileEntity, local: File) {
+        dao.storeFile(file)
+        withContext(Dispatchers.IO) {
+            cache.adopt(file.fileId, localName(file), local)
+            cache.trim(keep = file.fileId)
+        }
+    }
 
     private suspend fun loadMetadata(roomId: String, fileId: String): FileState? {
         if (fileId in unavailable) return FileState.Unavailable

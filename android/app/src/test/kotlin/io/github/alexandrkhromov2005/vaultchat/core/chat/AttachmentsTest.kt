@@ -76,7 +76,7 @@ class AttachmentsTest {
         requests: ChatRequests = server.requests,
         budget: RequestBudget = RequestBudget(6_000, 100, System::currentTimeMillis),
         cache: AttachmentCache = AttachmentCache(cacheDir),
-    ) = Attachments(dao, requests, gate, cache, scope, budget)
+    ) = Attachments(dao, requests, gate, cache, Staging(temporary.root.resolve("staging")), scope, budget)
 
     private suspend fun known(files: Attachments, fileId: String): FileEntity =
         withTimeout(5_000) { (files.metadata(roomId, fileId).first { it is FileState.Known } as FileState.Known).file }

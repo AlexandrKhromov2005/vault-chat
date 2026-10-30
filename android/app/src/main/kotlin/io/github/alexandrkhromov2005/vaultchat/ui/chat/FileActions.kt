@@ -50,6 +50,8 @@ private object NoFiles : FileSource {
     override fun content(file: FileEntity): Flow<ContentState> = emptyFlow()
 
     override fun retry(fileId: String?) = Unit
+
+    override fun staged(name: String): File = File(name)
 }
 
 /**

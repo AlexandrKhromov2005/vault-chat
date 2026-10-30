@@ -1,6 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
 import android.content.ClipData
+import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,6 +59,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -88,23 +91,35 @@ import androidx.paging.map
 import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
+import io.github.alexandrkhromov2005.vaultchat.core.chat.MAX_ATTACHMENTS
 import io.github.alexandrkhromov2005.vaultchat.core.chat.MAX_TEXT_CODE_POINTS
 import io.github.alexandrkhromov2005.vaultchat.core.chat.MessageText
+import io.github.alexandrkhromov2005.vaultchat.core.chat.StagedFile
+import io.github.alexandrkhromov2005.vaultchat.core.chat.Staging
+import io.github.alexandrkhromov2005.vaultchat.core.chat.UploadProgress
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingFileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -132,7 +147,12 @@ sealed interface RoomView {
     data object Gone : RoomView
 }
 
-class ConversationViewModel(private val chat: ChatSession, private val roomId: String) : ViewModel() {
+class ConversationViewModel(
+    private val chat: ChatSession,
+    private val roomId: String,
+    /** Reads picked files; their URIs come from the system pickers. */
+    private val pick: (Uri) -> PickedFile,
+) : ViewModel() {
     init {
         addCloseable(chat.retain())
     }
@@ -180,21 +200,107 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
         .handedOver(dismissed) { SystemClock.elapsedRealtime() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
+    private val seenFiles = chat.outbox.outgoingFiles(roomId).keptForHandoff()
+
+    /** The files of the outgoing rows on screen, by message key. */
+    val outgoingFiles: StateFlow<Map<String, List<OutgoingFileEntity>>> = combine(outgoing, seenFiles) { rows, files ->
+        rows.mapNotNull { row -> files[row.clientMessageId]?.let { row.clientMessageId to it } }.toMap()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyMap())
+
+    val uploads: StateFlow<Map<String, UploadProgress>> = chat.outbox.progress
+
+    private val _draft = MutableStateFlow<List<StagedFile>>(emptyList())
+
+    /** Files picked for the next message, copied and checked (Staging). */
+    val draft: StateFlow<List<StagedFile>> = _draft
+
+    private val _staging = MutableStateFlow(0)
+
+    /** Picked files still being copied. */
+    val staging: StateFlow<Int> = _staging
+
+    private val _notices = MutableSharedFlow<DraftNotice>(extraBufferCapacity = MAX_ATTACHMENTS + 1)
+
+    /** Picked files that were not attached, and why. */
+    val notices: SharedFlow<DraftNotice> = _notices
+
+    // Draft files a send is queuing; they are not deleted when the screen closes.
+    private val queuing = ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile
+    private var cleared = false
+
     /**
-     * Queues [text] and reports whether it was queued, so that the composer
-     * keeps text that was not. It is stored even if the screen closes at once.
+     * Copies and checks picked files, up to [MAX_ATTACHMENTS] in the draft,
+     * one after another, so that they keep the order they were picked in.
+     */
+    fun attach(uris: List<Uri>) {
+        val room = MAX_ATTACHMENTS - _draft.value.size - _staging.value
+        if (uris.size > room) _notices.tryEmit(DraftNotice(null, null))
+        val taken = uris.take(room.coerceAtLeast(0))
+        if (taken.isEmpty()) return
+        _staging.update { it + taken.size }
+        viewModelScope.launch(Dispatchers.IO) {
+            for (uri in taken) {
+                try {
+                    stage(uri)
+                } finally {
+                    _staging.update { it - 1 }
+                }
+            }
+        }
+    }
+
+    private fun stage(uri: Uri) {
+        val picked = pick(uri)
+        val input = try {
+            picked.open()
+        } catch (e: Exception) {
+            null
+        }
+        when (val result = if (input == null) Staging.Result.Refused(Staging.Problem.UNREADABLE) else chat.staging.stage(picked.name, input)) {
+            is Staging.Result.Staged -> if (cleared) chat.staging.delete(listOf(result.file.staged)) else _draft.update { it + result.file }
+            is Staging.Result.Refused -> _notices.tryEmit(DraftNotice(picked.name, result.problem))
+        }
+    }
+
+    fun detach(staged: String) {
+        _draft.update { files -> files.filterNot { it.staged == staged } }
+        chat.staging.delete(listOf(staged))
+    }
+
+    /**
+     * Queues [text] with the draft's files and reports whether it was queued,
+     * so that the composer keeps what was not. It is stored even if the
+     * screen closes at once; files picked meanwhile stay in the draft.
      */
     fun send(text: String, onResult: (Boolean) -> Unit) {
+        val files = _draft.value
+        queuing += files.map { it.staged }
         viewModelScope.launch {
             val queued = withContext(NonCancellable) {
                 try {
-                    chat.outbox.send(roomId, text)
+                    chat.outbox.send(roomId, text, files)
                 } catch (e: Exception) {
                     false
                 }
             }
+            if (queued) _draft.update { it - files.toSet() }
+            queuing -= files.map { it.staged }.toSet()
             onResult(queued)
         }
+    }
+
+    /** Cancels a message whose files are not all uploaded yet. */
+    fun cancel(clientMessageId: String) {
+        dismissed += clientMessageId
+        outboxWork { chat.outbox.cancel(clientMessageId) }
+    }
+
+    override fun onCleared() {
+        cleared = true
+        // A draft that is not sent is not kept (docs/android/attachments.md).
+        chat.staging.delete(_draft.value.map { it.staged }.filter { it !in queuing })
     }
 
     fun retry(clientMessageId: String) {
@@ -234,11 +340,16 @@ class ConversationViewModel(private val chat: ChatSession, private val roomId: S
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onMembers: () -> Unit) {
-    val model = viewModel { ConversationViewModel(chat, roomId) }
+    val resolver = LocalContext.current.applicationContext.contentResolver
+    val model = viewModel { ConversationViewModel(chat, roomId, resolver::picked) }
     val room by model.room.collectAsStateWithLifecycle()
     val connection by model.connection.collectAsStateWithLifecycle()
     val rows = model.rows.collectAsLazyPagingItems()
     val outgoing by model.outgoing.collectAsStateWithLifecycle()
+    val outgoingFiles by model.outgoingFiles.collectAsStateWithLifecycle()
+    val uploads by model.uploads.collectAsStateWithLifecycle()
+    val draft by model.draft.collectAsStateWithLifecycle()
+    val staging by model.staging.collectAsStateWithLifecycle()
 
     LaunchedEffect(room) {
         if (room == RoomView.Gone) onBack()
@@ -258,6 +369,20 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val files = rememberFileActions(chat.attachments) { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val resources = LocalResources.current
+    LaunchedEffect(model) {
+        model.notices.collect { notice ->
+            val name = notice.name.orEmpty()
+            val message = when (notice.problem) {
+                null -> resources.getString(R.string.draft_too_many)
+                Staging.Problem.EMPTY -> resources.getString(R.string.draft_empty, name)
+                Staging.Problem.TOO_LARGE -> resources.getString(R.string.draft_too_large, name)
+                Staging.Problem.UNSUPPORTED -> resources.getString(R.string.draft_unsupported, name)
+                Staging.Problem.UNREADABLE -> resources.getString(R.string.draft_unreadable, name)
+            }
+            snackbar.showSnackbar(message)
+        }
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -296,7 +421,16 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
             )
         },
         bottomBar = {
-            if (present != null) Composer(onSend = model::send)
+            if (present != null) {
+                Composer(
+                    draft = draft,
+                    staging = staging,
+                    stagedFile = chat.attachments::staged,
+                    onAttach = model::attach,
+                    onDetach = model::detach,
+                    onSend = model::send,
+                )
+            }
         },
     ) { padding ->
         CompositionLocalProvider(LocalFileSource provides chat.attachments, LocalFileActions provides files) {
@@ -309,6 +443,9 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
                     onNewestSeen = model::markRead,
                     onRetry = model::retry,
                     onDelete = model::delete,
+                    outgoingFiles = outgoingFiles,
+                    uploads = uploads,
+                    onCancel = model::cancel,
                 )
             }
             files.viewing?.let { ImageViewer(it, files) }
@@ -321,70 +458,94 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
  * button is enabled only for text the server accepts (MessageText).
  */
 @Composable
-private fun Composer(onSend: (String, (Boolean) -> Unit) -> Unit) {
+private fun Composer(
+    draft: List<StagedFile>,
+    staging: Int,
+    stagedFile: (String) -> File,
+    onAttach: (List<Uri>) -> Unit,
+    onDetach: (String) -> Unit,
+    onSend: (String, (Boolean) -> Unit) -> Unit,
+) {
     var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     val problem = MessageText.check(text)
     val length = MessageText.length(text)
+    // Files may go without text, but not with text the server rejects.
+    val sendable = !sending && staging == 0 && (problem == null || (text.isEmpty() && draft.isNotEmpty()))
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Column(Modifier.weight(1f)) {
-                TextField(
-                    value = text,
-                    // Pasted Windows line ends would otherwise be rejected as
-                    // control characters; what is queued is what is shown.
-                    onValueChange = { text = it.replace("\r\n", "\n").replace('\r', '\n') },
-                    placeholder = { Text(stringResource(R.string.composer_hint)) },
-                    maxLines = COMPOSER_LINES,
-                    shape = RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                val hint = when {
-                    problem == MessageText.Problem.INVALID_CHARACTER -> stringResource(R.string.composer_invalid)
-                    length > MAX_TEXT_CODE_POINTS - COUNTER_FROM_END ->
-                        stringResource(R.string.composer_too_long, length, MAX_TEXT_CODE_POINTS)
-                    else -> null
-                }
-                if (hint != null) {
-                    Text(
-                        hint,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        // Announced when it explains why the text cannot be sent,
-                        // not on every key press near the limit.
-                        modifier = Modifier.padding(start = 16.dp, top = 2.dp)
-                            .then(if (problem != null) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier),
-                    )
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(vertical = 6.dp)) {
+            DraftFiles(draft, staging, stagedFile, onDetach)
+            ComposerRow(text, { text = it }, problem, length, sendable, draft.size + staging < MAX_ATTACHMENTS, onAttach) {
+                val sent = text
+                sending = true
+                onSend(sent) { queued ->
+                    sending = false
+                    // Text typed meanwhile stays.
+                    if (queued && text == sent) text = ""
                 }
             }
-            IconButton(
-                onClick = {
-                    val sent = text
-                    sending = true
-                    onSend(sent) { queued ->
-                        sending = false
-                        // Text typed meanwhile stays.
-                        if (queued && text == sent) text = ""
-                    }
-                },
-                enabled = problem == null && !sending,
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_send),
-                    contentDescription = stringResource(R.string.composer_send),
-                    tint = if (problem == null && !sending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+    }
+}
+
+@Composable
+private fun ComposerRow(
+    text: String,
+    onText: (String) -> Unit,
+    problem: MessageText.Problem?,
+    length: Int,
+    sendable: Boolean,
+    canAttach: Boolean,
+    onAttach: (List<Uri>) -> Unit,
+    onSend: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        AttachButton(enabled = canAttach, onPicked = onAttach)
+        Column(Modifier.weight(1f)) {
+            TextField(
+                value = text,
+                // Pasted Windows line ends would otherwise be rejected as
+                // control characters; what is queued is what is shown.
+                onValueChange = { onText(it.replace("\r\n", "\n").replace('\r', '\n')) },
+                placeholder = { Text(stringResource(R.string.composer_hint)) },
+                maxLines = COMPOSER_LINES,
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            val hint = when {
+                problem == MessageText.Problem.INVALID_CHARACTER -> stringResource(R.string.composer_invalid)
+                length > MAX_TEXT_CODE_POINTS - COUNTER_FROM_END ->
+                    stringResource(R.string.composer_too_long, length, MAX_TEXT_CODE_POINTS)
+                else -> null
+            }
+            if (hint != null) {
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    // Announced when it explains why the text cannot be sent,
+                    // not on every key press near the limit.
+                    modifier = Modifier.padding(start = 16.dp, top = 2.dp)
+                        .then(if (problem != null) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier),
                 )
             }
+        }
+        IconButton(onClick = onSend, enabled = sendable) {
+            Icon(
+                painterResource(R.drawable.ic_send),
+                contentDescription = stringResource(R.string.composer_send),
+                tint = if (sendable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -403,6 +564,9 @@ internal fun Messages(
     onNewestSeen: () -> Unit,
     onRetry: (String) -> Unit,
     onDelete: (String) -> Unit,
+    outgoingFiles: Map<String, List<OutgoingFileEntity>> = emptyMap(),
+    uploads: Map<String, UploadProgress> = emptyMap(),
+    onCancel: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val refresh = rows.loadState.refresh
@@ -473,7 +637,7 @@ internal fun Messages(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Bubbles leave a margin on the other side, as in other messengers.
         val bubbleWidth = maxWidth * BUBBLE_WIDTH
-        MessageList(rows, snapshot, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete)
+        MessageList(rows, snapshot, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete, outgoingFiles, uploads, onCancel)
     }
 }
 
@@ -491,6 +655,9 @@ private fun MessageList(
     bubbleWidth: Dp,
     onRetry: (String) -> Unit,
     onDelete: (String) -> Unit,
+    outgoingFiles: Map<String, List<OutgoingFileEntity>>,
+    uploads: Map<String, UploadProgress>,
+    onCancel: (String) -> Unit,
 ) {
     val append = rows.loadState.append
     LazyColumn(
@@ -503,7 +670,16 @@ private fun MessageList(
         // layout is reversed, so the last of them is the first item. A
         // message keeps its key from the queue into the history (Handoff).
         items(outgoing.asReversed(), key = { Handoff.key(it, claims) }) { row ->
-            OutgoingBubble(row, bubbleWidth, onRetry, onDelete, Modifier.animateItem())
+            OutgoingBubble(
+                row,
+                outgoingFiles[row.clientMessageId].orEmpty(),
+                uploads[row.clientMessageId],
+                bubbleWidth,
+                onRetry,
+                onDelete,
+                onCancel,
+                Modifier.animateItem(),
+            )
         }
         // Stored rows come from the snapshot [claims] were taken from, so a
         // page that arrives before the next composition cannot show a
@@ -687,9 +863,12 @@ private fun StatusIcon(icon: Int, tint: Color) {
 @Composable
 private fun OutgoingBubble(
     row: OutgoingRow,
+    files: List<OutgoingFileEntity>,
+    upload: UploadProgress?,
     maxWidth: Dp,
     onRetry: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onCancel: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val entity = row.entity
@@ -713,11 +892,18 @@ private fun OutgoingBubble(
     val failure = when {
         delivery != Delivery.FAILED -> null
         entity.error == OutgoingEntity.ERROR_NO_ACCESS -> stringResource(R.string.message_failed_no_access)
+        entity.error == OutgoingEntity.ERROR_UPLOAD -> stringResource(R.string.message_failed_upload)
+        entity.error == OutgoingEntity.ERROR_FILE -> stringResource(R.string.message_failed_file)
         else -> stringResource(R.string.message_failed_rejected)
     }
+    // Never sent while a file waits for its upload, so it can be cancelled.
+    val cancellable = row.leftAt == null && entity.state != OutgoingEntity.SENT && files.any { it.fileId == null }
+    val shownFiles = rememberOutgoingFiles(entity.roomId, files, upload, uploading = delivery == Delivery.QUEUED)
     val state = failure ?: stringResource(if (delivery == Delivery.SENT) R.string.message_sent else R.string.message_queued)
     val time = formatTime(entity.createdAt, LocalLocale.current.platformLocale)
-    val description = listOf(stringResource(R.string.sender_you), entity.text, time, state).joinToString(", ")
+    val attachmentText = if (files.isNotEmpty()) pluralStringResource(R.plurals.attachments, files.size, files.size) else null
+    val description = listOfNotNull(stringResource(R.string.sender_you), entity.text.takeIf { it.isNotEmpty() }, attachmentText, time, state)
+        .joinToString(", ")
     var menu by remember { mutableStateOf(false) }
     val actions = stringResource(R.string.message_actions)
     val clipboard = LocalClipboard.current
@@ -748,7 +934,16 @@ private fun OutgoingBubble(
                         scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, entity.text))) }
                     },
                 )
-                if (failure != null) {
+                if (cancellable) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.message_cancel)) },
+                        onClick = {
+                            menu = false
+                            onCancel(row.clientMessageId)
+                        },
+                    )
+                }
+                if (failure != null && !cancellable) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.message_delete)) },
                         onClick = {
@@ -771,7 +966,10 @@ private fun OutgoingBubble(
             }
         },
     ) {
-        Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        MessageFiles(shownFiles, maxWidth)
+        if (entity.text.isNotEmpty()) {
+            Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
         Footer(time, own = true, if (delivery == Delivery.QUEUED && !slow) null else delivery, Modifier.align(Alignment.End))
     }
 }

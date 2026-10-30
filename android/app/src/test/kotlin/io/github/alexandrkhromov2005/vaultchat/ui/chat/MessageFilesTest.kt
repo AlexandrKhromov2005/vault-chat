@@ -4,11 +4,15 @@ import android.content.ComponentName
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -19,9 +23,12 @@ import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ContentState
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileSource
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileState
+import io.github.alexandrkhromov2005.vaultchat.core.chat.UploadProgress
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingFileEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -77,6 +84,10 @@ class MessageFilesTest {
         override fun retry(fileId: String?) {
             retried += fileId
         }
+
+        var stagingDir = java.io.File(".")
+
+        override fun staged(name: String): java.io.File = java.io.File(stagingDir, name)
     }
 
     private val source = Source()
@@ -91,6 +102,77 @@ class MessageFilesTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    private val me = "00000000-0000-4000-8000-0000000000aa"
+    private val cid = "00000000-0000-4000-8004-000000000001"
+
+    private fun outgoingRow() = OutgoingEntity(cid, roomId, me, position = 1, text = "", createdAt = now, state = OutgoingEntity.QUEUED)
+
+    /** An own message of one file: queued with [files], then the [stored] history. */
+    private fun showOutgoing(
+        queue: MutableStateFlow<List<OutgoingEntity>>,
+        files: MutableStateFlow<List<OutgoingFileEntity>>,
+        uploads: Map<String, UploadProgress>,
+        stored: MutableStateFlow<PagingData<ChatRow>>,
+        onCancel: (String) -> Unit = {},
+    ) {
+        compose.setContent {
+            val actions = rememberFileActions(source) { }
+            val outgoing by remember { queue.handedOver { 0L } }.collectAsState(emptyList())
+            // As the screen's model reads them.
+            val shownFiles by remember { files.keptForHandoff() }.collectAsState(emptyMap())
+            CompositionLocalProvider(LocalFileSource provides source, LocalFileActions provides actions) {
+                Messages(
+                    stored.collectAsLazyPagingItems(), outgoing, me, channel = false, onNewestSeen = {}, onRetry = {}, onDelete = {},
+                    outgoingFiles = shownFiles, uploads = uploads, onCancel = onCancel,
+                )
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    private fun shownName(name: String) = compose.onAllNodesWithText(name, useUnmergedTree = true).fetchSemanticsNodes().size
+
+    @Test
+    fun aMessageWhoseFileWaitsForItsUploadShowsTheCopyAndCanBeCancelled() {
+        source.stagingDir = temporary.newFolder("staging")
+        java.io.File(source.stagingDir, "s1").writeText("draft")
+        val file = OutgoingFileEntity(cid, 0, "notes.txt", "text/plain", 5, "s1")
+        val cancelled = mutableListOf<String>()
+        showOutgoing(
+            MutableStateFlow(listOf(outgoingRow())),
+            MutableStateFlow(listOf(file)),
+            mapOf(cid to UploadProgress(0, 2, 5)),
+            MutableStateFlow(PagingData.from(emptyList())),
+            onCancel = { cancelled += it },
+        )
+        assertEquals(1, shownName("notes.txt"))
+        compose.onNode(hasContentDescription("1 вложение", substring = true)).performClick()
+        compose.onNodeWithText(context.getString(R.string.message_cancel)).performClick()
+        assertEquals(listOf(cid), cancelled)
+    }
+
+    @Test
+    fun anUploadedFileStaysOnScreenWhileItsMessageIsHandedOver() {
+        val uploaded = file(7, "report.pdf", "application/pdf")
+        source.metadata.value = mapOf(uploaded.fileId to FileState.Known(uploaded))
+        val queue = MutableStateFlow(listOf(outgoingRow()))
+        val files = MutableStateFlow(listOf(OutgoingFileEntity(cid, 0, "report.pdf", "application/pdf", 2048, "s1", uploaded.fileId)))
+        val stored = MutableStateFlow(PagingData.from(emptyList<ChatRow>()))
+        showOutgoing(queue, files, emptyMap(), stored)
+        assertEquals(1, shownName("report.pdf"))
+
+        // The queue's observer sees the transaction first, and its files go with the row.
+        queue.value = emptyList()
+        files.value = emptyList()
+        compose.waitForIdle()
+        assertEquals("shown while the history reloads", 1, shownName("report.pdf"))
+
+        val message = MessageEntity(roomId, 1, "m-1", me, cid, "", attachments = uploaded.fileId, createdAt = now)
+        stored.value = PagingData.from(listOf(ChatRow.Message(MessageItem(message, null, true))))
+        compose.waitForIdle()
+        assertEquals(1, shownName("report.pdf"))
     }
 
     private fun bubble() = compose.onNode(hasContentDescription("pictures", substring = true)).fetchSemanticsNode()

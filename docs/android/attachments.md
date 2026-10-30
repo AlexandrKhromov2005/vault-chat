@@ -140,10 +140,12 @@ answer to a send must also carry the row's file IDs in order.
 
 - The composer's clip button offers Photo (the system Photo Picker, images
   only) and File (`OpenMultipleDocuments` with the four types). Neither
-  needs a permission. Up to 5 files per message; each picked file is
-  copied and checked at once and appears above the text field, a picture
-  with its thumbnail, with a button to remove it. Files of a draft that is
-  not sent are deleted when the conversation closes.
+  needs a permission. Up to 5 files per message; picked files are copied
+  and checked one after another, so that they keep the order they were
+  picked in, which is the order of `attachment_ids`, and appear above the
+  text field, a picture with its thumbnail, with a button to remove it.
+  Files of a draft that is not sent are deleted when the conversation
+  closes.
 - Send queues the text, which may be empty, with the files in one
   transaction. The bubble appears at once with the files and an upload
   progress; sending goes on in the background (OutboxWorker) as for text.
@@ -176,10 +178,16 @@ answer to a send must also carry the row's file IDs in order.
   Sending the message then follows [send.md](send.md); its `400` (`invalid
   attachment`) is `FAILED` (`invalid`).
 - **Retry** of a failed message uploads only the files without an ID; after
-  `409` it takes a new key and keeps the IDs. **Cancel** is offered while a
-  file of the message is not uploaded: such a message has never been sent,
-  so deleting it is safe; a running upload is cancelled. **Delete** stays
-  for failed messages.
+  `409` it takes a new key and keeps the IDs; the key changes in place, so
+  the message's files follow it. **Cancel** is offered while a file of the
+  message is not uploaded: such a message has never been sent, so deleting
+  it is safe; a running upload is cancelled. **Delete** stays for failed
+  messages whose files are all uploaded.
+- A queued message of files alone is previewed in the room list as an
+  attachment. A message that leaves the queue keeps its files on screen
+  until its stored copy shows them (`keptForHandoff`), and an uploaded
+  file shows from the metadata and the copy its upload stored, so the
+  hand-over changes nothing.
 
 ## Background
 
@@ -255,9 +263,14 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     is not exported (checked by its configuration: FileProvider compares
     paths with `/` and cannot run on a Windows build machine).
 12. Compose: a bubble with pictures and files keeps its size while they
-    load; the composer shows picked files and removes them; an outgoing
-    message shows its upload and Cancel; the hand-over to the stored message
-    keeps the files on screen.
+    load; an outgoing message shows its waiting file and Cancel; the
+    hand-over to the stored message keeps the files on screen.
+13. The conversation's draft (its model): picked files are checked, kept in
+    the order they were picked, at most 5; a removed file and an unsent
+    draft are deleted, while files of a message being queued stay.
+14. The upload body: one part named `file` with a quoted name, the mark set
+    after everything before the closing boundary has left and before it,
+    not set when the body breaks off earlier, one-shot.
 
 Not covered by automated tests: the pickers, the viewer, other apps opening
 files, decoding real photos (EXIF rotation), checked by hand on a device.
