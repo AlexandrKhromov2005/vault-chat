@@ -284,6 +284,24 @@ abstract class ChatDao {
     )
     abstract fun members(roomId: String): Flow<List<MemberItem>>
 
+    @Query("SELECT * FROM files WHERE file_id = :fileId")
+    abstract fun file(fileId: String): Flow<FileEntity?>
+
+    @Query("SELECT * FROM files WHERE file_id = :fileId")
+    abstract suspend fun fileRow(fileId: String): FileEntity?
+
+    /** Stores a file's metadata unless the room is gone; returns whether it is stored. */
+    @Transaction
+    open suspend fun storeFile(file: FileEntity): Boolean {
+        if (room(file.roomId) == null) return false
+        insertFile(file)
+        return true
+    }
+
+    // Files never change, so a stored row stays as it is.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    protected abstract suspend fun insertFile(file: FileEntity)
+
     @Query("SELECT * FROM rosters WHERE room_id = :roomId")
     abstract fun rosterFlow(roomId: String): Flow<RosterEntity?>
 

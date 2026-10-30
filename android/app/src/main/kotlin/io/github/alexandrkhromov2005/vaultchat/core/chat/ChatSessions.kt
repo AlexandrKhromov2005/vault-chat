@@ -57,7 +57,9 @@ class ChatSessions(
     fun get(signedIn: SessionState.SignedIn): ChatSession {
         current?.takeIf { it.signedIn === signedIn }?.let { return it }
         val name = ChatDatabases.fileName(signedIn.server.toString(), signedIn.userId)
-        val session = ChatSession(signedIn, name, databases.open(signedIn.server.toString(), signedIn.userId), deps, ::released)
+        val session = ChatSession(
+            signedIn, name, databases.open(signedIn.server.toString(), signedIn.userId), databases.files(name), deps, ::released,
+        )
         open += session
         if (state?.value !== signedIn) {
             // A screen asked for a session that has ended meanwhile: it gets

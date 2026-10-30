@@ -1,5 +1,6 @@
 package io.github.alexandrkhromov2005.vaultchat.core.net
 
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -9,6 +10,7 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import retrofit2.http.Tag
 
 /**
@@ -115,6 +117,14 @@ interface GatewayApi {
 
     @DELETE("api/v1/rooms/{room_id}/members/me")
     suspend fun leave(@Header("Authorization") authorization: String, @Path("room_id") roomId: String): Response<Unit>
+
+    @GET("api/v1/files/{file_id}")
+    suspend fun file(@Header("Authorization") authorization: String, @Path("file_id") fileId: String): Response<FileDto>
+
+    /** A file's bytes, read as they arrive; only through [Gateway.transferApi]. */
+    @Streaming
+    @GET("api/v1/files/{file_id}/content")
+    suspend fun fileContent(@Header("Authorization") authorization: String, @Path("file_id") fileId: String): Response<ResponseBody>
 }
 
 /**

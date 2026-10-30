@@ -108,3 +108,15 @@ data class MemberDto(@SerialName("user_id") val userId: String, @SerialName("joi
 
 @Serializable
 data class MemberPage(val members: List<MemberDto>, @SerialName("next_cursor") val nextCursor: String)
+
+/** A file's metadata (`File` in docs/api/gateway.yaml). */
+@Serializable
+data class FileDto(
+    @SerialName("file_id") val fileId: String,
+    @SerialName("room_id") val roomId: String,
+    @SerialName("owner_id") val ownerId: String,
+    val filename: String,
+    @SerialName("content_type") val contentType: String,
+    val size: Long,
+    @SerialName("created_at") val createdAt: String,
+)

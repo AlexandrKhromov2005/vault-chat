@@ -3,6 +3,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.chat
 import io.github.alexandrkhromov2005.vaultchat.core.net.CreateChannelRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmailAcknowledgement
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmailVerificationRequest
+import io.github.alexandrkhromov2005.vaultchat.core.net.FileDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.LoginRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.MemberDto
@@ -26,6 +27,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import retrofit2.Response
 import java.time.Instant
@@ -352,6 +354,46 @@ class FakeChatServer(val me: String) : GatewayApi {
             rooms.remove(room)
         }
         return noContent()
+    }
+
+    /** Stored files with their content, by file ID. */
+    val files = mutableMapOf<String, Pair<FileDto, ByteArray>>()
+
+    /** Stores a file of a room as an upload of [owner] would. */
+    @Synchronized
+    fun addFile(roomId: String, n: Int, content: ByteArray, name: String = "file $n.txt", type: String = "text/plain; charset=utf-8", owner: String = me): FileDto {
+        val file = FileDto(id(5, n), roomId, owner, name, type, content.size.toLong(), tick())
+        files[file.fileId] = file to content
+        return file
+    }
+
+    /** What reading a file's metadata answers instead. */
+    @Volatile
+    var fileReply: (FileDto) -> FileDto = { it }
+
+    /** What a download sends instead of the stored content. */
+    @Volatile
+    var contentReply: (ByteArray) -> ByteArray = { it }
+
+    // A file is readable for current members of its room only.
+    @Synchronized
+    private fun readable(fileId: String): Pair<FileDto, ByteArray>? {
+        val stored = files[fileId] ?: return null
+        return stored.takeIf { rooms.any { room -> room.roomId == stored.first.roomId } }
+    }
+
+    override suspend fun file(authorization: String, fileId: String): Response<FileDto> {
+        log += "file $fileId"
+        intercept("file $fileId")?.let { return error(it) }
+        val (file, _) = readable(fileId) ?: return error(404)
+        return Response.success(fileReply(file))
+    }
+
+    override suspend fun fileContent(authorization: String, fileId: String): Response<ResponseBody> {
+        log += "content $fileId"
+        intercept("content $fileId")?.let { return error(it) }
+        val (file, content) = readable(fileId) ?: return error(404)
+        return Response.success(contentReply(content).toResponseBody(file.contentType.toMediaType()))
     }
 
     /** Requests as the client sends them, through the same error mapping. */

@@ -33,7 +33,8 @@ import java.util.concurrent.TimeUnit
  * rotates the token, and its deadline must leave time to retry within the
  * server's retry window (see SessionManager). Requests tagged
  * [NotRepeatable] are not repeated by OkHttp either, once they began to be
- * sent.
+ * sent. [transferApi] moves file content, with the Gateway's transfer budget
+ * and bodies up to a file's size.
  */
 class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
     // A WebSocket has no read deadline: the server pings every 30 s, and our
@@ -57,12 +58,24 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
         }
         .build()
 
+    // The Gateway ends a transfer after 5 minutes, or after 30 s without progress.
+    private val transferHttp = http.newBuilder()
+        .addInterceptor(OneShotBodies)
+        .addInterceptor(ResponseSizeLimit(MAX_TRANSFER_BYTES))
+        .readTimeout(TRANSFER_IDLE_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(TRANSFER_IDLE_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(TRANSFER_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     private val apis = ConcurrentHashMap<ServerAddress, GatewayApi>()
     private val refreshApis = ConcurrentHashMap<ServerAddress, GatewayApi>()
+    private val transferApis = ConcurrentHashMap<ServerAddress, GatewayApi>()
 
     fun api(server: ServerAddress): GatewayApi = apis.getOrPut(server) { create(server, apiHttp) }
 
     fun refreshApi(server: ServerAddress): GatewayApi = refreshApis.getOrPut(server) { create(server, refreshHttp) }
+
+    fun transferApi(server: ServerAddress): GatewayApi = transferApis.getOrPut(server) { create(server, transferHttp) }
 
     /** Opens the event stream; the token is sent in the first frame, never in the URL. */
     fun webSocket(server: ServerAddress, listener: WebSocketListener): WebSocket =
@@ -76,8 +89,16 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
         .create(GatewayApi::class.java)
 
     companion object {
-        /** API responses are small JSON documents; files will use their own client. */
+        /** API responses are small JSON documents; file content uses [transferApi]. */
         const val MAX_RESPONSE_BYTES = 1024L * 1024
+
+        /** The largest file (docs/media/files.md). */
+        const val MAX_TRANSFER_BYTES = 10L * 1024 * 1024
+
+        // The Gateway's transfer budget (internal/shared/transfer); a little
+        // more, so that its own answer arrives first.
+        const val TRANSFER_TIMEOUT_SECONDS = 5 * 60L + 15
+        const val TRANSFER_IDLE_SECONDS = 35L
 
         /** Gateway's own budget is 10 s; a refresh that takes longer is retried. */
         const val REFRESH_TIMEOUT_SECONDS = 10L

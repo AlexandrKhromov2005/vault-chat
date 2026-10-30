@@ -205,9 +205,21 @@ class SessionManager(
     suspend fun <T : Any> authorized(
         session: SessionState.SignedIn?,
         request: suspend GatewayApi.(authorization: String) -> Response<T>,
+    ): Success<T> = authorized(session, gateway::api, request)
+
+    /** Like [authorized], for file content through [Gateway.transferApi]. */
+    suspend fun <T : Any> transfer(
+        session: SessionState.SignedIn,
+        request: suspend GatewayApi.(authorization: String) -> Response<T>,
+    ): Success<T> = authorized(session, gateway::transferApi, request)
+
+    private suspend fun <T : Any> authorized(
+        session: SessionState.SignedIn?,
+        apis: (ServerAddress) -> GatewayApi,
+        request: suspend GatewayApi.(authorization: String) -> Response<T>,
     ): Success<T> {
         val (current, token) = credentials(session, RENEW_BEFORE_MS)
-        val api = gateway.api(current.server)
+        val api = apis(current.server)
         return try {
             call { api.request(bearer(token)) }
         } catch (e: ApiException) {

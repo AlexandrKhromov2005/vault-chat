@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessionDeps
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FakeChatServer
+import io.github.alexandrkhromov2005.vaultchat.core.chat.SessionFiles
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
@@ -23,7 +24,9 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
@@ -55,11 +58,15 @@ class MembersViewModelTest {
         override fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket = error("no socket")
     }
 
+    @get:Rule
+    val temporary = TemporaryFolder()
+
     @Before
     fun setUp() {
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), ChatDatabase::class.java).build()
         val signedIn = SessionState.SignedIn(ServerAddress.parse("https://chat.example.org", allowLocalCleartext = false), me, "me")
-        chat = ChatSession(signedIn, "test.db", database, deps, onReleased = {})
+        val files = SessionFiles(temporary.newFolder("cache"), temporary.newFolder("staging"))
+        chat = ChatSession(signedIn, "test.db", database, files, deps, onReleased = {})
     }
 
     @After

@@ -33,6 +33,9 @@ import java.util.concurrent.ConcurrentHashMap
 /** Sends a request for the signed-in session and returns its body. */
 interface ChatRequests {
     suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T
+
+    /** Like [send], for file content, with the Gateway's transfer budget (Gateway.transferApi). */
+    suspend fun <T : Any> transfer(request: suspend GatewayApi.(authorization: String) -> Response<T>): T = send(request)
 }
 
 /** The state of synchronisation, for the connection indicator. */

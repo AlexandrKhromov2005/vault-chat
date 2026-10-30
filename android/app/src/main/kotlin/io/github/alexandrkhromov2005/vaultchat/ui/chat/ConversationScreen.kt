@@ -32,6 +32,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +41,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
@@ -61,6 +64,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -251,7 +255,11 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
     }
 
     val present = (room as? RoomView.Present)?.item
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val files = rememberFileActions(chat.attachments) { message -> scope.launch { snackbar.showSnackbar(message) } }
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -291,16 +299,19 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
             if (present != null) Composer(onSend = model::send)
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            Messages(
-                rows,
-                outgoing,
-                me = chat.me,
-                channel = present?.room?.kind == RoomEntity.CHANNEL,
-                onNewestSeen = model::markRead,
-                onRetry = model::retry,
-                onDelete = model::delete,
-            )
+        CompositionLocalProvider(LocalFileSource provides chat.attachments, LocalFileActions provides files) {
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                Messages(
+                    rows,
+                    outgoing,
+                    me = chat.me,
+                    channel = present?.room?.kind == RoomEntity.CHANNEL,
+                    onNewestSeen = model::markRead,
+                    onRetry = model::retry,
+                    onDelete = model::delete,
+                )
+            }
+            files.viewing?.let { ImageViewer(it, files) }
         }
     }
 }
@@ -612,17 +623,26 @@ private fun Bubble(item: MessageItem, own: Boolean, showSender: Boolean, maxWidt
     val attachments = message.attachmentCount
     val attachmentText = if (attachments > 0) pluralStringResource(R.plurals.attachments, attachments, attachments) else null
     val description = listOfNotNull(sender, message.text.takeIf { it.isNotEmpty() }, attachmentText, time).joinToString(", ")
+    val files = rememberMessageFiles(message.roomId, message.attachmentIds)
+    // The bubble speaks as one; its files are opened through its actions.
+    val fileActions = fileAccessibilityActions(files)
 
-    MessageFrame(own, maxWidth, modifier, bubble = Modifier.clearAndSetSemantics { contentDescription = description }) {
+    MessageFrame(
+        own,
+        maxWidth,
+        modifier,
+        bubble = Modifier.clearAndSetSemantics {
+            contentDescription = description
+            if (fileActions.isNotEmpty()) customActions = fileActions
+        },
+    ) {
         val content = if (own) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
         if (showSender) {
             Text(sender, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
+        MessageFiles(files, maxWidth)
         if (message.text.isNotEmpty()) {
             Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
-        }
-        if (attachmentText != null) {
-            Text(attachmentText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Footer(time, own, if (own) Delivery.SENT else null, Modifier.align(Alignment.End))
     }

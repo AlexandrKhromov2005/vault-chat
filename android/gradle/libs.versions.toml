@@ -14,6 +14,7 @@ ksp = "2.3.12"
 room = "2.8.5"
 paging = "3.5.3"
 work = "2.12.0"
+coil = "3.6.3"
 robolectric = "4.17"
 androidx-test-core = "1.7.0"
 junit = "4.13.2"
@@ -43,6 +44,7 @@ room-paging = { module = "androidx.room:room-paging", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 paging-runtime = { module = "androidx.paging:paging-runtime", version.ref = "paging" }
 paging-compose = { module = "androidx.paging:paging-compose", version.ref = "paging" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }

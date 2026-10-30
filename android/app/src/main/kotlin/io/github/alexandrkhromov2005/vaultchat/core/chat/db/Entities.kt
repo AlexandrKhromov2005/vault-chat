@@ -69,6 +69,8 @@ data class MessageEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long,
 ) {
     val attachmentCount: Int get() = if (attachments.isEmpty()) 0 else attachments.count { it == ',' } + 1
+
+    val attachmentIds: List<String> get() = if (attachments.isEmpty()) emptyList() else attachments.split(',')
 }
 
 /**
@@ -114,6 +116,27 @@ data class OutgoingEntity(
         const val ERROR_CONFLICT = "conflict"
     }
 }
+
+/**
+ * The metadata of a file of a room (docs/android/attachments.md), from an
+ * upload or `GET /files/{id}`. Files are immutable, so a row never changes.
+ * [name] and [contentType] are the server's and untrusted (FileNames,
+ * FileKind).
+ */
+@Entity(
+    tableName = "files",
+    foreignKeys = [ForeignKey(RoomEntity::class, ["room_id"], ["room_id"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("room_id")],
+)
+data class FileEntity(
+    @PrimaryKey @ColumnInfo(name = "file_id") val fileId: String,
+    @ColumnInfo(name = "room_id") val roomId: String,
+    @ColumnInfo(name = "owner_id") val ownerId: String,
+    val name: String,
+    @ColumnInfo(name = "content_type") val contentType: String,
+    val size: Long,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)
 
 /**
  * A member of a room whose roster is stored ([RosterEntity]). [joinedAt] is

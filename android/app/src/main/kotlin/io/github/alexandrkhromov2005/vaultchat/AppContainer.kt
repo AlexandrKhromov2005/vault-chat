@@ -68,6 +68,9 @@ class AppContainer(private val context: Context) {
         override suspend fun <T : Any> send(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T =
             this@AppContainer.session.authorized(session, request).body
 
+        override suspend fun <T : Any> transfer(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T =
+            this@AppContainer.session.transfer(session, request).body
+
         override suspend fun grant(session: SessionState.SignedIn, minValidityMs: Long): AccessGrant =
             this@AppContainer.session.accessGrant(session, minValidityMs)
 

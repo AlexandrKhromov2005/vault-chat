@@ -48,6 +48,9 @@ interface ChatSessionDeps {
 
     suspend fun <T : Any> send(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T
 
+    suspend fun <T : Any> transfer(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T =
+        send(session, request)
+
     suspend fun grant(session: SessionState.SignedIn, minValidityMs: Long): AccessGrant
 
     suspend fun renew(session: SessionState.SignedIn, rejected: String): AccessGrant
@@ -68,6 +71,7 @@ class ChatSession(
     val signedIn: SessionState.SignedIn,
     val databaseName: String,
     private val database: ChatDatabase,
+    private val files: SessionFiles,
     private val deps: ChatSessionDeps,
     private val onReleased: (ChatSession) -> Unit,
 ) {
@@ -82,6 +86,9 @@ class ChatSession(
     private val requests = object : ChatRequests {
         override suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
             deps.send(signedIn, request)
+
+        override suspend fun <T : Any> transfer(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
+            deps.transfer(signedIn, request)
     }
 
     val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
@@ -93,6 +100,11 @@ class ChatSession(
     )
 
     val membership = Membership(dao, me, sync)
+
+    val attachments = Attachments(
+        dao, requests, sync.gate, AttachmentCache(files.cache), scope,
+        RequestBudget(Attachments.REQUESTS_PER_MINUTE, Attachments.REQUEST_BURST, deps.elapsed),
+    )
 
     val realtime = Realtime(
         userId = me,
@@ -132,6 +144,7 @@ class ChatSession(
                 .collectLatest { network ->
                     if (network == null) return@collectLatest
                     outbox.kick()
+                    attachments.retry()
                     // A sync also runs without the WebSocket, if it does not
                     // become live soon; its ready triggers one otherwise.
                     launch {
@@ -170,14 +183,18 @@ class ChatSession(
     }
 
     /**
-     * Stops the session. With [wipe], its data is deleted from the database at
-     * once; the file itself goes when the database is closed.
+     * Stops the session. With [wipe], its data is deleted from the database
+     * and its files at once; the database file itself goes when the database
+     * is closed.
      */
     fun end(wipe: Boolean, background: CoroutineScope) {
         if (!ended.compareAndSet(false, true)) return
         scope.cancel()
         background.launch(Dispatchers.IO) {
-            if (wipe) runCatching { database.clearAllTables() }
+            if (wipe) {
+                runCatching { database.clearAllTables() }
+                runCatching { files.wipe() }
+            }
             if (retained.get() == 0) release()
         }
     }

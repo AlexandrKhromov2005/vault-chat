@@ -31,6 +31,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import retrofit2.Response
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class ChatSessionsTest {
@@ -123,6 +124,38 @@ class ChatSessionsTest {
         screen.close()
         withTimeout(10_000) { while (fileName in context.databaseList()) delay(50) }
         assertFalse(fileName in context.databaseList())
+    }
+
+    @Test
+    fun signingOutDeletesTheFilesAtOnce() = runBlocking {
+        val files = databases.files(fileName)
+        val state = MutableStateFlow<SessionState>(alice)
+        val sessions = ChatSessions(databases, deps, scope)
+        sessions.follow(state)
+        val screen = sessions.get(alice).retain()
+        File(files.cache, "picture").apply { parentFile!!.mkdirs() }.writeText("downloaded")
+        File(files.staging, "picked").apply { parentFile!!.mkdirs() }.writeText("waiting to be sent")
+
+        state.value = SessionState.SignedOut(SessionState.Reason.LOGOUT)
+        // Even while a screen still reads from the database.
+        withTimeout(5_000) { while (files.cache.exists() || files.staging.exists()) delay(10) }
+        screen.close()
+    }
+
+    @Test
+    fun filesOfSessionsThatAreNotOpenAreSwept() = runBlocking {
+        // Left behind by a killed process.
+        val stale = databases.files(ChatDatabases.fileName(server.toString(), "00000000-0000-4000-8000-0000000000bb"))
+        stale.cache.mkdirs()
+        stale.staging.mkdirs()
+        val mine = databases.files(fileName)
+        val sessions = ChatSessions(databases, deps, scope)
+        sessions.follow(MutableStateFlow(alice))
+        sessions.get(alice)
+        File(mine.cache, "picture").apply { parentFile!!.mkdirs() }.writeText("downloaded")
+
+        withTimeout(5_000) { while (stale.cache.exists() || stale.staging.exists()) delay(10) }
+        assertTrue(File(mine.cache, "picture").exists())
     }
 
     @Test

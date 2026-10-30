@@ -88,6 +88,20 @@ fun connectionText(status: ConnectionStatus): String? = when (status) {
     ConnectionStatus.UNREACHABLE -> stringResource(R.string.connection_unreachable)
 }
 
+/** A file's size in bytes, KiB or MiB with one decimal, as the web client shows it. */
+@Composable
+@ReadOnlyComposable
+fun formatSize(bytes: Long): String {
+    val locale = LocalLocale.current.platformLocale
+    return when {
+        bytes < KIB -> stringResource(R.string.file_size_bytes, bytes.toInt())
+        bytes < KIB * KIB -> stringResource(R.string.file_size_kib, "%.1f".format(locale, bytes / KIB.toDouble()))
+        else -> stringResource(R.string.file_size_mib, "%.1f".format(locale, bytes / (KIB * KIB).toDouble()))
+    }
+}
+
+private const val KIB = 1024L
+
 /** The first letter of a name, for its avatar. */
 fun initial(name: String): String {
     val trimmed = name.trim()

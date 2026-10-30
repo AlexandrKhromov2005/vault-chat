@@ -115,6 +115,7 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.paging.runtime)
     implementation(libs.paging.compose)
+    implementation(libs.coil.compose)
     ksp(libs.room.compiler)
     debugImplementation(libs.compose.ui.tooling)
 
