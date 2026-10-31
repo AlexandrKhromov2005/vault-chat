@@ -96,6 +96,11 @@ func TestEmailLinksCannotMutateThroughGET(t *testing.T) {
 	}
 }
 
+// TestConcurrentEmailRequestsShareOneCredentialBudget sends malformed
+// requests: unauthenticated ones share the strict "-" subject (5), email
+// change requests the caller's account (5), and all of them the address
+// budget (10). Which requests take the address tokens first depends on
+// scheduling, so the admitted count lies between those bounds.
 func TestConcurrentEmailRequestsShareOneCredentialBudget(t *testing.T) {
 	f := newFixture(t)
 	f.limiter.EXPECT().Allow(mock.Anything, mock.Anything).Return(ratelimit.Result{Allowed: true}, nil)
@@ -120,5 +125,7 @@ func TestConcurrentEmailRequestsShareOneCredentialBudget(t *testing.T) {
 	for code := range results {
 		counts[code]++
 	}
-	require.Equal(t, map[int]int{http.StatusBadRequest: 5, http.StatusTooManyRequests: 25}, counts)
+	require.Equal(t, 30, counts[http.StatusBadRequest]+counts[http.StatusTooManyRequests], counts)
+	require.GreaterOrEqual(t, counts[http.StatusBadRequest], 5, counts)
+	require.LessOrEqual(t, counts[http.StatusBadRequest], 10, counts)
 }

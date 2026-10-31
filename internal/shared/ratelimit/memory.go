@@ -78,6 +78,19 @@ func (l *MemoryLimiter) Allow(ctx context.Context, key string) (Result, error) {
 	return result, nil
 }
 
+// Refund returns one token taken from the bucket of key by Allow, up to the
+// burst. A bucket that is gone was full already, so nothing is created.
+func (l *MemoryLimiter) Refund(_ context.Context, key string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if b, exists := l.buckets[key]; exists {
+		b = l.refill(b, l.now())
+		b.tokens = min(float64(l.burst), b.tokens+1)
+		l.buckets[key] = b
+	}
+	return nil
+}
+
 func (l *MemoryLimiter) refill(b bucket, now time.Time) bucket {
 	if now.After(b.updated) {
 		b.tokens = min(float64(l.burst), b.tokens+float64(now.Sub(b.updated))/float64(l.interval))

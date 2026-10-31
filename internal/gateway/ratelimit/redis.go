@@ -62,6 +62,20 @@ redis.call('PEXPIRE', KEYS[1], ttl)
 return {allowed, math.floor(units / unit), retry}
 `)
 
+// refundToken returns one token to the bucket in KEYS[1], up to its
+// capacity. A missing bucket is full by definition and stays missing.
+var refundToken = redis.NewScript(`
+local capacity = tonumber(ARGV[1])
+local unit = tonumber(ARGV[2])
+local units = tonumber(redis.call('HGET', KEYS[1], 'units'))
+if units == nil then
+  return 0
+end
+units = math.min(capacity, units + unit)
+redis.call('HSET', KEYS[1], 'units', string.format('%.0f', units))
+return 1
+`)
+
 // Result is the outcome of a single rate limit check.
 type Result = sharedlimit.Result
 
@@ -115,4 +129,13 @@ func (l *RedisLimiter) Allow(ctx context.Context, key string) (Result, error) {
 		Remaining:  int(values[1]),
 		RetryAfter: time.Duration(values[2]) * time.Millisecond,
 	}, nil
+}
+
+// Refund returns one token that Allow took from the bucket of key.
+func (l *RedisLimiter) Refund(ctx context.Context, key string) error {
+	err := refundToken.Run(ctx, l.client, []string{keyPrefix + key}, l.burst*unitsPerToken, unitsPerToken).Err()
+	if err != nil {
+		return fmt.Errorf("failed to refund token bucket for %s: %w", key, err)
+	}
+	return nil
 }

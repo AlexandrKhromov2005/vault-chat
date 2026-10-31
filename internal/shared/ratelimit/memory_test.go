@@ -75,3 +75,35 @@ func TestMemoryLimiterRejectsCanceledRequestsAndBoundsKeys(t *testing.T) {
 	}
 	require.Len(t, l.buckets, 10)
 }
+
+func TestMemoryLimiterRefund(t *testing.T) {
+	l := NewMemoryLimiter(time.Minute, 2, 2)
+	now := time.Now()
+	l.now = func() time.Time { return now }
+	ctx := context.Background()
+	allowed := func(key string) bool {
+		t.Helper()
+		got, err := l.Allow(ctx, key)
+		require.NoError(t, err)
+		return got.Allowed
+	}
+	require.True(t, allowed("a"))
+	require.True(t, allowed("a"))
+	require.False(t, allowed("a"))
+	require.NoError(t, l.Refund(ctx, "a"))
+	require.True(t, allowed("a"))
+	require.False(t, allowed("a"))
+
+	// Refunds never raise a bucket above its burst.
+	for range 5 {
+		require.NoError(t, l.Refund(ctx, "a"))
+	}
+	require.True(t, allowed("a"))
+	require.True(t, allowed("a"))
+	require.False(t, allowed("a"))
+
+	// A refund for a key without a bucket takes no table slot.
+	require.NoError(t, l.Refund(ctx, "missing"))
+	require.True(t, allowed("b"))
+	require.False(t, allowed("c"), "the table holds two buckets")
+}

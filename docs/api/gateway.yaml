@@ -13,16 +13,26 @@ info:
     and forwarded to backends.
 
     **Rate limiting.** `/api/` routes are limited per client IP; authenticated
-    routes are additionally limited per user. Responses carry
-    `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429` responses carry
-    `Retry-After` (seconds).
+    routes are additionally limited per user, and a valid access token gives
+    back the client IP token, so users behind one NAT are limited per user.
+    Responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429`
+    responses carry `Retry-After` (seconds). Details: `docs/gateway/rate-limits.md`.
 
     IPv6 addresses share their /64 quota; IPv4-mapped addresses use the IPv4
     key. Login, registration, public email/recovery requests, all email proof
-    confirmations and authenticated email-change requests share an additional quota (default 5/minute,
-    burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`GATEWAY_AUTH_RATE_LIMIT_BURST`)
-    per IP/network, enforced both locally and in Redis. These routes return
-    `503` when Redis is unavailable. Ordinary API limiting still fails open.
+    confirmations and authenticated email-change requests have two additional
+    quotas, enforced both locally and in Redis: per IP/network and subject
+    (the case-insensitive `email`, the `token`, or for the authenticated
+    email change the caller's account; default
+    5/minute, burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`_BURST`) and per
+    IP/network (default 10/minute, burst 10;
+    `GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE`/`_BURST`). A successful login or
+    registration gives back its per-IP tokens, so only failures accumulate.
+    These routes return `503` when Redis is unavailable. Refresh has its own
+    quota per IP/network (default 30/minute, burst 30;
+    `GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE`/`_BURST`); successful refreshes
+    give their tokens back, and without Redis only the local quota applies.
+    Ordinary API limiting still fails open.
     Auth also limits login attempts per case-insensitive email: burst 5,
     refill 1/minute, regardless of whether the account exists (`429`,
     `Retry-After: 60`). This account quota is per Auth process, with bounded
