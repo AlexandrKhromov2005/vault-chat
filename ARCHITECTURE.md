@@ -457,11 +457,137 @@ Client → Gateway (multipart upload)
 
 ## 12. Future Evolution
 
-| Phase | Feature | Architecture Change |
-|-------|---------|---------------------|
-| v0.1 (MVP) | Auth, DM, channels, file upload | 4 services, Docker Compose |
-| v0.2 | Search, threads, reactions | Add Elasticsearch, Chat sharding |
-| v0.3 | E2EE DMs, TOTP 2FA | Add Signal Protocol client lib |
-| v0.4 | Voice messages, video calls | Add WebRTC service |
-| v0.5 | Enterprise SSO (SAML/OIDC) | Extend Auth with identity providers |
-| v1.0 | Kubernetes, auto-scaling | Helm charts, HPA, service mesh |
+These tracks describe planning priorities, not release numbers or delivery dates.
+Released features are recorded in [CHANGELOG](CHANGELOG.md); assign future
+versions under [VERSIONING](VERSIONING.md) after the scope is agreed. In
+particular, the released `v0.4.0` contains internal mTLS, not calls.
+
+| Track | Feature | Architecture direction |
+|-------|---------|------------------------|
+| MVP baseline | Auth, DM, channels, file upload | Existing four services and Docker Compose |
+| Collaboration | Search, threads, reactions | Add Elasticsearch, Chat sharding |
+| Account and message security | E2EE DMs, TOTP 2FA | Add Signal Protocol client lib |
+| Calls | Personal audio first; video and groups later | WebRTC infrastructure; evaluate Erlang/OTP call control against Go (§12.1) |
+| Media processing | Image previews; voice messages and waveforms later | Evaluate an isolated Zig worker against Go (§12.2) |
+| Enterprise identity | SSO (SAML/OIDC) | Extend Auth with identity providers |
+| Deployment scale | Kubernetes, auto-scaling | Helm charts, HPA, service mesh |
+
+**Planning decision, 2026-10-31:** add the Erlang and Zig investigations below.
+Implementation has not started and is deferred until separately authorized.
+Neither language is an adopted dependency. Auth, Chat, Media and Gateway remain
+on Go; these tracks do not require rewriting them or introducing both languages.
+
+### 12.1 Erlang/OTP: call control
+
+**Candidate scope.** Start with one-to-one audio calls: invite, ring, accept,
+reject, cancel, connect and end. An OTP process per call, using `gen_statem`, is
+a candidate for serializing commands and timeouts. Compare it with a Go service
+implementing the same contract. Lightweight processes alone do not establish a
+capacity or latency advantage; no current measurement identifies Go as the
+limiting factor.
+
+Call control and media transport are separate decisions. Evaluate WebRTC
+peer-to-peer with TURN versus an SFU such as self-hosted LiveKit; account for
+bandwidth, network reachability, operational cost and future group calls.
+Audio/video packets do not travel through the existing Chat event stream.
+Define any E2EE requirement separately from transport encryption. Video,
+conferences and recording require their own scope and acceptance decisions.
+
+**Trust boundaries and recovery.** Clients send untrusted commands and connection
+descriptions. Auth remains authoritative for live sessions, and Chat for room
+membership. Define service identities and mTLS ACLs, media admission credentials,
+their lifetime and the policy for logout or removal during an active call.
+New admission must fail closed when Auth or Chat cannot authorize it. Explicitly
+document the limits of server-enforced termination for the chosen media topology.
+
+The current [WebSocket contract](docs/chat/realtime.md) accepts only client auth
+frames; signaling needs a separately reviewed API and bounded messages. Redis
+Pub/Sub events can be lost, so define authoritative call state, versions,
+idempotent commands and reconciliation after reconnect. Decide how state is
+recovered, or the call is safely ended, after process/node failure. An OTP
+supervisor restart alone does not restore state; multiple instances must not
+independently accept conflicting transitions for the same call.
+
+**Budgets before a prototype.** Record numeric limits for active/ringing calls
+per user and instance, participants, command rate, SDP/ICE size and count, queue
+depth, setup/ringing/idle timeouts and shutdown. Specify overload responses and
+bounded dependency deadlines. Queues and recovery attempts must remain bounded
+during Redis, Auth, Chat or media-server outages.
+
+Future work, in order, after implementation is authorized:
+
+- [ ] **E1 — design:** agree on the first client scenario, an owner able to
+  maintain OTP, contracts, threat model and budgets. Write an ADR comparing Go
+  and Erlang/OTP, including deployment, observability and state recovery.
+- [ ] **E2 — prototype and compare:** implement the same small call-control
+  scenario in both candidates on a disposable test stack. Measure setup p95/p99,
+  throughput, errors, CPU, peak memory and recovery under the same workload;
+  report media-server and TURN costs separately. Commit fixtures and commands.
+- [ ] **E3 — acceptance:** cover malformed/oversized signaling, expired or revoked
+  sessions, nonmembers, removal during a call, two devices accepting together,
+  duplicate/reordered commands, lost `accepted`/`ended` events, reconnect,
+  process/node restart and dependency outages. Verify bounded overload behavior.
+- [ ] **E4 — client acceptance:** test browser and Android devices, permissions,
+  background incoming calls, delayed/missed push, network loss, Wi-Fi/mobile
+  handover and TURN fallback. Depend on reviewed session and push behavior;
+  an open client or push PR does not satisfy this gate.
+- [ ] **E5 — adoption decision:** record results in the ADR. Retain Go unless OTP
+  offers an agreed benefit that justifies ownership and another runtime. If
+  adopted, add pinned tooling, CI, metrics, deployment and rollback acceptance
+  in separate focused PRs before enabling calls.
+
+### 12.2 Zig: isolated media processing
+
+**Candidate scope.** First evaluate PNG/JPEG previews. The current
+[Media service](docs/media/files.md) validates uploads and stores private objects;
+it does not resize images or decode audio/video. No measured CPU bottleneck
+currently requires Zig. Compare a Zig worker with Go and suitable existing
+image-processing tools, using equivalent output and codec settings.
+
+In the proposed design, Go Media owns authorization, metadata, task scheduling
+and publication of results. The worker is a separate process/container receiving
+a bounded job and returning a bounded preview. It gets neither Auth secrets nor unrestricted
+storage access, arbitrary client paths or URLs. Media validates the result before
+publishing it. Derived files remain private and use the original file's current
+room-access checks; a job must not create a public or permanent access bypass.
+
+**Budgets and failure behavior.** Before a prototype, fix numeric limits for
+input bytes, decoded dimensions/pixels and memory, output bytes, CPU, elapsed
+time, parallel workers, queue size and retries. The existing 10 MiB upload and
+40-million-pixel header checks are upper input bounds, not sufficient decoder
+memory budgets. A timeout, crash or OOM must leave the original intact and the
+main upload/download service available. An unavailable preview uses a placeholder;
+retries are bounded and duplicate jobs must not publish conflicting results.
+
+Future work, in order, after implementation is authorized:
+
+- [ ] **Z1 — design and baseline:** specify the preview contract, codec/library
+  choices, job identity, access checks, budgets and cancellation/cleanup behavior.
+  Measure the Go baseline first; define the benefit required for adoption before
+  comparing results. A learning experiment is not a production-performance claim.
+- [ ] **Z2 — isolated prototype:** benchmark the worker on the same hardware and
+  synthetic image corpus, including IPC, decoding and encoding costs. Compare
+  output quality, throughput, p95/p99, peak memory and maintenance/build cost;
+  attribute any improvement from a different codec library separately.
+- [ ] **Z3 — acceptance:** cover corrupt/truncated files, excessive decoded size,
+  invalid worker output, unauthorized result access, membership changes, duplicate
+  jobs, a full queue, timeout/OOM/crash and S3/database outages. Commit disposable
+  fixtures, behavioral regressions and fuzz targets; verify bounded recovery and
+  preservation of originals.
+- [ ] **Z4 — adoption decision:** keep Go if the evidence does not justify Zig.
+  If adopted, pin compiler and native dependencies, extend CI to build/test the
+  worker, verify supported deployment architectures and document rollback before
+  production integration. Existing Go CI is not evidence that Zig was checked.
+- [ ] **Z5 — later candidates:** reconsider waveform/audio analysis only after
+  voice-message formats, permissions and storage limits are designed. Consider
+  WebAssembly for a concrete browser need. Direct cgo or Erlang NIF integration
+  requires separate evidence that IPC is a bottleneck and a reviewed failure
+  boundary; it is not the initial design. The current [container build](Dockerfile)
+  disables cgo, and a native NIF crash can terminate the whole Erlang VM.
+
+Technical references: [OTP state machines](https://www.erlang.org/doc/system/statem.html),
+[WebRTC signaling](https://webrtc.org/getting-started/peer-connections),
+[TURN](https://webrtc.org/getting-started/turn-server),
+[LiveKit SFU](https://docs.livekit.io/reference/internals/livekit-sfu/),
+[Zig interoperability and memory](https://ziglang.org/learn/overview/),
+[Erlang NIF failure boundary](https://www.erlang.org/doc/system/nif.html).
