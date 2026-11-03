@@ -12,9 +12,9 @@ stores one device token per login.
   only marked as shown, so that they do not pop up when the app leaves the
   screen. The table `notified` keeps the newest shown sequence of each room;
   messages up to the room's last read one are never shown, and the history
-  of a room's first load counts as read. Opening a room removes its
-  notification; tapping a notification opens the room, only for the account
-  it was posted for.
+  of a room's first load counts as read. A room coming on screen, also when
+  the user returns to it, removes its notification; tapping a notification
+  opens the room, only for the account it was posted for.
 - **End of a session.** Nothing of an account stays visible or actionable
   after it signs out or its session is revoked: the session stops posting, all
   of its notifications and a room waiting to open are removed. The notification

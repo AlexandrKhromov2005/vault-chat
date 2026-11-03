@@ -350,6 +350,19 @@ class ConversationViewModel(
     }
 }
 
+/**
+ * Removes the room's notification whenever the room comes on screen: when it
+ * opens, and when the user comes back to it, say by unlocking the phone with
+ * the room open after a message notified.
+ */
+@Composable
+internal fun RemoveRoomNotice(roomId: String, remove: () -> Unit) {
+    LifecycleResumeEffect(roomId) {
+        remove()
+        onPauseOrDispose { }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onMembers: () -> Unit) {
@@ -368,7 +381,7 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
         if (room == RoomView.Gone) onBack()
     }
     val appContext = LocalContext.current.applicationContext
-    LaunchedEffect(roomId) { Notifications.cancel(appContext, roomId) }
+    RemoveRoomNotice(roomId) { Notifications.cancel(appContext, roomId) }
     // A reset drops the older history the pager has already seen to its end;
     // it must start over to page through it again.
     val oldest by model.oldest.collectAsStateWithLifecycle()
