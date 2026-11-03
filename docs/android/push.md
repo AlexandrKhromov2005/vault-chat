@@ -42,7 +42,11 @@ stores one device token per login.
   `PUT /api/v1/push/token` after every sign-in and whenever FCM changes it. A
   failed registration is tried again on the next start; the periodic sync
   covers the gap. Signing out revokes the login, and the server deletes its
-  token (docs/push.md); the client sends nothing.
+  token (docs/push.md); the client sends nothing to the server, but deletes the
+  installation's token at FCM, tried again at the next start if that fails. So
+  after a logout the server could not hear of, the token left there wakes
+  nothing, and FCM's answer makes the server drop it. The next sign-in gets a new
+  token.
 - **Permission.** On Android 13 and later the app asks once for the
   notification permission when the chat opens; refused, it shows nothing and
   keeps working.

@@ -102,7 +102,7 @@ class AppContainer(
         }
     }, appScope).also { it.follow(session.state) }
 
-    val push = Push(context, session, appScope)
+    val push = Push(context, session, settings, appScope)
 }
 
 /** Preferences that are not secret. */
@@ -118,6 +118,11 @@ class Settings(context: Context) {
         get() = preferences.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
         set(value) = preferences.edit { putBoolean(KEY_NOTIFICATIONS_ASKED, value) }
 
+    /** Whether FCM's token of this installation may still be bound to a login on the server. */
+    var pushTokenBound: Boolean
+        get() = preferences.getBoolean(KEY_PUSH_TOKEN_BOUND, false)
+        set(value) = preferences.edit { putBoolean(KEY_PUSH_TOKEN_BOUND, value) }
+
     /** When GitHub was last asked for a newer release (Updates), and what it had. */
     var updateCheckedAt: Long
         get() = preferences.getLong(KEY_UPDATE_CHECKED_AT, 0)
@@ -132,6 +137,7 @@ class Settings(context: Context) {
         set(value) = preferences.edit { putString(KEY_UPDATE_PAGE, value) }
 
     private companion object {
+        const val KEY_PUSH_TOKEN_BOUND = "push_token_bound"
         const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
         const val KEY_UPDATE_VERSION = "update_version"
         const val KEY_UPDATE_PAGE = "update_page"
