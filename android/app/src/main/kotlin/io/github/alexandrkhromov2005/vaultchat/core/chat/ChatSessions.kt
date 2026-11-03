@@ -15,6 +15,12 @@ import kotlinx.coroutines.launch
  * one; signing out also deletes its data. Database files of sessions that are
  * neither current nor still open, such as those left behind by a killed
  * process, are deleted whenever the session changes.
+ *
+ * Opening a session, wiping data and deleting files all hold this object's
+ * lock, and decide what to touch only once they hold it: work queued for an
+ * earlier state must not reach the data of a session that has opened since.
+ * They are brief, and sessions change rarely, so a screen asking for its
+ * session is not held up for long.
  */
 class ChatSessions(
     private val databases: ChatDatabases,
@@ -64,7 +70,7 @@ class ChatSessions(
         if (state?.value !== signedIn) {
             // A screen asked for a session that has ended meanwhile: it gets
             // one that does nothing, and the current session is untouched.
-            session.end(wipe = false, appScope, io)
+            session.end(appScope, io)
             return session
         }
         // A new session of the same user and server keeps its data.
@@ -75,8 +81,14 @@ class ChatSessions(
 
     @Synchronized
     private fun endCurrent(wipe: Boolean) {
-        current?.end(wipe, appScope, io)
+        if (wipe) current?.end(appScope, io, ::wipeUnlessReopened) else current?.end(appScope, io)
         current = null
+    }
+
+    /** The same user's new session owns the data by now, and keeps it. */
+    @Synchronized
+    private fun wipeUnlessReopened(ended: ChatSession) {
+        if (current?.databaseName != ended.databaseName) ended.clearData()
     }
 
     private fun released(session: ChatSession) {
@@ -90,8 +102,11 @@ class ChatSessions(
     }
 
     private fun cleanUp() {
-        val keep = synchronized(this) { open.map { it.databaseName }.toSet() }
-        appScope.launch(io) { runCatching { databases.deleteAllExcept(keep) } }
+        appScope.launch(io) {
+            synchronized(this@ChatSessions) {
+                runCatching { databases.deleteAllExcept(open.map { it.databaseName }.toSet()) }
+            }
+        }
     }
 
     private companion object {

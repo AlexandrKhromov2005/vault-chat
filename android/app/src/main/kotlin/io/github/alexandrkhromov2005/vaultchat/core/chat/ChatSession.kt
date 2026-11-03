@@ -169,14 +169,14 @@ class ChatSession(
     }
 
     /**
-     * Stops the session. With [wipe], its data is deleted from the database at
-     * once; the file itself goes when the database is closed.
+     * Stops the session and then runs [wipe] in the background, which may delete
+     * its data with [clearData]; the file itself goes when the database is closed.
      */
-    fun end(wipe: Boolean, background: CoroutineScope, io: CoroutineDispatcher = Dispatchers.IO) {
+    fun end(background: CoroutineScope, io: CoroutineDispatcher = Dispatchers.IO, wipe: (ChatSession) -> Unit = {}) {
         if (!ended.compareAndSet(false, true)) return
         scope.cancel()
         background.launch(io) {
-            if (wipe) runCatching { database.clearAllTables() }
+            runCatching { wipe(this@ChatSession) }
             if (retained.get() == 0) release()
         }
     }
@@ -186,6 +186,11 @@ class ChatSession(
     private fun release() {
         if (!released.compareAndSet(false, true)) return
         onReleased(this)
+    }
+
+    /** Deletes the session's data from the database. */
+    internal fun clearData() {
+        database.clearAllTables()
     }
 
     /** Closes the database; only after [end] and once nothing retains it. */
