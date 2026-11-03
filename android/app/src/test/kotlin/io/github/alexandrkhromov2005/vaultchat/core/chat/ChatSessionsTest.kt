@@ -9,6 +9,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
 import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +33,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import retrofit2.Response
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 @RunWith(RobolectricTestRunner::class)
 class ChatSessionsTest {
@@ -69,9 +74,23 @@ class ChatSessionsTest {
             gateway.requests.send(request)
     }
 
+    private val io = HeldDispatcher()
+
     @After
     fun tearDown() {
+        io.close()
         scope.cancel()
+    }
+
+    /** What the database holds for the current session, read through a handle of its own. */
+    private suspend fun storedUnsentTexts(roomId: String): List<String> {
+        assertTrue("the database file was deleted", fileName in context.databaseList())
+        val database = databases.open(server.toString(), alice.userId)
+        return try {
+            database.dao().storedOutgoing(roomId).map { it.text }
+        } finally {
+            database.close()
+        }
     }
 
     /** Leaves a queued message behind, as a process killed after queuing it would. */
@@ -159,6 +178,71 @@ class ChatSessionsTest {
     }
 
     @Test
+    fun aCleanUpQueuedWhileSignedOutLeavesTheDatabaseOfANewSession() = runBlocking {
+        val cleanUps = WatchedDatabases(context)
+        val state = MutableStateFlow<SessionState>(SessionState.SignedOut(SessionState.Reason.NONE))
+        val sessions = ChatSessions(cleanUps, deps, scope, io)
+        sessions.follow(state)
+        // The clean-up for "nobody is signed in" waits for its turn.
+        io.awaitQueued(1)
+
+        state.value = alice
+        sessions.get(alice).rooms.first()
+        val roomId = queueAMessage(FakeChatServer(alice.userId))
+        io.release()
+        io.awaitIdle()
+
+        // Asked of the clean-up as well as of the file: Windows refuses to
+        // delete an open file, where Android and Linux delete it.
+        assertTrue(cleanUps.kept.isNotEmpty())
+        assertTrue("a clean-up left out the open database: ${cleanUps.kept}", cleanUps.kept.all { fileName in it })
+        assertEquals(listOf("hello"), storedUnsentTexts(roomId))
+    }
+
+    @Test
+    fun aSessionOpensOnlyAfterACleanUpUnderWayHasFinished() = runBlocking {
+        val cleanUps = WatchedDatabases(context, hold = true)
+        val state = MutableStateFlow<SessionState>(SessionState.SignedOut(SessionState.Reason.NONE))
+        val sessions = ChatSessions(cleanUps, deps, scope, io)
+        sessions.follow(state)
+        io.release()
+        // The clean-up is deleting files for a set it worked out before alice came.
+        cleanUps.awaitDeleting()
+
+        state.value = alice
+        val opening = scope.async { sessions.get(alice) }
+        delay(300)
+
+        assertFalse("the session opened during the clean-up", opening.isCompleted)
+        cleanUps.letDeletingFinish()
+        withTimeout(5_000) { opening.await() }
+        Unit
+    }
+
+    @Test
+    fun aWipeQueuedAtSignOutLeavesTheDataOfTheSameUsersNewSession() = runBlocking {
+        val state = MutableStateFlow<SessionState>(alice)
+        val sessions = ChatSessions(databases, deps, scope, io)
+        sessions.follow(state)
+        sessions.get(alice).rooms.first()
+        io.awaitQueued(1)
+        state.value = SessionState.SignedOut(SessionState.Reason.LOGOUT)
+        // The wipe of the ended session and a clean-up wait for their turn.
+        io.awaitQueued(3)
+
+        val again = SessionState.SignedIn(server, alice.userId, alice.username)
+        state.value = again
+        sessions.get(again).rooms.first()
+        val roomId = queueAMessage(FakeChatServer(alice.userId))
+        io.release()
+        // Past the ended session's close and the clean-up after it.
+        delay(2_500)
+        io.awaitIdle()
+
+        assertEquals(listOf("hello"), storedUnsentTexts(roomId))
+    }
+
+    @Test
     fun theBackgroundJobSendsTheQueueOfTheStoredSession() = runBlocking {
         val gateway = FakeChatServer(alice.userId)
         val roomId = queueAMessage(gateway)
@@ -220,5 +304,68 @@ class ChatSessionsTest {
 
         assertNotSame(chat, late)
         assertTrue(sessions.get(bob) === current)
+    }
+}
+
+/** Records what clean-ups keep; with [hold], the first one stops before it deletes. */
+private class WatchedDatabases(context: Context, private val hold: Boolean = false) : ChatDatabases(context) {
+    val kept = java.util.Collections.synchronizedList(mutableListOf<Set<String>>())
+    private val deleting = CountDownLatch(1)
+    private val finish = CountDownLatch(1)
+
+    override fun deleteAllExcept(keep: Set<String>) {
+        kept += keep
+        deleting.countDown()
+        if (hold) finish.await()
+        super.deleteAllExcept(keep)
+    }
+
+    suspend fun awaitDeleting() = withTimeout(5_000) {
+        while (deleting.count > 0) delay(10)
+    }
+
+    fun letDeletingFinish() = finish.countDown()
+}
+
+/** One worker that runs nothing until [release], so that work piles up in a known order. */
+private class HeldDispatcher : CoroutineDispatcher() {
+    private val worker = Executors.newSingleThreadExecutor()
+    private val gate = CountDownLatch(1)
+    private val queued = AtomicInteger()
+    private val done = AtomicInteger()
+
+    init {
+        worker.execute { gate.await() }
+    }
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        queued.incrementAndGet()
+        worker.execute {
+            try {
+                block.run()
+            } finally {
+                done.incrementAndGet()
+            }
+        }
+    }
+
+    suspend fun awaitQueued(count: Int) = withTimeout(5_000) {
+        while (queued.get() < count) delay(10)
+    }
+
+    fun release() = gate.countDown()
+
+    /** Until everything queued has run and nothing new has come for a while. */
+    suspend fun awaitIdle() = withTimeout(10_000) {
+        var seen = -1
+        while (seen != queued.get() || done.get() != seen) {
+            seen = queued.get()
+            delay(300)
+        }
+    }
+
+    fun close() {
+        release()
+        worker.shutdownNow()
     }
 }

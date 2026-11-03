@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import javax.crypto.AEADBadTagException
@@ -37,6 +38,7 @@ interface SessionStore {
 
     suspend fun save(session: StoredSession)
 
+    /** Forgets the session. Throws when it may still be readable afterwards. */
     suspend fun clear()
 }
 
@@ -79,6 +81,7 @@ class EncryptedFileSessionStore(
         } catch (e: Exception) {
             // SerializationException is an IllegalArgumentException.
             if (e !is AEADBadTagException && e !is UnreadableSessionException && e !is IllegalArgumentException) throw e
+            // What cannot be read is no session, even if it cannot be removed.
             discard()
             null
         }
@@ -106,14 +109,22 @@ class EncryptedFileSessionStore(
         Unit
     }
 
-    override suspend fun clear() = withContext(io) { discard() }
+    override suspend fun clear() = withContext(io) {
+        if (!discard()) throw IOException("the stored session can neither be deleted nor made unreadable")
+    }
 
-    private fun discard() {
+    /**
+     * Deletes the files and the key; false when the session may still be read.
+     * Either is enough: without the files the key protects nothing, so a failure
+     * to destroy it must not keep the user signed in, and without the key the
+     * files are noise.
+     */
+    private fun discard(): Boolean {
+        val temporary = File(file.parentFile, file.name + ".tmp")
         file.delete()
-        File(file.parentFile, file.name + ".tmp").delete()
-        // Without the file the key protects nothing; a failure to delete it
-        // must not keep the user signed in.
-        runCatching { cipher.destroyKey() }
+        temporary.delete()
+        val keyDestroyed = runCatching { cipher.destroyKey() }.isSuccess
+        return keyDestroyed || (!file.exists() && !temporary.exists())
     }
 
     private companion object {

@@ -24,7 +24,7 @@ import (
 
 // newAuthHandler wires the gRPC handler to the real service, repositories and
 // token manager.
-func newAuthHandler(t *testing.T) *handler.AuthGRPCHandler {
+func newAuthHandler(t *testing.T, options ...service.Option) *handler.AuthGRPCHandler {
 	t.Helper()
 
 	pool := newTestPool(t)
@@ -40,7 +40,7 @@ func newAuthHandler(t *testing.T) *handler.AuthGRPCHandler {
 		}),
 		tokens,
 		slog.Default(),
-		service.WithInvitations(repository.NewUserRepository(pool)),
+		append([]service.Option{service.WithInvitations(repository.NewUserRepository(pool))}, options...)...,
 	)
 	require.NoError(t, err)
 

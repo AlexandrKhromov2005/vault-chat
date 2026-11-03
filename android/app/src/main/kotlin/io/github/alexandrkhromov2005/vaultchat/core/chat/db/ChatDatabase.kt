@@ -32,7 +32,7 @@ abstract class ChatDatabase : RoomDatabase() {
 }
 
 /** Database files of the app's sessions. */
-class ChatDatabases(private val context: Context) {
+open class ChatDatabases(private val context: Context) {
 
     fun open(server: String, userId: String): ChatDatabase =
         Room.databaseBuilder(context, ChatDatabase::class.java, fileName(server, userId))
@@ -48,7 +48,7 @@ class ChatDatabases(private val context: Context) {
     }
 
     /** Deletes the database files and directories of every session except those named in [keep]. */
-    fun deleteAllExcept(keep: Set<String>) {
+    open fun deleteAllExcept(keep: Set<String>) {
         context.databaseList()
             .filter { it.startsWith(PREFIX) && it.endsWith(SUFFIX) && it !in keep }
             .forEach { context.deleteDatabase(it) }

@@ -36,6 +36,13 @@ func newTestSession(userID string, ttl time.Duration) *domain.Session {
 	}
 }
 
+// rotate rotates without a retry window, so that every reuse of a rotated
+// session is reported.
+func rotate(ctx context.Context, repo *repository.SessionRepository, currentID string, next *domain.Session) error {
+	_, err := repo.Rotate(ctx, currentID, next, 0)
+	return err
+}
+
 func TestSessionRepository_Rotate(t *testing.T) {
 	_, repo, user := newSessionFixture(t)
 	ctx := context.Background()
@@ -44,12 +51,12 @@ func TestSessionRepository_Rotate(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, current))
 
 	next := newTestSession(user.ID, time.Hour)
-	require.NoError(t, repo.Rotate(ctx, current.ID, next))
+	require.NoError(t, rotate(ctx, repo, current.ID, next))
 
-	err := repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour))
+	err := rotate(ctx, repo, current.ID, newTestSession(user.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrSessionReused, "a rotated session must not be usable again")
 
-	require.NoError(t, repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour)),
+	require.NoError(t, rotate(ctx, repo, next.ID, newTestSession(user.ID, time.Hour)),
 		"the replacement session must be active")
 }
 
@@ -67,7 +74,7 @@ func TestSessionRepository_Rotate_ConcurrentRotationsHaveOneWinner(t *testing.T)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs[i] = repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour))
+			errs[i] = rotate(ctx, repo, current.ID, newTestSession(user.ID, time.Hour))
 		}()
 	}
 	wg.Wait()
@@ -83,16 +90,135 @@ func TestSessionRepository_Rotate_ConcurrentRotationsHaveOneWinner(t *testing.T)
 	require.Equal(t, 1, succeeded)
 }
 
+const retryWindow = 30 * time.Second
+
+func TestSessionRepository_Rotate_RetryWithinWindowReturnsTheSuccessor(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	ctx := context.Background()
+
+	current := newTestSession(user.ID, time.Hour)
+	require.NoError(t, repo.Create(ctx, current))
+	next := newTestSession(user.ID, time.Hour)
+	active, err := repo.Rotate(ctx, current.ID, next, retryWindow)
+	require.NoError(t, err)
+	require.Equal(t, next.ID, active.ID)
+
+	for range 2 {
+		active, err = repo.Rotate(ctx, current.ID, newTestSession(user.ID, 2*time.Hour), retryWindow)
+		require.NoError(t, err, "a retry within the window must not count as reuse")
+		require.Equal(t, next.ID, active.ID)
+		require.Equal(t, user.ID, active.UserID)
+		require.WithinDuration(t, next.ExpiresAt, active.ExpiresAt, time.Millisecond,
+			"a retry must not extend the login")
+	}
+	require.Equal(t, 2, countSessions(t, pool, user.ID), "a retry must not create sessions")
+
+	require.NoError(t, rotate(ctx, repo, next.ID, newTestSession(user.ID, time.Hour)),
+		"the successor returned to a retry must stay active")
+}
+
+func TestSessionRepository_Rotate_RetryIsReuseWhenNotTheLatest(t *testing.T) {
+	cases := map[string]func(t *testing.T, pool *pgxpool.Pool, repo *repository.SessionRepository, current, next *domain.Session){
+		"window has passed": func(t *testing.T, pool *pgxpool.Pool, _ *repository.SessionRepository, current, _ *domain.Session) {
+			_, err := pool.Exec(context.Background(),
+				`UPDATE sessions SET revoked_at = now() - make_interval(secs => $2) WHERE id = $1::uuid`,
+				current.ID, retryWindow.Seconds()+1)
+			require.NoError(t, err)
+		},
+		"successor was rotated": func(t *testing.T, _ *pgxpool.Pool, repo *repository.SessionRepository, current, next *domain.Session) {
+			_, err := repo.Rotate(context.Background(), next.ID, newTestSession(current.UserID, time.Hour), retryWindow)
+			require.NoError(t, err)
+		},
+		"login was logged out": func(t *testing.T, _ *pgxpool.Pool, repo *repository.SessionRepository, current, _ *domain.Session) {
+			require.NoError(t, repo.RevokeFamily(context.Background(), current.UserID, current.ID))
+		},
+		"successor expired": func(t *testing.T, pool *pgxpool.Pool, _ *repository.SessionRepository, _, next *domain.Session) {
+			_, err := pool.Exec(context.Background(),
+				`UPDATE sessions SET expires_at = now() - interval '1 second' WHERE id = $1::uuid`, next.ID)
+			require.NoError(t, err)
+		},
+	}
+	for name, prepare := range cases {
+		t.Run(name, func(t *testing.T) {
+			pool, repo, user := newSessionFixture(t)
+			ctx := context.Background()
+
+			current := newTestSession(user.ID, time.Hour)
+			require.NoError(t, repo.Create(ctx, current))
+			next := newTestSession(user.ID, time.Hour)
+			_, err := repo.Rotate(ctx, current.ID, next, retryWindow)
+			require.NoError(t, err)
+			prepare(t, pool, repo, current, next)
+
+			active, err := repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour), retryWindow)
+			require.ErrorIs(t, err, repository.ErrSessionReused)
+			require.Nil(t, active)
+		})
+	}
+}
+
+func TestSessionRepository_Rotate_RetryOfAnotherUsersSession(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	ctx := context.Background()
+	other := newTestUser()
+	require.NoError(t, repository.NewUserRepository(pool).Create(ctx, other))
+
+	current := newTestSession(user.ID, time.Hour)
+	require.NoError(t, repo.Create(ctx, current))
+	_, err := repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour), retryWindow)
+	require.NoError(t, err)
+
+	active, err := repo.Rotate(ctx, current.ID, newTestSession(other.ID, time.Hour), retryWindow)
+	require.ErrorIs(t, err, repository.ErrNotFound)
+	require.Nil(t, active)
+}
+
+func TestSessionRepository_Rotate_ConcurrentRetriesShareOneSuccessor(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	ctx := context.Background()
+
+	current := newTestSession(user.ID, time.Hour)
+	require.NoError(t, repo.Create(ctx, current))
+
+	const attempts = 8
+	actives := make([]*domain.Session, attempts)
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			actives[i], errs[i] = repo.Rotate(ctx, current.ID, newTestSession(user.ID, time.Hour), retryWindow)
+		}()
+	}
+	wg.Wait()
+
+	for i := range attempts {
+		require.NoError(t, errs[i])
+		require.Equal(t, actives[0].ID, actives[i].ID)
+	}
+	require.Equal(t, 2, countSessions(t, pool, user.ID))
+}
+
+func countSessions(t *testing.T, pool *pgxpool.Pool, userID string) int {
+	t.Helper()
+
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM sessions WHERE user_id = $1::uuid", userID).Scan(&n))
+	return n
+}
+
 func TestSessionRepository_Rotate_UnknownOrExpired(t *testing.T) {
 	_, repo, user := newSessionFixture(t)
 	ctx := context.Background()
 
-	err := repo.Rotate(ctx, uuid.NewString(), newTestSession(user.ID, time.Hour))
+	err := rotate(ctx, repo, uuid.NewString(), newTestSession(user.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrNotFound)
 
 	expired := newTestSession(user.ID, -time.Minute)
 	require.NoError(t, repo.Create(ctx, expired))
-	err = repo.Rotate(ctx, expired.ID, newTestSession(user.ID, time.Hour))
+	err = rotate(ctx, repo, expired.ID, newTestSession(user.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrNotFound)
 }
 
@@ -105,10 +231,10 @@ func TestSessionRepository_Rotate_SessionOfAnotherUser(t *testing.T) {
 	session := newTestSession(user.ID, time.Hour)
 	require.NoError(t, repo.Create(ctx, session))
 
-	err := repo.Rotate(ctx, session.ID, newTestSession(other.ID, time.Hour))
+	err := rotate(ctx, repo, session.ID, newTestSession(other.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrNotFound)
 
-	require.NoError(t, repo.Rotate(ctx, session.ID, newTestSession(user.ID, time.Hour)),
+	require.NoError(t, rotate(ctx, repo, session.ID, newTestSession(user.ID, time.Hour)),
 		"a rejected rotation must leave the session active")
 }
 
@@ -119,14 +245,14 @@ func TestSessionRepository_RevokeFamily(t *testing.T) {
 	first := newTestSession(user.ID, time.Hour)
 	require.NoError(t, repo.Create(ctx, first))
 	second := newTestSession(user.ID, time.Hour)
-	require.NoError(t, repo.Rotate(ctx, first.ID, second))
+	require.NoError(t, rotate(ctx, repo, first.ID, second))
 	otherDevice := newTestSession(user.ID, time.Hour)
 	require.NoError(t, repo.Create(ctx, otherDevice))
 
 	// Logging out with a token that was already rotated still ends the
 	// session it was rotated into.
 	require.NoError(t, repo.RevokeFamily(ctx, user.ID, first.ID))
-	err := repo.Rotate(ctx, second.ID, newTestSession(user.ID, time.Hour))
+	err := rotate(ctx, repo, second.ID, newTestSession(user.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrSessionRevoked)
 
 	require.NoError(t, repo.RevokeFamily(ctx, user.ID, first.ID), "revoke must be idempotent")
@@ -134,7 +260,7 @@ func TestSessionRepository_RevokeFamily(t *testing.T) {
 	require.NoError(t, repo.RevokeFamily(ctx, uuid.NewString(), otherDevice.ID),
 		"a session cannot be revoked on behalf of another user")
 
-	require.NoError(t, repo.Rotate(ctx, otherDevice.ID, newTestSession(user.ID, time.Hour)),
+	require.NoError(t, rotate(ctx, repo, otherDevice.ID, newTestSession(user.ID, time.Hour)),
 		"sessions of other logins must stay active")
 }
 
@@ -148,13 +274,13 @@ func TestSessionRepository_RevokeFamily_DuringRotation(t *testing.T) {
 	stallInsertOf(t, pool, next.ID)
 
 	rotated := make(chan error, 1)
-	go func() { rotated <- repo.Rotate(ctx, current.ID, next) }()
+	go func() { rotated <- rotate(ctx, repo, current.ID, next) }()
 	waitForStalledInsert(t, pool)
 
 	require.NoError(t, repo.RevokeFamily(ctx, user.ID, current.ID))
 	require.NoError(t, <-rotated)
 
-	err := repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour))
+	err := rotate(ctx, repo, next.ID, newTestSession(user.ID, time.Hour))
 	require.ErrorIs(t, err, repository.ErrSessionRevoked,
 		"a session created by a concurrent rotation must not survive logout")
 }
@@ -177,14 +303,14 @@ func TestSessionRepository_RevokeAllForUser_DuringRotation(t *testing.T) {
 			stallInsertOf(t, pool, next.ID)
 
 			rotated := make(chan error, 1)
-			go func() { rotated <- repo.Rotate(ctx, current.ID, next) }()
+			go func() { rotated <- rotate(ctx, repo, current.ID, next) }()
 			waitForStalledInsert(t, pool)
 
 			_, err := repo.RevokeAllForUser(ctx, spell(user.ID))
 			require.NoError(t, err)
 			require.NoError(t, <-rotated)
 
-			err = repo.Rotate(ctx, next.ID, newTestSession(user.ID, time.Hour))
+			err = rotate(ctx, repo, next.ID, newTestSession(user.ID, time.Hour))
 			require.ErrorIs(t, err, repository.ErrSessionRevoked,
 				"a session created by a concurrent rotation must not survive revoke-all")
 		})
@@ -229,10 +355,10 @@ func TestSessionRepository_RevokeAllForUser(t *testing.T) {
 	require.EqualValues(t, 2, revoked)
 
 	for _, s := range []*domain.Session{first, second} {
-		err := repo.Rotate(ctx, s.ID, newTestSession(user.ID, time.Hour))
+		err := rotate(ctx, repo, s.ID, newTestSession(user.ID, time.Hour))
 		require.ErrorIs(t, err, repository.ErrSessionRevoked)
 	}
-	require.NoError(t, repo.Rotate(ctx, foreign.ID, newTestSession(other.ID, time.Hour)),
+	require.NoError(t, rotate(ctx, repo, foreign.ID, newTestSession(other.ID, time.Hour)),
 		"sessions of other users must stay active")
 }
 
