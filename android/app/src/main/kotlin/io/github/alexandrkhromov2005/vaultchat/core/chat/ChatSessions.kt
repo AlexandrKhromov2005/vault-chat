@@ -2,6 +2,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.chat
 
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -19,6 +20,7 @@ class ChatSessions(
     private val databases: ChatDatabases,
     private val deps: ChatSessionDeps,
     private val appScope: CoroutineScope,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private var current: ChatSession? = null
     private var state: StateFlow<SessionState>? = null
@@ -62,7 +64,7 @@ class ChatSessions(
         if (state?.value !== signedIn) {
             // A screen asked for a session that has ended meanwhile: it gets
             // one that does nothing, and the current session is untouched.
-            session.end(wipe = false, appScope)
+            session.end(wipe = false, appScope, io)
             return session
         }
         // A new session of the same user and server keeps its data.
@@ -73,12 +75,12 @@ class ChatSessions(
 
     @Synchronized
     private fun endCurrent(wipe: Boolean) {
-        current?.end(wipe, appScope)
+        current?.end(wipe, appScope, io)
         current = null
     }
 
     private fun released(session: ChatSession) {
-        appScope.launch(Dispatchers.IO) {
+        appScope.launch(io) {
             // Queries that screens started just before they let go may still run.
             delay(CLOSE_GRACE_MS)
             session.close()
@@ -89,7 +91,7 @@ class ChatSessions(
 
     private fun cleanUp() {
         val keep = synchronized(this) { open.map { it.databaseName }.toSet() }
-        appScope.launch(Dispatchers.IO) { runCatching { databases.deleteAllExcept(keep) } }
+        appScope.launch(io) { runCatching { databases.deleteAllExcept(keep) } }
     }
 
     private companion object {
