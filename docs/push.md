@@ -202,9 +202,26 @@ Metrics: `vault_push_pending`, `vault_push_sent_total`,
 
 ### Operator configuration
 
-Push stays disabled until an operator creates a Firebase project, stores its
-service account file privately on the host, mounts it read-only into Auth,
-sets `AUTH_PUSH_FCM_CREDENTIALS_FILE` and gives Auth egress to Google. A
-Compose overlay and `scripts/vps.sh` support are left for the Android push
-stage, together with the Firebase project; this change configures no real
-project and sends no real push.
+Push stays disabled until an operator enables it. On the VPS, from the
+checkout (`/opt/vault-chat`):
+
+1. Create `secrets/push` with owner `65532:65532` and mode `0700`.
+2. Copy the Firebase service account file to `secrets/push/fcm.json` through a
+   private channel, with owner `65532:65532` and mode `0400`. Auth runs as UID
+   65532 and refuses a file that others can read. It must belong to the same
+   Firebase project as the Android build.
+3. Copy `deployments/push.env.example` to `.env.push`, mode `0600`.
+4. Allow outbound HTTPS to `oauth2.googleapis.com` and `fcm.googleapis.com` in
+   the host or provider policy.
+5. Run `scripts/vps.sh up`.
+
+The presence of `.env.push` makes the VPS helper add
+`deployments/docker-compose.push.yml`. The overlay changes Auth only: it mounts
+the narrow directory read-only with automatic host-directory creation disabled
+and adds a dedicated bridge network for outbound traffic. No host ports are
+published. Backups include the opt-in and the encrypted key, and a restore
+repairs their ownership and modes. To pause push, leave the variable in
+`.env.push` empty. To stop for good, also delete the key from Firebase.
+
+These steps were checked against rendered Compose configuration and synthetic
+fixtures, not against a real Firebase project.
