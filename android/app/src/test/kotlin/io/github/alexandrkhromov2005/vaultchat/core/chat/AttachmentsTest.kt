@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -41,6 +42,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import retrofit2.Response
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -355,6 +358,161 @@ class AttachmentsTest {
         dao.deleteRooms(listOf(roomId))
         assertEquals(FileState.Unavailable, settled(attachments(), dto.fileId))
         assertNull(dao.fileRow(dto.fileId))
+    }
+
+    /** Requests whose downloads read the body [bodies] makes of the answer to each call, in order. */
+    private fun transferring(bodies: (call: Int, answer: ResponseBody) -> ResponseBody) = object : ChatRequests {
+        private val count = AtomicInteger()
+
+        override suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
+            server.requests.send(request)
+
+        @Suppress("UNCHECKED_CAST")
+        override suspend fun <T : Any> transfer(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
+            bodies(count.getAndIncrement(), server.requests.transfer(request) as ResponseBody) as T
+    }
+
+    /**
+     * A connection that stalls: [content] arrives, then a read blocks where
+     * cancelling a coroutine cannot reach it. Closing ends that read, as
+     * cancelling the call does, unless [closeIsIgnored]; then only [release]
+     * does, and the read reports the end of the body. Bounded, so that a
+     * failing test leaves no thread behind for long.
+     */
+    private class StalledSource(private val content: ByteArray = ByteArray(0), private val closeIsIgnored: Boolean = false) : Source {
+        val blocked = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        private var arrived = false
+
+        override fun read(sink: Buffer, byteCount: Long): Long {
+            if (!arrived && content.isNotEmpty()) {
+                arrived = true
+                sink.write(content)
+                return content.size.toLong()
+            }
+            blocked.countDown()
+            if (!release.await(10, TimeUnit.SECONDS)) throw IOException("stalled for too long")
+            if (!closeIsIgnored) throw IOException("closed")
+            return -1
+        }
+
+        override fun timeout() = Timeout.NONE
+
+        override fun close() {
+            closed.countDown()
+            if (!closeIsIgnored) release.countDown()
+        }
+
+        fun body(): ResponseBody = buffer().asResponseBody(null, content.size.toLong())
+    }
+
+    private fun await(latch: CountDownLatch, what: String, seconds: Long = 5) =
+        assertTrue(what, latch.await(seconds, TimeUnit.SECONDS))
+
+    @Test
+    fun aCancelledDownloadClosesABodyBlockedInARead() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val file = known(attachments(), dto.fileId)
+        val stalled = StalledSource()
+        val files = attachments(transferring { _, _ -> stalled.body() })
+        val watching = launch(Dispatchers.Default) { files.content(file).collect { } }
+        try {
+            await(stalled.blocked, "the download did not begin to read")
+            watching.cancelAndJoin()
+            await(stalled.closed, "the blocked body was not closed within a second", seconds = 1)
+        } finally {
+            stalled.release.countDown()
+        }
+    }
+
+    @Test
+    fun theEndOfTheSessionClosesABodyBlockedInARead() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val file = known(attachments(), dto.fileId)
+        val stalled = StalledSource()
+        val files = attachments(transferring { _, _ -> stalled.body() })
+        val watching = launch(Dispatchers.Default) { files.content(file).collect { } }
+        try {
+            await(stalled.blocked, "the download did not begin to read")
+            scope.cancel()
+            await(stalled.closed, "the blocked body was not closed within a second", seconds = 1)
+        } finally {
+            stalled.release.countDown()
+            watching.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun aDownloadStoppedMidwayIsNotStoredAndStartsAgain() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val file = known(attachments(), dto.fileId)
+        val stalled = StalledSource("he".toByteArray())
+        val files = attachments(transferring { call, answer -> if (call == 0) stalled.body() else answer })
+        val watching = launch(Dispatchers.Default) { files.content(file).collect { } }
+        try {
+            await(stalled.blocked, "the download did not begin to read")
+            watching.cancelAndJoin()
+            await(stalled.closed, "the blocked body was not closed within a second", seconds = 1)
+        } finally {
+            stalled.release.countDown()
+        }
+        assertEquals("hello", (downloaded(files, file) as ContentState.Ready).file.readText())
+        assertEquals(2, calls("content "))
+        assertEquals(listOf(FileNames.local(file.name, FileKind.TEXT)), cacheDir.resolve(dto.fileId).list().orEmpty().toList())
+    }
+
+    @Test
+    fun aCopyStoredWhileADownloadWasStoppingIsNotRequestedAgain() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val file = known(attachments(), dto.fileId)
+        // All of the content has arrived; only the read of its end is blocked.
+        val stalled = StalledSource("hello".toByteArray(), closeIsIgnored = true)
+        val files = attachments(transferring { call, answer -> if (call == 0) stalled.body() else answer })
+        val first = launch(Dispatchers.Default) { files.content(file).collect { } }
+        try {
+            await(stalled.blocked, "the download did not begin to read")
+            first.cancelAndJoin()
+            val second = async(Dispatchers.Default) { downloaded(files, file) }
+            delay(200)
+            stalled.release.countDown()
+            val state = withTimeout(5_000) { second.await() }
+            assertEquals(1, calls("content "))
+            assertEquals("hello", (state as ContentState.Ready).file.readText())
+        } finally {
+            stalled.release.countDown()
+        }
+    }
+
+    @Test
+    fun aDownloadGoesOnWhileSomeoneStillWaitsForIt() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val file = known(attachments(), dto.fileId)
+        val stalled = StalledSource("hello".toByteArray(), closeIsIgnored = true)
+        val files = attachments(transferring { _, _ -> stalled.body() })
+        val leaving = launch(Dispatchers.Default) { files.content(file).collect { } }
+        val staying = async(Dispatchers.Default) { files.content(file).first { it !is ContentState.Loading } }
+        try {
+            await(stalled.blocked, "the download did not begin to read")
+            delay(200)
+            leaving.cancelAndJoin()
+            assertEquals("still in use", 1L, stalled.closed.count)
+            stalled.release.countDown()
+            assertTrue(withTimeout(5_000) { staying.await() } is ContentState.Ready)
+        } finally {
+            stalled.release.countDown()
+            staying.cancel()
+        }
+        assertEquals(1, calls("content "))
+    }
+
+    @Test
+    fun aFinishedDownloadLeavesNothingRunning() = runBlocking {
+        val dto = server.addFile(roomId, 1, "hello".toByteArray())
+        val files = attachments()
+        assertTrue(downloaded(files, known(files, dto.fileId)) is ContentState.Ready)
+        delay(500)
+        assertEquals(0, scope.coroutineContext.job.children.count())
     }
 
     private fun failingAfter(content: Buffer): BufferedSource = object : Source {

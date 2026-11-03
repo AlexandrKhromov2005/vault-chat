@@ -225,6 +225,7 @@ that is closed keeps running, as it runs in the session's scope.
 | Media down | Uploads and sends with files repeat after the backoff; text messages are not affected |
 | Metadata or content not available (`404`) | "File unavailable"; the message is shown otherwise |
 | Download broken or larger than announced | Discarded; the file shows a retry |
+| Nobody waits for a download any more (scrolled away, sign-out) | The call is cancelled, which ends a read blocked on the network at once; what arrived is discarded. A new download of the file waits for the old one to end and looks in the cache first |
 | No app opens the file | A message says so; Save still works |
 | Access lost to a room | Its files fail like its messages; metadata goes with the room |
 | Sign-out, session end | Staged copies and the cache are deleted with the database |
@@ -258,6 +259,10 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    the concurrency.
 10. Downloads: written whole or not at all, larger or shorter than
     announced is discarded, the cache keeps to its size, sign-out deletes it.
+    A collector leaving, or the session ending, closes a body blocked in a
+    read within a second, while another collector keeps the download going;
+    closing a real call's body from another thread cancels the call; a copy
+    stored while a download was stopping is not requested again.
 11. Only PNG and JPEG with a matching signature are decoded; names are shown
     without format characters; the `FileProvider` serves only the cache and
     is not exported (checked by its configuration: FileProvider compares
