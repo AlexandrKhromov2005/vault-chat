@@ -18,6 +18,7 @@ import mockwebserver3.SocketEffect
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -254,9 +255,27 @@ class SessionManagerTest {
 
         manager.login(address, "alice@example.org", "password1")
 
-        assertEquals(SessionState.SignedIn(address, "user-1", "alice"), manager.state.value)
+        val signedIn = manager.state.value as SessionState.SignedIn
+        assertEquals(address, signedIn.server)
+        assertEquals("user-1", signedIn.userId)
+        assertEquals("alice", signedIn.username)
         assertEquals(StoredSession(address.toString(), "user-1", "alice", "refresh-0"), store.session)
         assertEquals("access-0", manager.accessToken())
+    }
+
+    /** A collector compares by equality: one busy across both steps must still hear of the new login. */
+    @Test
+    fun aNewLoginOfTheSameUserIsANewState() = runBlocking {
+        manager.restore()
+        handlers["/api/v1/auth/login"] = { tokenPair(0) }
+        handlers["/api/v1/auth/me"] = { user() }
+        manager.login(address, "alice@example.org", "password1")
+        val first = manager.state.value
+
+        manager.logout()
+        manager.login(address, "alice@example.org", "password1")
+
+        assertNotEquals(first, manager.state.value)
     }
 
     @Test

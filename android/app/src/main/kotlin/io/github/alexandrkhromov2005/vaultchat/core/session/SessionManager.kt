@@ -34,7 +34,12 @@ sealed interface SessionState {
 
     data class SignedOut(val reason: Reason) : SessionState
 
-    data class SignedIn(val server: ServerAddress, val userId: String, val username: String) : SessionState
+    /**
+     * Equal only to itself: two logins of a user are different sessions, and a
+     * StateFlow compares by equality, so a collector busy during a sign-out and
+     * a new login of the same user would otherwise never hear of the new one.
+     */
+    class SignedIn(val server: ServerAddress, val userId: String, val username: String) : SessionState
 
     enum class Reason { NONE, LOGOUT, EXPIRED }
 }
