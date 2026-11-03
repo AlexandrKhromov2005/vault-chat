@@ -86,7 +86,7 @@ class ConversationDraftTest {
     @After
     fun tearDown() {
         store.clear()
-        chat.end(wipe = false, background = CoroutineScope(Dispatchers.IO))
+        chat.end(background = CoroutineScope(Dispatchers.IO))
         database.close()
     }
 
