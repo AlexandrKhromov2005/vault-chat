@@ -4,15 +4,30 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
+// DefaultRefreshRetryWindow is how long a rotated refresh token can still be
+// retried. It covers a refresh response lost on a mobile network and a client
+// retrying on timeout, and is short so that it barely helps a token thief.
+const DefaultRefreshRetryWindow = 30 * time.Second
+
+// WithRefreshRetryWindow sets how long a rotated refresh token can be retried
+// (see RefreshToken). A window of zero disables retries.
+func WithRefreshRetryWindow(window time.Duration) Option {
+	return func(s *Service) { s.refreshRetryWindow = window }
+}
+
 // RefreshToken exchanges a refresh token for a new token pair. The session of
-// the presented token is revoked and replaced (rotation). Presenting a token
-// whose session was already rotated indicates that the token leaked, so every
-// session of its owner is revoked.
+// the presented token is revoked and replaced (rotation). A client that lost
+// the response may retry with the same token for the retry window and gets a
+// pair for the session the token was rotated into, as long as that session
+// has not been used to refresh in turn. Any other use of a rotated token
+// indicates that the token leaked, so every session of its owner is revoked.
 func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	claims, err := s.parseToken(ctx, refreshToken, jwt.RefreshToken)
 	if err != nil {
@@ -37,11 +52,13 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
-	err = s.sessions.Rotate(ctx, claims.ID, next)
+	active, err := s.sessions.Rotate(ctx, claims.ID, next, s.refreshRetryWindow)
 	switch {
-	case err == nil:
+	case err == nil && active.ID == next.ID:
 		s.logger.InfoContext(ctx, "session refreshed", "user_id", user.ID)
 		return pair, nil
+	case err == nil:
+		return s.reissueTokenPair(ctx, user, active)
 	case errors.Is(err, repository.ErrNotFound), errors.Is(err, repository.ErrSessionRevoked):
 		return nil, ErrInvalidToken
 	case errors.Is(err, repository.ErrSessionReused):
@@ -49,6 +66,22 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 	default:
 		return nil, fmt.Errorf("refresh: failed to rotate session: %w", err)
 	}
+}
+
+// reissueTokenPair answers a retried refresh with a new pair for the session
+// that the retried token was already rotated into. No session is created, so
+// the login stays a single chain of sessions.
+func (s *Service) reissueTokenPair(ctx context.Context, user *domain.User, session *domain.Session) (*TokenPair, error) {
+	pair, err := s.issueTokens(user, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
+	}
+	// The session, not the token, bounds the lifetime of the login.
+	if session.ExpiresAt.Before(pair.RefreshExpiresAt) {
+		pair.RefreshExpiresAt = session.ExpiresAt
+	}
+	s.logger.InfoContext(ctx, "session refresh retried", "user_id", user.ID)
+	return pair, nil
 }
 
 // handleTokenReuse revokes every session of userID after an already rotated

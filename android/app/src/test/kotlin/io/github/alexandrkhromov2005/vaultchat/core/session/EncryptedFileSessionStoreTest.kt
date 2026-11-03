@@ -106,6 +106,70 @@ class EncryptedFileSessionStoreTest {
         assertNull(store.load())
     }
 
+    @Test
+    fun aClearThatLeavesTheSessionReadableFails() = runBlocking {
+        val (store, _, cipher) = newStuckStore()
+        store.save(session)
+        cipher.failDestroy = keystoreFailure
+
+        assertTrue("clear reported success", runCatching { store.clear() }.isFailure)
+
+        assertEquals(session, store.load())
+    }
+
+    @Test
+    fun aClearSucceedsOnceTheKeyIsGoneThoughTheFileStays() = runBlocking {
+        val (store, file, _) = newStuckStore()
+        store.save(session)
+
+        store.clear()
+
+        assertTrue(file.exists())
+        assertNull(store.load())
+    }
+
+    @Test
+    fun aClearSucceedsOnceTheFileIsGoneThoughTheKeyStays() = runBlocking {
+        val (store, file, cipher) = newStore()
+        store.save(session)
+        cipher.failDestroy = keystoreFailure
+
+        store.clear()
+
+        assertFalse(file.exists())
+        assertNull(store.load())
+    }
+
+    @Test
+    fun aClearFailsWhileAnUnfinishedSaveStaysReadable() = runBlocking {
+        val (store, file, cipher) = newStore()
+        store.save(session)
+        // A directory with content cannot be deleted on any platform.
+        val temporary = File(file.parentFile, file.name + ".tmp").apply { mkdir() }
+        File(temporary, "content").createNewFile()
+        cipher.failDestroy = keystoreFailure
+
+        assertTrue("clear reported success", runCatching { store.clear() }.isFailure)
+    }
+
+    @Test
+    fun aFileThatCanNeverBeReadIsNoSessionEvenIfItCannotBeRemoved() = runBlocking {
+        val (store, file, cipher) = newStuckStore()
+        store.save(session)
+        val bytes = file.readBytes()
+        bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 1).toByte()
+        file.writeBytes(bytes)
+        cipher.failDestroy = keystoreFailure
+
+        assertNull(store.load())
+    }
+
+    private fun newStuckStore(): Triple<EncryptedFileSessionStore, File, JvmCipher> {
+        val file = UndeletableFile(File(folder.newFolder(), "session.bin").path)
+        val cipher = JvmCipher()
+        return Triple(EncryptedFileSessionStore(file, cipher), file, cipher)
+    }
+
     private fun newStore(): Triple<EncryptedFileSessionStore, File, JvmCipher> {
         val file = File(folder.newFolder(), "session.bin")
         val cipher = JvmCipher()
@@ -114,15 +178,26 @@ class EncryptedFileSessionStoreTest {
 }
 
 /**
+ * A real file that refuses to be deleted, as in a read-only directory. Windows
+ * ignores the permissions of directories, so a test cannot rely on them.
+ */
+internal class UndeletableFile(path: String) : File(path) {
+    override fun delete(): Boolean = false
+}
+
+internal val keystoreFailure get() = java.security.ProviderException("keystore unavailable")
+
+/**
  * AES-GCM in the JDK's own provider, standing in for the Android Keystore.
  * The provider is named because Robolectric tests in the same JVM register
  * providers of their own.
  */
-private class JvmCipher : SessionCipher {
+internal class JvmCipher : SessionCipher {
     private var key: SecretKey = newKey()
     var destroyed = false
     var failure: Exception? = null
     var failEncryptions = 0
+    var failDestroy: Exception? = null
 
     private fun newKey(): SecretKey = KeyGenerator.getInstance("AES", PROVIDER).apply { init(256) }.generateKey()
 
@@ -147,6 +222,7 @@ private class JvmCipher : SessionCipher {
     }
 
     override fun destroyKey() {
+        failDestroy?.let { throw it }
         destroyed = true
         key = newKey()
     }

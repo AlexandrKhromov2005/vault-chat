@@ -18,6 +18,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -198,18 +199,15 @@ class ChatSession(
     }
 
     /**
-     * Stops the session. With [wipe], its data is deleted from the database
-     * and its files at once; the database file itself goes when the database
+     * Stops the session and then runs [wipe] in the background, which may delete
+     * its data with [clearData]; the database file itself goes when the database
      * is closed.
      */
-    fun end(wipe: Boolean, background: CoroutineScope) {
+    fun end(background: CoroutineScope, io: CoroutineDispatcher = Dispatchers.IO, wipe: (ChatSession) -> Unit = {}) {
         if (!ended.compareAndSet(false, true)) return
         scope.cancel()
-        background.launch(Dispatchers.IO) {
-            if (wipe) {
-                runCatching { database.clearAllTables() }
-                runCatching { files.wipe() }
-            }
+        background.launch(io) {
+            runCatching { wipe(this@ChatSession) }
             if (retained.get() == 0) release()
         }
     }
@@ -219,6 +217,12 @@ class ChatSession(
     private fun release() {
         if (!released.compareAndSet(false, true)) return
         onReleased(this)
+    }
+
+    /** Deletes the session's data from the database and its files. */
+    internal fun clearData() {
+        runCatching { database.clearAllTables() }
+        runCatching { files.wipe() }
     }
 
     /** Closes the database; only after [end] and once nothing retains it. */
