@@ -71,7 +71,7 @@ class MembersViewModelTest {
 
     @After
     fun tearDown() {
-        chat.end(wipe = false, background = CoroutineScope(Dispatchers.IO))
+        chat.end(background = CoroutineScope(Dispatchers.IO))
         database.close()
     }
 
