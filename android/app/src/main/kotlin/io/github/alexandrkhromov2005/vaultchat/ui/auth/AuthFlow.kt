@@ -3,7 +3,6 @@ package io.github.alexandrkhromov2005.vaultchat.ui.auth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.github.alexandrkhromov2005.vaultchat.AppContainer
@@ -25,14 +24,7 @@ fun AuthFlow(container: AppContainer, reason: SessionState.Reason) {
         AuthViewModel(container.session, container.settings, container.allowLocalCleartext, BuildConfig.DEFAULT_SERVER)
     }
     val navController = rememberNavController()
-    NavHost(
-        navController,
-        startDestination = LoginRoute,
-        enterTransition = ScreenTransitions.enter,
-        exitTransition = ScreenTransitions.exit,
-        popEnterTransition = ScreenTransitions.popEnter,
-        popExitTransition = ScreenTransitions.popExit,
-    ) {
+    ScreenTransitions.Host(navController, startDestination = LoginRoute) {
         composable<LoginRoute> {
             LoginScreen(
                 model = model,
