@@ -350,9 +350,13 @@ paths:
     post:
       summary: Exchange a refresh token for a new token pair
       description: |
-        The presented refresh token is rotated out and stops working. Presenting
-        an already rotated token is treated as theft: every session of the user
-        is revoked and the request fails with 401.
+        The presented refresh token is rotated out and stops working. A client
+        that did not receive the response may retry with the same token for 30
+        seconds and receives a new pair for the same login, as long as the
+        token returned by the lost response has not been used to refresh.
+        Any other use of an already rotated token is treated as theft: every
+        session of the user is revoked and the request fails with 401. Clients
+        must still send one refresh at a time.
       tags: [auth]
       requestBody:
         required: true
