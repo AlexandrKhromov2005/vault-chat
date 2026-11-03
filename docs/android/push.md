@@ -14,9 +14,11 @@ stores one device token per login.
   messages up to the room's last read one are never shown, and the history
   of a room's first load counts as read. Opening a room removes its
   notification; tapping a notification opens the room.
-- **Privacy.** On the lock screen a notification says only "new message";
-  the text needs the phone unlocked (`VISIBILITY_PRIVATE` with a public
-  version). Text and names come through the API, never through FCM.
+- **Privacy.** A notification is `VISIBILITY_PRIVATE` with a public version
+  that says only "new message", so the lock screen follows the user's system
+  choice: with "hide sensitive content" it shows that public version, and with
+  "show all content", the default on many phones, it shows the sender and the
+  text. Text and names come through the API, never through FCM.
 - **Background sync.** `SyncWorker` runs a sync of the current session and
   then `Notifier.check()`: at once (expedited) when a push arrives, and every
   15 minutes with a network as a fallback for lost pushes and for builds

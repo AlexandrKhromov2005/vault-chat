@@ -15,8 +15,9 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 
 /**
  * The app's notifications (docs/android/push.md): one per room with its new
- * messages. On the lock screen only "new message" shows; the text needs the
- * phone unlocked.
+ * messages. What the lock screen shows follows the user's system setting: the
+ * public version says only "new message", and it is used only when the user
+ * chose to hide sensitive content there.
  */
 object Notifications {
     const val MESSAGES = "messages"
