@@ -221,6 +221,7 @@ that is closed keeps running, as it runs in the session's scope.
 | Connection lost during an upload | Repeated after the backoff from the first byte |
 | Connection lost after the whole file was sent | The message fails (`upload`); Retry uploads the file again; the first copy may stay on the server unused |
 | Process killed during an upload | The next run repeats it, or fails it if the closing boundary had left |
+| The flag cannot be written (disk full) | The call fails like a broken connection, on OkHttp's thread too, and the closing boundary does not leave; the message stays queued and repeats after the backoff |
 | A picked file is too large, empty or of another type | Refused when picked, with a message; nothing is queued |
 | The server rejects a file | The message fails (`file`); Delete or Retry |
 | Media down | Uploads and sends with files repeat after the backoff; text messages are not affected |
@@ -278,7 +279,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     draft are deleted, while files of a message being queued stay.
 14. The upload body: one part named `file` with a quoted name, the mark set
     after everything before the closing boundary has left and before it,
-    not set when the body breaks off earlier, one-shot.
+    not set when the body breaks off earlier, one-shot. A mark that throws
+    fails an enqueued call as an ordinary error; nothing reaches the thread's
+    uncaught exception handler, and the message stays queued.
 
 Not covered by automated tests: the pickers, the viewer, other apps opening
 files, decoding real photos (EXIF rotation), checked by hand on a device.

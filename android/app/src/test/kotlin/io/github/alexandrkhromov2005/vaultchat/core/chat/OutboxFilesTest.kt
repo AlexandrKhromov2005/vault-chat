@@ -224,6 +224,26 @@ class OutboxFilesTest {
         assertEquals(listOf("never.txt"), server.uploads().map { it.filename })
     }
 
+    @Test
+    fun aFlagThatCannotBeWrittenKeepsTheMessageQueued() = runBlocking {
+        val roomId = loadedChannel(1)
+        // As a full disk fails the write, only for the flag being set.
+        val db = database.openHelper.writableDatabase
+        db.execSQL(
+            "CREATE TRIGGER disk_full BEFORE UPDATE OF maybe_stored ON outgoing_files WHEN NEW.maybe_stored = 1 " +
+                "BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END",
+        )
+        outbox().send(roomId, "stays", listOf(text("a.txt")))
+        eventually { uploads() >= 2 }
+        assertEquals(OutgoingEntity.QUEUED, row(roomId).state)
+        assertEquals(0, server.uploads().size)
+
+        db.execSQL("DROP TRIGGER disk_full")
+        eventually { dao.storedOutgoing(roomId).isEmpty() }
+        assertEquals(1, server.uploads().size)
+        assertEquals("stays", server.sent(roomId).single().text)
+    }
+
     private suspend fun answeredWith(status: Int): OutgoingEntity? {
         val roomId = loadedChannel(status)
         server.intercept = { if (it == "upload $roomId") status else null }
