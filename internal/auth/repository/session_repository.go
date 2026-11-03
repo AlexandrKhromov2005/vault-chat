@@ -82,22 +82,34 @@ func (r *SessionRepository) sessionUserCurrent(ctx context.Context, tx pgx.Tx, s
 }
 
 // Rotate atomically revokes the active session currentID of next.UserID and
-// stores next in its place, in the same family. It returns ErrSessionReused if
-// currentID was already rotated, ErrSessionRevoked if it was revoked otherwise,
-// and ErrNotFound if the user has no such session or it has expired.
-func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *domain.Session) error {
-	return r.withUserLock(ctx, next.UserID, func(tx pgx.Tx) error {
+// stores next in its place, in the same family, and returns next.
+//
+// A retry of a rotation that the client did not see is told apart from token
+// reuse: if currentID was rotated less than retryWindow ago into a session
+// that is still active and was never rotated itself, nothing changes and that
+// session is returned instead, so the caller can issue its tokens again. Only
+// the latest replaced session qualifies, so a token is never accepted after
+// the client has moved on with its successor.
+//
+// Otherwise Rotate returns ErrSessionReused if currentID was already rotated,
+// ErrSessionRevoked if it was revoked otherwise, and ErrNotFound if the user
+// has no such session or it has expired.
+func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *domain.Session, retryWindow time.Duration) (*domain.Session, error) {
+	active := next
+	err := r.withUserLock(ctx, next.UserID, func(tx pgx.Tx) error {
 		if err := r.sessionUserCurrent(ctx, tx, next); err != nil {
 			return err
 		}
-		const revoke = `UPDATE sessions SET revoked_at = now(), replaced_by = $3::uuid
+		// Waiting for the user lock must not consume the new retry window.
+		const revoke = `UPDATE sessions SET revoked_at = clock_timestamp(), replaced_by = $3::uuid
 			WHERE id = $1::uuid AND user_id = $2::uuid AND credential_version=$4
 			AND revoked_at IS NULL AND expires_at > clock_timestamp()
 			RETURNING family_id`
 		var familyID string
 		err := tx.QueryRow(ctx, revoke, currentID, next.UserID, next.ID, next.CredentialVersion).Scan(&familyID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return inactiveSessionError(ctx, tx, currentID, next.UserID, next.CredentialVersion)
+			active, err = retriedRotation(ctx, tx, currentID, next.UserID, retryWindow, next.CredentialVersion)
+			return err
 		}
 		if err != nil {
 			return fmt.Errorf("failed to revoke session: %w", err)
@@ -110,6 +122,10 @@ func (r *SessionRepository) Rotate(ctx context.Context, currentID string, next *
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return active, nil
 }
 
 // RevokeFamily revokes the session sessionID of userID together with every
@@ -175,30 +191,48 @@ func (r *SessionRepository) withUserLock(ctx context.Context, userID string, fn 
 	return nil
 }
 
-// inactiveSessionError explains why the session id of userID could not be
-// rotated.
-func inactiveSessionError(ctx context.Context, tx pgx.Tx, id, userID string, version int64) error {
-	var revoked, rotated bool
-	var storedVersion int64
-	err := tx.QueryRow(ctx,
-		`SELECT revoked_at IS NOT NULL, replaced_by IS NOT NULL, credential_version FROM sessions
-		WHERE id = $1::uuid AND user_id = $2::uuid`,
-		id, userID).Scan(&revoked, &rotated, &storedVersion)
+// retriedRotation returns the session that the inactive session id of userID
+// was rotated into less than retryWindow ago, if that session is still active.
+// Otherwise it explains why id could not be rotated.
+func retriedRotation(ctx context.Context, tx pgx.Tx, id, userID string, retryWindow time.Duration, version int64) (*domain.Session, error) {
+	// A rotated session keeps the time of its rotation in revoked_at: later
+	// revocations only touch sessions that are still active. A successor
+	// that is not revoked has not been rotated either.
+	// now() is fixed at transaction start, before a potentially long lock wait;
+	// evaluate both deadlines against the wall clock after taking the lock.
+	const query = `SELECT current.revoked_at IS NOT NULL, current.replaced_by IS NOT NULL, current.credential_version,
+			successor.id::text, successor.expires_at
+		FROM sessions current
+		LEFT JOIN sessions successor ON successor.id = current.replaced_by
+			AND successor.user_id = current.user_id AND successor.credential_version=$4
+			AND current.revoked_at > clock_timestamp() - make_interval(secs => $3)
+			AND successor.revoked_at IS NULL AND successor.expires_at > clock_timestamp()
+		WHERE current.id = $1::uuid AND current.user_id = $2::uuid`
+	var (
+		revoked, rotated bool
+		storedVersion    int64
+		successorID      *string
+		successorExpiry  *time.Time
+	)
+	err := tx.QueryRow(ctx, query, id, userID, retryWindow.Seconds(), version).
+		Scan(&revoked, &rotated, &storedVersion, &successorID, &successorExpiry)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("failed to load session: %w", err)
+		return nil, fmt.Errorf("failed to load session: %w", err)
 	}
 	if storedVersion != version {
-		return ErrSessionRevoked
+		return nil, ErrSessionRevoked
 	}
 	switch {
+	case successorID != nil:
+		return &domain.Session{ID: *successorID, UserID: userID, ExpiresAt: *successorExpiry, CredentialVersion: version}, nil
 	case rotated:
-		return ErrSessionReused
+		return nil, ErrSessionReused
 	case revoked:
-		return ErrSessionRevoked
+		return nil, ErrSessionRevoked
 	default:
-		return ErrNotFound // exists, not revoked, therefore expired
+		return nil, ErrNotFound // exists, not revoked, therefore expired
 	}
 }
