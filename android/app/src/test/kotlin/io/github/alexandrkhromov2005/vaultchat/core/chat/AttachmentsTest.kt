@@ -507,6 +507,66 @@ class AttachmentsTest {
     }
 
     @Test
+    fun atMostTwoBodiesAreReadAtOnce() = runBlocking {
+        val entities = attachments().let { first -> (1..6).map { known(first, server.addFile(roomId, it, "file $it".toByteArray()).fileId) } }
+        val bodies = List(6) { StalledSource() }
+        val files = attachments(transferring { call, _ -> bodies[call].body() })
+        val watching = entities.map { file -> launch(Dispatchers.Default) { files.content(file).collect { } } }
+        try {
+            await(bodies[0].blocked, "the first download did not begin to read")
+            await(bodies[1].blocked, "the second download did not begin to read")
+            delay(500)
+            assertEquals(Attachments.CONCURRENT_LOADS, calls("content "))
+            // One leaving makes room for the next.
+            val reading = server.calls().first { it.startsWith("content ") }.removePrefix("content ")
+            watching[entities.indexOfFirst { it.fileId == reading }].cancelAndJoin()
+            withTimeout(5_000) { while (calls("content ") < Attachments.CONCURRENT_LOADS + 1) delay(10) }
+        } finally {
+            bodies.forEach { it.release.countDown() }
+            watching.forEach { it.cancel() }
+        }
+    }
+
+    @Test
+    fun downloadsDoNotHoldUpMetadata() = runBlocking {
+        val entities = attachments().let { first -> (1..2).map { known(first, server.addFile(roomId, it, "file $it".toByteArray()).fileId) } }
+        val bodies = List(2) { StalledSource() }
+        val files = attachments(transferring { call, _ -> bodies[call].body() })
+        val watching = entities.map { file -> launch(Dispatchers.Default) { files.content(file).collect { } } }
+        try {
+            bodies.forEach { await(it.blocked, "a download did not begin to read") }
+            val next = server.addFile(roomId, 3, "next".toByteArray())
+            assertEquals(next.filename, known(files, next.fileId).name)
+        } finally {
+            bodies.forEach { it.release.countDown() }
+            watching.forEach { it.cancel() }
+        }
+    }
+
+    @Test
+    fun aFileStoredWhileItsDownloadWaitedForItsTurnIsNotRequested() = runBlocking {
+        val entities = attachments().let { first -> (1..3).map { known(first, server.addFile(roomId, it, "file $it".toByteArray()).fileId) } }
+        val bodies = List(3) { StalledSource() }
+        val files = attachments(transferring { call, _ -> bodies[call].body() })
+        val watching = entities.map { file -> async(Dispatchers.Default) { files.content(file).first { it !is ContentState.Loading } } }
+        try {
+            await(bodies[0].blocked, "the first download did not begin to read")
+            await(bodies[1].blocked, "the second download did not begin to read")
+            delay(200)
+            val waiting = entities.indexOfFirst { file -> server.calls().none { it == "content ${file.fileId}" } }
+            val file = entities[waiting]
+            // As an upload's copy moving into the cache does.
+            AttachmentCache(cacheDir).put(file.fileId, FileNames.local(file.name, FileKind.TEXT)) { it.writeText("file ${waiting + 1}") }
+            watching[(waiting + 1) % entities.size].cancel()
+            assertTrue(withTimeout(5_000) { watching[waiting].await() } is ContentState.Ready)
+            assertEquals(Attachments.CONCURRENT_LOADS, calls("content "))
+        } finally {
+            bodies.forEach { it.release.countDown() }
+            watching.forEach { it.cancel() }
+        }
+    }
+
+    @Test
     fun aFinishedDownloadLeavesNothingRunning() = runBlocking {
         val dto = server.addFile(roomId, 1, "hello".toByteArray())
         val files = attachments()

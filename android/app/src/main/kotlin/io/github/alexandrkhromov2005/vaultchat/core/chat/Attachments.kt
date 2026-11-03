@@ -97,7 +97,10 @@ class Attachments(
     private val scope: CoroutineScope,
     private val budget: RequestBudget,
 ) : FileSource {
-    private val slots = Semaphore(CONCURRENT_LOADS)
+    // Apart, since a download holds its slot until its body is read, which
+    // may take minutes; a message's metadata should not wait for that.
+    private val metadataSlots = Semaphore(CONCURRENT_LOADS)
+    private val downloadSlots = Semaphore(CONCURRENT_LOADS)
     private val metadataLoads = ConcurrentHashMap<String, Deferred<FileState?>>()
 
     // Running downloads by file ID, guarded by itself. One stays here until it
@@ -199,7 +202,7 @@ class Attachments(
 
     private suspend fun fetchMetadata(roomId: String, fileId: String): FileState? {
         val answer = try {
-            request { requests.send { file(it, fileId) } }
+            request(metadataSlots) { requests.send { file(it, fileId) } }
         } catch (e: ApiException) {
             return if (failure(fileId, e)) FileState.Unavailable else FileState.Failed(e)
         }
@@ -253,12 +256,14 @@ class Attachments(
     }
 
     private suspend fun fetch(file: FileEntity, progress: MutableStateFlow<ContentState>): ContentState {
-        cache.get(file.fileId, localName(file), file.size)?.let { return ContentState.Ready(it) }
         return try {
-            val body = request { requests.transfer { fileContent(it, file.fileId) } }
-            val stored = store(file, body, progress)
-            cache.trim(keep = file.fileId)
-            ContentState.Ready(stored)
+            // Looked up once it is this download's turn: the file may have
+            // been stored meanwhile, by the one before it or by an upload.
+            request<ContentState>(downloadSlots, stored = { cache.get(file.fileId, localName(file), file.size)?.let { ContentState.Ready(it) } }) {
+                val stored = store(file, requests.transfer { fileContent(it, file.fileId) }, progress)
+                cache.trim(keep = file.fileId)
+                ContentState.Ready(stored)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
@@ -304,10 +309,14 @@ class Attachments(
         }
     }
 
-    /** Runs a request within the budget and the `429` pause, at most [CONCURRENT_LOADS] at a time. */
-    private suspend fun <T> request(block: suspend () -> T): T {
+    /**
+     * Runs a request within the budget and the `429` pause, at most
+     * [CONCURRENT_LOADS] at a time, unless [stored] already has the answer.
+     */
+    private suspend fun <T> request(slots: Semaphore, stored: () -> T? = { null }, block: suspend () -> T): T {
         while (true) {
             val answer = slots.withPermit {
+                stored()?.let { return it }
                 while (gate.remaining() > 0) delay(gate.remaining())
                 budget.takeWithinDebt()
                 try {

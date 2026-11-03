@@ -203,7 +203,8 @@ that is closed keeps running, as it runs in the session's scope.
 | Budget | Value | Why |
 |---|---|---|
 | Gateway rate limit per user and IP | 120/min, burst 30, shared | File requests (metadata, downloads, uploads) keep to their own 30/min, burst 5, next to sync's 60/min and sending's 30/min: 120 together. A file shown on screen goes at once while the budget is in debt of less than its burst, so that a screen of pictures loads without waiting; uploads wait for a token; a tap takes one at once |
-| Concurrent metadata reads and downloads | 2 | Pictures of one screen arrive in parallel without crowding out other requests |
+| Concurrent metadata reads | 2 | Bubbles of one screen arrive in parallel without crowding out other requests |
+| Concurrent downloads | 2, each until its body is read | Pictures of one screen arrive in parallel; a slow download never holds up metadata |
 | Concurrent uploads | 1 per session | The Gateway allows 2 per user; one is left for another device |
 | File size | 10 MiB | Server limit, checked before queuing and while downloading |
 | Files per message | 5 | Server limit |
@@ -262,7 +263,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     A collector leaving, or the session ending, closes a body blocked in a
     read within a second, while another collector keeps the download going;
     closing a real call's body from another thread cancels the call; a copy
-    stored while a download was stopping is not requested again.
+    stored while a download was stopping or waiting for its turn is not
+    requested again. At most 2 bodies are read at once, whatever metadata
+    needs meanwhile.
 11. Only PNG and JPEG with a matching signature are decoded; names are shown
     without format characters; the `FileProvider` serves only the cache and
     is not exported (checked by its configuration: FileProvider compares
