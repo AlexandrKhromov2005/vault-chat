@@ -66,10 +66,11 @@ interface FileSource {
     fun retry(fileId: String? = null)
 
     /**
-     * What this process already knows of [fileId], to show at once instead
-     * of a frame of loading while [metadata] reads the database.
+     * What this process already knows of [fileId] as a file of [roomId], to
+     * show at once instead of a frame of loading while [metadata] reads the
+     * database.
      */
-    fun known(fileId: String): FileState.Known? = null
+    fun known(roomId: String, fileId: String): FileState.Known? = null
 
     /** Like [known], for the content of [file]: its copy, if one was ready. */
     fun ready(file: FileEntity): ContentState.Ready? = null
@@ -122,6 +123,12 @@ class Attachments(
     /** The metadata of [fileId], a file of a message in [roomId], loaded if it is not stored. */
     override fun metadata(roomId: String, fileId: String): Flow<FileState> = dao.file(fileId).transformLatest { row ->
         if (row != null) {
+            // A file belongs to one room for good: a message of another that
+            // lists it does not show its name or content.
+            if (row.roomId != roomId) {
+                emit(FileState.Unavailable)
+                return@transformLatest
+            }
             knownFiles[fileId] = row
             emit(FileState.Known(row))
             return@transformLatest
@@ -164,7 +171,8 @@ class Attachments(
 
     override fun staged(name: String): File = staging.file(name)
 
-    override fun known(fileId: String): FileState.Known? = knownFiles[fileId]?.let { FileState.Known(it) }
+    override fun known(roomId: String, fileId: String): FileState.Known? =
+        knownFiles[fileId]?.takeIf { it.roomId == roomId }?.let { FileState.Known(it) }
 
     override fun ready(file: FileEntity): ContentState.Ready? =
         readyFiles[file.fileId]?.let { ContentState.Ready(it) }

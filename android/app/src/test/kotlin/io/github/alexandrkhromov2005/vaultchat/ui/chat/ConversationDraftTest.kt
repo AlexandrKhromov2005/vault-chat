@@ -15,6 +15,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.FileKind
 import io.github.alexandrkhromov2005.vaultchat.core.chat.SessionFiles
 import io.github.alexandrkhromov2005.vaultchat.core.chat.Staging
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
 import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
@@ -111,6 +112,14 @@ class ConversationDraftTest {
     }
 
     private fun staged() = staging.list().orEmpty().toSet()
+
+    @Test
+    fun filesStoredForAnotherRoomAreNotReadWithAMessage() = runBlocking {
+        val fileId = server.id(5, 1)
+        database.dao().storeFile(FileEntity(fileId, roomId, me, "a.txt", "text/plain", 1, 0))
+        assertEquals(setOf(fileId), chat.storedFiles(roomId, listOf(fileId)).keys)
+        assertEquals(emptySet<String>(), chat.storedFiles(server.id(1, 2), listOf(fileId)).keys)
+    }
 
     @Test
     fun pickedFilesAreCheckedAndAtMostFiveAreKept() {

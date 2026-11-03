@@ -123,6 +123,21 @@ class AttachmentsTest {
     }
 
     @Test
+    fun aFileStoredForAnotherRoomIsNotShownInThisOne() = runBlocking {
+        val dto = server.addFile(roomId, 1, "of the first room".toByteArray())
+        val files = attachments()
+        known(files, dto.fileId)
+        assertEquals(FileState.Known(dao.fileRow(dto.fileId)!!), files.known(roomId, dto.fileId))
+
+        // A message of another room lists the same file.
+        val other = server.addChannel(2)
+        assertEquals(null, files.known(other, dto.fileId))
+        assertEquals(FileState.Unavailable, withTimeout(5_000) { files.metadata(other, dto.fileId).first { it != FileState.Loading } })
+        // Nothing to ask the server: files never change their room.
+        assertEquals(1, calls("file "))
+    }
+
+    @Test
     fun anUnavailableFileIsNotAskedForAgainUntilTheUserTaps() = runBlocking {
         val files = attachments()
         val missing = server.id(5, 9)

@@ -182,9 +182,9 @@ class ChatSession(
         pagingSourceFactory = { dao.messages(roomId) },
     ).flow
 
-    /** The stored metadata of those of [fileIds] that have it. */
-    suspend fun storedFiles(fileIds: List<String>): Map<String, FileEntity> =
-        fileIds.mapNotNull { dao.fileRow(it) }.associateBy { it.fileId }
+    /** The stored metadata of those of [fileIds], listed by a message of [roomId], that have it as files of that room. */
+    suspend fun storedFiles(roomId: String, fileIds: List<String>): Map<String, FileEntity> =
+        fileIds.mapNotNull { dao.fileRow(it)?.takeIf { row -> row.roomId == roomId } }.associateBy { it.fileId }
 
     /**
      * Keeps the database open until the returned handle is closed. Screens

@@ -66,7 +66,9 @@ only in the documentation:
   and the staged size; metadata must name the requested file and the
   message's room, a size of 1 byte to 10 MiB and a name of at most 255
   bytes. Content must not exceed the metadata's size, and must have exactly
-  it. Anything else is an invalid response and is not stored.
+  it. Anything else is an invalid response and is not stored. A file stored
+  for one room shows as unavailable in a message of another that lists it,
+  without its name or content.
 - **File names and types from the server** are untrusted. Names are shown
   as plain text with bidirectional and other format characters removed,
   and never used as paths: a cached file is stored under its file ID, in a
@@ -281,7 +283,8 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    server's rules; orphaned copies are swept when the session starts.
 9. Metadata: stored once, a file of another room or a bogus size is
    refused, `404` is remembered, loads are shared and keep to the budget and
-   the concurrency.
+   the concurrency; a stored file asked for by a message of another room is
+   not shown there, by any of the ways it is read.
 10. Downloads: written whole or not at all, larger or shorter than
     announced is discarded, the cache keeps to its size, sign-out deletes it.
     A collector leaving, or the session ending, closes a body blocked in a

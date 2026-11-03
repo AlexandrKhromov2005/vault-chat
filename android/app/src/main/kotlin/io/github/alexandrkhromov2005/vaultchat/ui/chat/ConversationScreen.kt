@@ -177,7 +177,7 @@ class ConversationViewModel(
 
     val rows: Flow<PagingData<ChatRow>> = chat.messages(roomId)
         .map { page ->
-            page.map { ChatRow.Message(it, chat.storedFiles(it.message.attachmentIds)) as ChatRow }
+            page.map { ChatRow.Message(it, chat.storedFiles(roomId, it.message.attachmentIds)) as ChatRow }
                 .insertSeparators { newer, older ->
                     // A heading above the oldest message of each day; the list is
                     // newest first, so it goes after that message.
