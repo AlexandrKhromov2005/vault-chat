@@ -46,12 +46,22 @@ key must never change (see below).
    sha256sum app/build/outputs/apk/release/app-release.apk
    ```
 
-4. **Publish.** Tag the commit and attach the APK; put both SHA-256 values
-   (APK and signing certificate) in the notes:
+4. **Publish.** Check that the tag says what the APK says, tag the commit and
+   attach the APK. The app offers a release by its tag, so a tag that differs
+   from `versionName` offers the wrong version, or the installed one forever.
+   Put both SHA-256 values (APK and signing certificate) in the notes.
+   `--verify-tag` refuses to go on without the pushed tag, instead of creating
+   one from the default branch. The chain stops at the first step that fails:
 
    ```sh
-   gh release create android-v0.1.0 app/build/outputs/apk/release/app-release.apk \
-     --title "Vault Chat for Android 0.1.0" --notes "APK SHA-256: … Certificate SHA-256: …"
+   tag=android-v0.1.0
+   apk=app/build/outputs/apk/release/app-release.apk
+   version=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+   test "$tag" = "android-v$version" \
+     && aapt2 dump badging "$apk" | grep -q "versionName='$version'" \
+     && git tag "$tag" && git push origin "$tag" \
+     && gh release create "$tag" "$apk" --verify-tag \
+       --title "Vault Chat for Android $version" --notes "APK SHA-256: … Certificate SHA-256: …"
    ```
 
 ## Not done yet
