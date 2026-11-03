@@ -43,8 +43,9 @@ An earlier caller deadline takes precedence. Local development RPC supports the 
   both participants, including the caller, in `participant_ids` in UUID order.
   Channels leave it empty; their roster is not part of room metadata.
 - A channel has one owner, enrolled atomically during creation. Names contain
-  1–80 Unicode code points, without control characters or surrounding whitespace;
-  they need not be unique. The owner can add members idempotently. Adding an
+  1–80 Unicode code points and at most 320 bytes, without control characters or
+  surrounding whitespace; they need not be unique. The owner can add members
+  idempotently. Adding an
   existing owner does not change ownership. Membership changes are described in
   [Members](#members).
 - Both public and private channels currently require invitation. `private=false`

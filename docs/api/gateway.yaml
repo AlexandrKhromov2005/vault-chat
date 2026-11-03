@@ -58,7 +58,7 @@ paths:
   /ready:
     get:
       summary: Readiness probe
-      description: Ready when both Auth and Chat answer their gRPC health checks.
+      description: Ready when Auth and Chat, and Media when configured, answer their gRPC health checks.
       tags: [probes]
       responses:
         "200":
@@ -102,7 +102,7 @@ paths:
                   type: string
                   minLength: 8
                   maxLength: 128
-                  description: At least one ASCII letter and one digit.
+                  description: 8-128 bytes with at least one ASCII letter and one digit.
                   example: password1
       responses:
         "201":
@@ -277,7 +277,7 @@ paths:
     post:
       summary: Request an email address change
       description: |
-        Requires an access token and a fresh current password. Identity comes only from the access token. The existing email remains active until an explicit confirmation of the new-address proof. The credential quota also applies to this authenticated route.
+        Requires an access token, a fresh current password and an already verified current email. Identity comes only from the access token. The existing email remains active until an explicit confirmation of the new-address proof. The credential quota also applies to this authenticated route.
       tags: [auth]
       security: [{bearerAuth: []}]
       requestBody:
@@ -293,6 +293,7 @@ paths:
               schema: {$ref: "#/components/schemas/EmailAcknowledgement"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/EmailVerificationRequired"}
         "413": {$ref: "#/components/responses/TooLarge"}
         "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
@@ -490,7 +491,8 @@ paths:
         Each Gateway instance also caps its connections
         (`GATEWAY_WS_MAX_CONNECTIONS`) and those not yet authenticated
         (`GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS`) independently of
-        Redis. Browser origins must be the Gateway's own or listed in
+        Redis. A browser Origin is accepted when its host matches the request
+        Host (the scheme is not compared), or when the origin is listed in
         `GATEWAY_CORS_ALLOWED_ORIGINS`.
       responses:
         "101": {description: Switching to the WebSocket protocol.}
@@ -618,7 +620,7 @@ paths:
               additionalProperties: false
               required: [name]
               properties:
-                name: {type: string, minLength: 1, maxLength: 80, description: "Valid UTF-8, no control characters or surrounding whitespace."}
+                name: {type: string, minLength: 1, maxLength: 80, description: "1-80 Unicode code points and at most 320 bytes; valid UTF-8, no control characters or surrounding whitespace."}
                 private: {type: boolean, default: false}
       responses:
         "201":
@@ -776,7 +778,7 @@ paths:
                 text:
                   type: string
                   maxLength: 4096
-                  description: Empty only with attachments; otherwise valid UTF-8 with visible content, newline and tab.
+                  description: At most 4096 Unicode code points and 16384 bytes. Empty only with attachments; otherwise valid UTF-8 with visible content, newline and tab.
                 attachment_ids:
                   type: array
                   maxItems: 5
@@ -793,7 +795,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409":
-          description: The retry key was already used with different text.
+          description: The retry key was already used with different text or ordered attachment IDs.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -875,7 +877,11 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "413": {$ref: "#/components/responses/TooLarge"}
+        "413":
+          description: File content or its multipart upload exceeds the 10 MiB file limit (`too_large`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
@@ -909,9 +915,15 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         "200":
-          description: Streamed with attachment disposition, nosniff and no-store.
+          description: Streamed with the stored detected content type, attachment disposition, nosniff and no-store.
           content:
-            application/octet-stream:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            application/pdf:
+              schema: {type: string, format: binary}
+            text/plain; charset=utf-8:
               schema: {type: string, format: binary}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
@@ -960,7 +972,7 @@ components:
         room_id: {type: string, format: uuid}
         sender_id: {type: string, format: uuid}
         client_message_id: {type: string, format: uuid}
-        text: {type: string, maxLength: 4096}
+        text: {type: string, maxLength: 4096, description: At most 4096 Unicode code points and 16384 bytes.}
         attachment_ids:
           type: array
           maxItems: 5
@@ -1109,18 +1121,18 @@ components:
             code:
               type: string
               enum: [invalid_argument, invalid_email_action, email_verification_required, invalid_json, unauthenticated, permission_denied, not_found,
-                     already_exists, failed_precondition, body_too_large, unsupported_media_type, rate_limited,
-                     cors_forbidden, origin_forbidden, request_timeout, timeout, unavailable, internal]
+                     already_exists, failed_precondition, body_too_large, too_large, unsupported_media_type, rate_limited,
+                     cors_forbidden, origin_forbidden, too_many_connections, shutting_down, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
   responses:
     EmailVerificationRequired:
-      description: Correct credentials require email ownership before a session may be issued (email_verification_required).
+      description: Login requires verified email ownership before a session may be issued; email change requires the current email to be verified (`email_verification_required`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     NotFound:
-      description: User or room absent, or the caller is not a room member.
+      description: User, room or file absent, or the caller is not a room member.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -1140,14 +1152,14 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
-      description: Missing, malformed, invalid, or expired credentials.
+      description: Missing, malformed, invalid, or expired credentials. `WWW-Authenticate` is present for Gateway bearer-auth middleware failures, but is not guaranteed for Auth-originated 401 responses such as login, refresh or logout.
       headers:
-        WWW-Authenticate: {schema: {type: string}, description: Bearer challenge (RFC 6750).}
+        WWW-Authenticate: {schema: {type: string}, description: Bearer challenge (RFC 6750), present for Gateway bearer-auth middleware failures.}
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     TooLarge:
-      description: Body exceeds GATEWAY_MAX_BODY_BYTES.
+      description: Request body exceeds `GATEWAY_MAX_BODY_BYTES` (`body_too_large`), or an upload exceeds 10 MiB (`too_large`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
