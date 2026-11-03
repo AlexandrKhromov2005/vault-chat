@@ -136,6 +136,10 @@ answer to a send must also carry the row's file IDs in order.
   Save. Save uses the system's document creation (`CreateDocument`), so no
   storage permission is needed; Open hands the cached copy to another app
   (`ACTION_VIEW`, type from the allowlist).
+- The system has created the document by the time the user has chosen where,
+  so a save ends with the file in it, or with no document and a message. The
+  file to save is kept in the saved state while the system asks; a save also
+  goes on while Open fetches the same file.
 
 ## Sending
 
@@ -242,6 +246,8 @@ that is closed keeps running, as it runs in the session's scope.
 | Download broken or larger than announced | Discarded; the file shows a retry |
 | Nobody waits for a download any more (scrolled away, sign-out) | The call is cancelled, which ends a read blocked on the network at once; what arrived is discarded. A new download of the file waits for the old one to end and looks in the cache first |
 | No app opens the file | A message says so; Save still works |
+| Saving fails (download, copy, no file to save) | The document is deleted, or emptied if the provider cannot delete it, and a message says so |
+| The screen goes away during a save | Saving stops, the document is deleted and a toast says so, since the screen's messages went with it |
 | Access lost to a room | Its files fail like its messages; metadata goes with the room |
 | Sign-out, session end | Staged copies and the cache are deleted with the database |
 
@@ -294,7 +300,11 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
 13. The conversation's draft (its model): picked files are checked, kept in
     the order they were picked, at most 5; a removed file and an unsent
     draft are deleted, while files of a message being queued stay.
-14. The upload body: one part named `file` with a quoted name, the mark set
+14. Saving through a document provider: the file arrives, also while Open
+    fetches it and after the Activity was recreated while the system asked
+    where; a failed download or copy and a screen that went away leave no
+    document and say so; a cancelled picker says nothing.
+15. The upload body: one part named `file` with a quoted name, the mark set
     after everything before the closing boundary has left and before it,
     not set when the body breaks off earlier, one-shot. A mark that throws
     fails an enqueued call as an ordinary error; nothing reaches the thread's
@@ -302,6 +312,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
 
 Not covered by automated tests: the pickers, the viewer, other apps opening
 files, decoding real photos (EXIF rotation), checked by hand on a device.
+
+A process killed during a save leaves what the document had by then: nothing
+runs to clean it up, and the app does not remember the document afterwards.
 
 ## Not in this stage
 
