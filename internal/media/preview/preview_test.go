@@ -125,6 +125,27 @@ func TestMakeFlattensTransparencyOnWhite(t *testing.T) {
 	}
 }
 
+func TestMakeAppliesOrientation(t *testing.T) {
+	// Left half red, right half blue; orientation 6 rotates 90° clockwise,
+	// so red ends up on top.
+	src := solid(40, 20, color.NRGBA{B: 255, A: 255})
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			src.Set(x, y, color.NRGBA{R: 255, A: 255})
+		}
+	}
+	img := mustMake(t, withExif(encodeJPEG(t, src), 6, binary.BigEndian))
+	if got := img.Bounds().Size(); got != image.Pt(20, 40) {
+		t.Fatalf("rotated size %v, want 20×40", got)
+	}
+	if r, _, b := rgb(img.At(10, 5)); r < 200 || b > 60 {
+		t.Fatalf("top is (%d,_,%d), want red", r, b)
+	}
+	if r, _, b := rgb(img.At(10, 35)); b < 200 || r > 60 {
+		t.Fatalf("bottom is (%d,_,%d), want blue", r, b)
+	}
+}
+
 func TestMakeStripsMetadata(t *testing.T) {
 	out, err := Make(withExif(encodeJPEG(t, solid(64, 48, color.NRGBA{R: 90, A: 255})), 1, binary.LittleEndian))
 	if err != nil {
@@ -163,6 +184,38 @@ func TestMakeRejectsInvalidData(t *testing.T) {
 			t.Errorf("%s: %v, want ErrInvalid", name, err)
 		}
 	}
+}
+
+func TestOrientation(t *testing.T) {
+	plain := encodeJPEG(t, solid(8, 8, color.NRGBA{A: 255}))
+	cases := map[string]struct {
+		data []byte
+		want int
+	}{
+		"big endian":    {withExif(plain, 6, binary.BigEndian), 6},
+		"little endian": {withExif(plain, 8, binary.LittleEndian), 8},
+		"no exif":       {plain, 1},
+		"out of range":  {withExif(plain, 9, binary.BigEndian), 1},
+		"truncated":     {withExif(plain, 3, binary.BigEndian)[:30], 1},
+		"not a jpeg":    {[]byte("plain text"), 1},
+	}
+	for name, c := range cases {
+		if got := orientation(c.data); got != c.want {
+			t.Errorf("%s: orientation %d, want %d", name, got, c.want)
+		}
+	}
+}
+
+func FuzzOrientation(f *testing.F) {
+	plain := encodeJPEG(f, solid(8, 8, color.NRGBA{A: 255}))
+	f.Add(plain)
+	f.Add(withExif(plain, 6, binary.BigEndian))
+	f.Add(withExif(plain, 3, binary.LittleEndian))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if got := orientation(data); got < 1 || got > 8 {
+			t.Fatalf("orientation %d outside 1..8", got)
+		}
+	})
 }
 
 func FuzzMake(f *testing.F) {
