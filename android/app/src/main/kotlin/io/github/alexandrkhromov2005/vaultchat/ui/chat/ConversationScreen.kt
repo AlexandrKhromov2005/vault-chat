@@ -156,6 +156,8 @@ sealed interface RoomView {
 class ConversationViewModel(
     private val chat: ChatSession,
     private val roomId: String,
+    /** This app's package, whose providers are not read as picked files. */
+    private val ownPackage: String,
     /** Reads picked files; their URIs come from the system pickers. */
     private val pick: (Uri) -> PickedFile,
 ) : ViewModel() {
@@ -258,6 +260,10 @@ class ConversationViewModel(
     }
 
     private fun stage(uri: Uri) {
+        if (!isPickable(uri, ownPackage)) {
+            _notices.tryEmit(DraftNotice(uri.lastPathSegment, Staging.Problem.UNREADABLE))
+            return
+        }
         val picked = pick(uri)
         val input = try {
             picked.open()
@@ -346,8 +352,8 @@ class ConversationViewModel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onMembers: () -> Unit) {
-    val resolver = LocalContext.current.applicationContext.contentResolver
-    val model = viewModel { ConversationViewModel(chat, roomId, resolver::picked) }
+    val application = LocalContext.current.applicationContext
+    val model = viewModel { ConversationViewModel(chat, roomId, application.packageName, application.contentResolver::picked) }
     val room by model.room.collectAsStateWithLifecycle()
     val connection by model.connection.collectAsStateWithLifecycle()
     val rows = model.rows.collectAsLazyPagingItems()

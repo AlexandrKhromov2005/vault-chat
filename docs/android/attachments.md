@@ -54,7 +54,11 @@ only in the documentation:
 
 ## Trust boundaries
 
-- **Picked files.** Read once through the content URI the picker granted,
+- **Picked files.** Only `content://` URIs of other apps are read: reading
+  runs with this app's rights, so a `file://` URI or one of its own providers
+  from a picker that is not the system's could attach its private files. The
+  rest is refused as unreadable, before anything is opened. A file is read
+  once through the content URI the picker granted,
   copied into the app's private storage and checked there: 1 byte to
   10 MiB, a PNG, JPEG or PDF signature or UTF-8 text without NUL, so that
   a HEIC photo or a document of another type is refused before it is
@@ -310,7 +314,8 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     hand-over to the stored message keeps the files on screen.
 13. The conversation's draft (its model): picked files are checked, kept in
     the order they were picked, at most 5; a removed file and an unsent
-    draft are deleted, while files of a message being queued stay.
+    draft are deleted, while files of a message being queued stay; `file://`
+    URIs and the app's own providers are refused without being opened.
 14. Saving through a document provider: the file arrives, also while Open
     fetches it and after the Activity was recreated while the system asked
     where; a failed download or copy and a screen that went away leave no
