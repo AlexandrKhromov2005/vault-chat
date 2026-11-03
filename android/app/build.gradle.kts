@@ -27,6 +27,15 @@ fun firebaseValue(name: String): String = providers.gradleProperty("vaultchat.fi
     require(Regex("[A-Za-z0-9:._-]*").matches(it)) { "vaultchat.firebase.$name has unexpected characters" }
 }
 
+// All or none: Firebase started without one of them may throw in
+// Application.onCreate, which would crash every start of the app.
+val firebase = listOf("appId", "apiKey", "projectId", "senderId").associateWith(::firebaseValue).also { values ->
+    val missing = values.filterValues { it.isEmpty() }.keys
+    require(missing.isEmpty() || missing.size == values.size) {
+        "set all of vaultchat.firebase.* or none of them; missing: ${missing.joinToString()}"
+    }
+}
+
 android {
     namespace = "io.github.alexandrkhromov2005.vaultchat"
     compileSdk = 37
@@ -40,10 +49,10 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "FIREBASE_APP_ID", "\"${firebaseValue("appId")}\"")
-        buildConfigField("String", "FIREBASE_API_KEY", "\"${firebaseValue("apiKey")}\"")
-        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${firebaseValue("projectId")}\"")
-        buildConfigField("String", "FIREBASE_SENDER_ID", "\"${firebaseValue("senderId")}\"")
+        buildConfigField("String", "FIREBASE_APP_ID", "\"${firebase.getValue("appId")}\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${firebase.getValue("apiKey")}\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${firebase.getValue("projectId")}\"")
+        buildConfigField("String", "FIREBASE_SENDER_ID", "\"${firebase.getValue("senderId")}\"")
     }
 
     signingConfigs {

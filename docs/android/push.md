@@ -65,8 +65,9 @@ vaultchat.firebase.senderId=123456789
 
 The values are those of the Android app registered in the Firebase project
 (`google-services.json`: `mobilesdk_app_id`, `current_key`, `project_id`,
-`project_number`). Without them the build has no push. The server needs the
-same project's service account in `AUTH_PUSH_FCM_CREDENTIALS_FILE`.
+`project_number`). Without them the build has no push; with only some of them
+the build fails. The server needs the same project's service account in
+`AUTH_PUSH_FCM_CREDENTIALS_FILE`.
 
 ## Not in this stage
 
@@ -77,7 +78,19 @@ same project's service account in `AUTH_PUSH_FCM_CREDENTIALS_FILE`.
 ## Tests
 
 `NotifierTest`: new messages of others are shown once, history and own
-messages never; on screen nothing is shown and nothing pops up later; a
-read room is not shown. Not covered: FCM delivery, WorkManager scheduling
-and the notification's look, checked by hand on a device with a Firebase
-project.
+messages never; on screen nothing is shown and nothing pops up later; a read
+room is not shown; a replacing notice keeps what is unread; the first message
+of a new dialog shows while the first load of a device stays silent; a failed
+mark does not alert again; a room that is gone loses its notification.
+`NotificationLifetimeTest`: sign-out and revocation leave no notification and
+no pending room, through the real container; a tap opens a room only for its
+account. `ChatSessionsTest`: an ended session posts nothing. `OldSqliteTest`:
+the notification queries and upserts on an engine older than API 26's, and a
+static check of all queries for newer syntax. `PushSignalTest`, `SyncWorkerTest`
+and `PushTokensTest`: the push decision, a running sync left alone with one more
+behind it, tokens across logins. Not covered: FCM delivery and token deletion
+at FCM, expedited scheduling on a real device, and the notification's look,
+checked by hand on a device with a Firebase project.
+
+A partial Firebase configuration failing the build is checked with
+`./gradlew :app:help -Pvaultchat.firebase.appId=1:2:android:3 -Pvaultchat.firebase.apiKey= -Pvaultchat.firebase.projectId= -Pvaultchat.firebase.senderId=`.
