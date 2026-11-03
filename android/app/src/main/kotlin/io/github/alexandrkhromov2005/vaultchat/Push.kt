@@ -67,11 +67,22 @@ class Push(private val context: Context, private val session: SessionManager, pr
     }
 }
 
+/** What a push means. */
+object PushSignal {
+    /**
+     * Data only, {"type":"sync","room_id":...}; anything else is ignored. The
+     * server sends it whatever this device's connection (docs/push.md), and a
+     * live socket has the message already; a socket that breaks syncs when it
+     * connects again.
+     */
+    fun wakesSync(data: Map<String, String>, socketLive: Boolean): Boolean = !socketLive && data["type"] == "sync"
+}
+
 /** Receives pushes and token changes from FCM. */
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        // Data only, {"type":"sync","room_id":...}; anything else is ignored.
-        if (message.data["type"] == "sync") SyncWorker.runNow(applicationContext)
+        val container = (application as VaultChatApplication).container
+        if (PushSignal.wakesSync(message.data, container.chats.socketLive())) SyncWorker.runNow(applicationContext)
     }
 
     override fun onNewToken(token: String) {

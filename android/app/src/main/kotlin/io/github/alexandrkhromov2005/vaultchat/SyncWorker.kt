@@ -11,6 +11,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import io.github.alexandrkhromov2005.vaultchat.core.chat.syncAndNotify
@@ -39,7 +40,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     )
 
     companion object {
-        private const val NOW = "sync-now"
+        internal const val NOW = "sync-now"
         private const val PERIODIC = "sync-periodic"
 
         // WorkManager stops a job after 10 minutes; a sync takes seconds.
@@ -47,13 +48,34 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
         private val network = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
-        /** Synchronises at once, for a push; a sync under way is replaced, since it may predate the message. */
+        /**
+         * Synchronises at once, for a push. Off the main thread: it asks WorkManager
+         * what is under way, and FCM calls it on a thread of its own.
+         */
         fun runNow(context: Context) {
+            val manager = WorkManager.getInstance(context)
+            val policy = policyFor(manager.getWorkInfosForUniqueWork(NOW).get().map { it.state }) ?: return
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setConstraints(network)
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
+            manager.enqueueUniqueWork(NOW, policy, request)
+        }
+
+        /**
+         * What a push does with the syncs under way: a running one is never
+         * cancelled, but it may have passed the server before the message, so one
+         * more waits behind it, and only one, however many pushes come. A sync that
+         * has not started yet will see the message; a new one replaces it, without
+         * the backoff of an earlier failure. Null: nothing to do.
+         */
+        internal fun policyFor(jobs: List<WorkInfo.State>): ExistingWorkPolicy? {
+            val unfinished = jobs.filterNot { it.isFinished }
+            return when {
+                WorkInfo.State.RUNNING !in unfinished -> ExistingWorkPolicy.REPLACE
+                unfinished.size == 1 -> ExistingWorkPolicy.APPEND_OR_REPLACE
+                else -> null
+            }
         }
 
         /** Synchronises every 15 minutes, the shortest period WorkManager allows. */

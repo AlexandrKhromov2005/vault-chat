@@ -33,7 +33,10 @@ stores one device token per login.
   then `Notifier.check()`: at once (expedited) when a push arrives, and every
   15 minutes with a network as a fallback for lost pushes and for builds
   without push. A push only wakes the sync; a forged or lost push can neither
-  show nor hide a message.
+  show nor hide a message. It is ignored while this device's WebSocket is live,
+  which has the message already. A push never cancels a running sync, which may
+  have passed the server before the message: one more sync waits behind it, and
+  only one, so a stream of pushes costs at most one sync after another.
 - **Push.** `Push` starts Firebase when the build has a project configured,
   gets the installation's token and registers it with
   `PUT /api/v1/push/token` after every sign-in and whenever FCM changes it. A

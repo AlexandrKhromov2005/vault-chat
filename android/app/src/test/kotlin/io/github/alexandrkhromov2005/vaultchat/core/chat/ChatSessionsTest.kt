@@ -443,6 +443,45 @@ class ChatSessionsTest {
     }
 
     @Test
+    fun theSocketCountsAsLiveOnlyWhileItIs() = runBlocking {
+        val visible = MutableStateFlow(true)
+        val live = object : ChatSessionDeps by backgroundDeps(FakeChatServer(alice.userId)) {
+            override val foreground: StateFlow<Boolean> = visible
+
+            override suspend fun grant(session: SessionState.SignedIn, minValidityMs: Long) = AccessGrant("synthetic", Long.MAX_VALUE)
+
+            override fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket {
+                val socket = object : WebSocket {
+                    override fun request() = okhttp3.Request.Builder().url("http://127.0.0.1/").build()
+                    override fun queueSize() = 0L
+                    override fun send(text: String): Boolean {
+                        listener.onMessage(this, """{"type":"ready","user_id":"${alice.userId}"}""")
+                        return true
+                    }
+                    override fun send(bytes: okio.ByteString) = false
+                    override fun close(code: Int, reason: String?) = true
+                    override fun cancel() = Unit
+                }
+                listener.onOpen(
+                    socket,
+                    okhttp3.Response.Builder().request(socket.request()).protocol(okhttp3.Protocol.HTTP_1_1).code(101).message("").build(),
+                )
+                return socket
+            }
+        }
+        val state = MutableStateFlow<SessionState>(alice)
+        val sessions = ChatSessions(databases, live, scope)
+        assertFalse(sessions.socketLive())
+        sessions.follow(state)
+        sessions.get(alice)
+        withTimeout(5_000) { while (!sessions.socketLive()) delay(10) }
+
+        visible.value = false
+        withTimeout(5_000) { while (sessions.socketLive()) delay(10) }
+        Unit
+    }
+
+    @Test
     fun aScreenLateForAnEndedSessionDoesNotRestartIt() = runBlocking {
         val state = MutableStateFlow<SessionState>(alice)
         val sessions = ChatSessions(databases, deps, scope)

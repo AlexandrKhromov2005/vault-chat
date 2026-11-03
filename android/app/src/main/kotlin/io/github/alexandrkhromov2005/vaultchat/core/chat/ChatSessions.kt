@@ -60,6 +60,10 @@ class ChatSessions(
         return get(signedIn)
     }
 
+    /** Whether the current session's WebSocket is connected and delivering events. */
+    @Synchronized
+    fun socketLive(): Boolean = current?.realtime?.state?.value == RealtimeState.LIVE
+
     /** The chat of [signedIn], created when first asked for. */
     @Synchronized
     fun get(signedIn: SessionState.SignedIn): ChatSession {
