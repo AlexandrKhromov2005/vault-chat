@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.IntOffset
@@ -16,8 +18,10 @@ import androidx.navigation.compose.NavHost
 /**
  * Screens slide sideways, as in other messengers: a new screen comes in from
  * the end edge over the current one, which moves a little the same way, and
- * going back reverses both, a predictive back gesture included. Every screen
- * draws its own background, so the one below does not show through.
+ * going back reverses both. The back gesture has transitions of its own in
+ * navigation-compose (by default the screen shrinks to the centre); here
+ * they are the same slides, following the finger evenly. Every screen draws
+ * its own background, so the one below does not show through.
  */
 object ScreenTransitions {
     /** A navigation host whose screens move as described above. */
@@ -30,6 +34,8 @@ object ScreenTransitions {
             exitTransition = exit,
             popEnterTransition = popEnter,
             popExitTransition = popExit,
+            predictivePopEnterTransition = gestureEnter,
+            predictivePopExitTransition = gestureExit,
             builder = builder,
         )
     }
@@ -50,7 +56,15 @@ object ScreenTransitions {
         slideOutOfContainer(SlideDirection.End, spec())
     }
 
-    private fun spec() = tween<IntOffset>(DURATION_MS, easing = Decelerate)
+    private val gestureEnter: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> EnterTransition = {
+        slideIntoContainer(SlideDirection.End, spec(LinearEasing)) { it / PARALLAX }
+    }
+
+    private val gestureExit: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition = {
+        slideOutOfContainer(SlideDirection.End, spec(LinearEasing))
+    }
+
+    private fun spec(easing: Easing = Decelerate) = tween<IntOffset>(DURATION_MS, easing = easing)
 
     private const val DURATION_MS = 280
 
