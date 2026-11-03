@@ -73,7 +73,7 @@ class NotificationLifetimeTest {
         room,
         listOf(
             NoticeItem(
-                room, 1, "00000000-0000-4000-8000-0000000000bb", "bob", "synthetic text", attachments = "",
+                room, 1, "00000000-0000-4000-8000-0000000000bb", "bob", senderKnown = true, "synthetic text", attachments = "",
                 createdAt = 1_000_000, roomKind = RoomEntity.DIRECT, roomName = null, peerName = "bob",
             ),
         ),

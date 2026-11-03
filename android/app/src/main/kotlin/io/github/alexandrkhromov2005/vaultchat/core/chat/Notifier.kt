@@ -60,7 +60,7 @@ class Notifier(
         scope.launch {
             combine(dao.noticeRoomsFlow(me), foreground) { _, _ -> }.collect {
                 try {
-                    check()
+                    check(waitForNames = true)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -74,13 +74,19 @@ class Notifier(
      * Shows what is new now, and removes the notifications of rooms that are
      * gone; the background sync calls it before it ends. Does nothing once the
      * session has ended.
+     *
+     * Messages arrive before their senders' names, and a mark leaves no second
+     * chance to show the name. With [waitForNames], a room with a sender whose
+     * name is not stored yet stays until it is, which runs this again; the
+     * background sync's call shows what it has, so that a name that cannot be
+     * read holds nothing back for longer than until the next sync.
      */
-    suspend fun check() = lock.withLock {
+    suspend fun check(waitForNames: Boolean = false) = lock.withLock {
         if (synchronized(ending) { stopped }) return@withLock
         // Marked before they are posted: a mark that fails must not alert again
         // at every later check. What can go wrong after it loses one alert, and
         // the message stays unread in the app.
-        val notices = dao.takeNotices(me, MAX_SHOWN)
+        val notices = dao.takeNotices(me, MAX_SHOWN, waitForNames && !foreground.value)
         val rooms = dao.roomIds().toSet()
         synchronized(ending) {
             if (stopped) return@withLock

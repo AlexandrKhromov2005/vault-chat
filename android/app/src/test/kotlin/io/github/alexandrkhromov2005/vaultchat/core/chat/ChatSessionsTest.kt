@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ProfileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
@@ -314,10 +315,80 @@ class ChatSessionsTest {
         val database = databases.open(server.toString(), alice.userId)
         val dao = database.dao()
         dao.storeRoomList(listOf(RoomEntity(roomId, RoomEntity.CHANNEL, "general", null, false, 0, null, null, 0)), complete = true)
-        val message = MessageEntity(roomId, 1, "m-1", "00000000-0000-4000-8000-0000000000bb", "c-1", "synthetic", attachments = "", createdAt = 1)
+        val bob = "00000000-0000-4000-8000-0000000000bb"
+        dao.upsertProfiles(listOf(ProfileEntity(bob, "bob")))
+        val message = MessageEntity(roomId, 1, "m-1", bob, "c-1", "synthetic", attachments = "", createdAt = 1)
         dao.applyLatest(roomId, listOf(message), readThrough = 0)
         database.close()
         return roomId
+    }
+
+    private fun signedInWith(gateway: FakeChatServer, board: NoticeBoard): ChatSessions {
+        val background = backgroundDeps(gateway)
+        val sessions = ChatSessions(databases, object : ChatSessionDeps by background {
+            override val notices: NoticeBoard = board
+        }, scope)
+        sessions.follow(MutableStateFlow(alice))
+        return sessions
+    }
+
+    @Test
+    fun theBackgroundSyncShowsANewSenderByNameAndReportsItsFailure() = runBlocking {
+        val gateway = FakeChatServer(alice.userId)
+        val bob = "00000000-0000-4000-8000-0000000000bb"
+        val roomId = gateway.addForeignChannel(1, bob)
+        val board = NamesBoard()
+        val sessions = signedInWith(gateway, board)
+        assertTrue(syncAndNotify(sessions, budgetMs = 5_000))
+
+        gateway.profiles[bob] = "bob"
+        gateway.beforeUser = { delay(300) }
+        gateway.post(roomId, sender = bob, text = "hi")
+        assertTrue(syncAndNotify(sessions, budgetMs = 5_000))
+        assertEquals(listOf("bob"), board.names)
+
+        gateway.intercept = { if (it == "rooms") 503 else null }
+        assertFalse(syncAndNotify(sessions, budgetMs = 5_000))
+    }
+
+    @Test
+    fun theBackgroundSyncIsNotHeldUpByANameForLong() = runBlocking {
+        val gateway = FakeChatServer(alice.userId)
+        val bob = "00000000-0000-4000-8000-0000000000bb"
+        val roomId = gateway.addForeignChannel(1, bob)
+        val board = NamesBoard()
+        val sessions = signedInWith(gateway, board)
+        assertTrue(syncAndNotify(sessions, budgetMs = 5_000))
+
+        gateway.beforeUser = { delay(60_000) }
+        gateway.post(roomId, sender = bob, text = "hi")
+        assertTrue(syncAndNotify(sessions, budgetMs = 5_000, namesMs = 100))
+
+        assertEquals(listOf<String?>(null), board.names)
+    }
+
+    @Test
+    fun aBackgroundSyncWithoutASessionShowsNothing() = runBlocking {
+        val board = NamesBoard()
+        val sessions = ChatSessions(databases, object : ChatSessionDeps by deps {
+            override val notices: NoticeBoard = board
+        }, scope)
+        sessions.follow(MutableStateFlow(SessionState.SignedOut(SessionState.Reason.NONE)))
+
+        assertTrue(withTimeout(1_000) { syncAndNotify(sessions, budgetMs = 60_000) })
+        assertEquals(emptyList<String?>(), board.names)
+    }
+
+    private class NamesBoard : NoticeBoard {
+        val names: MutableList<String?> = java.util.Collections.synchronizedList(mutableListOf())
+
+        override fun post(account: String, notices: List<RoomNotice>) {
+            notices.forEach { notice -> notice.messages.forEach { names += it.senderName } }
+        }
+
+        override fun shownRooms(): Set<String> = emptySet()
+
+        override fun cancel(roomId: String) = Unit
     }
 
     @Test

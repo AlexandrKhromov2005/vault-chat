@@ -93,6 +93,10 @@ class FakeChatServer(val me: String) : GatewayApi {
     @Volatile
     var afterMemberPage: (index: Int) -> Unit = {}
 
+    /** Runs before a profile is read; suspending here holds the answer back. */
+    @Volatile
+    var beforeUser: suspend () -> Unit = {}
+
     /** Runs after a room page has been prepared, before it is returned. */
     @Volatile
     var afterRoomPage: (index: Int) -> Unit = {}
@@ -257,6 +261,7 @@ class FakeChatServer(val me: String) : GatewayApi {
     override suspend fun user(authorization: String, userId: String): Response<PublicProfile> {
         log += "user $userId"
         intercept("user $userId")?.let { return error(it) }
+        beforeUser()
         return synchronized(this) { profiles[userId] }?.let { ok(PublicProfile(userId, it)) } ?: error(404)
     }
 

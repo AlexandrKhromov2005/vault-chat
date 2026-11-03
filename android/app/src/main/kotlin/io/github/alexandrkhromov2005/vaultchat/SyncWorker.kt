@@ -13,8 +13,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
+import io.github.alexandrkhromov2005.vaultchat.core.chat.syncAndNotify
 import java.util.concurrent.TimeUnit
 
 /**
@@ -25,20 +24,7 @@ import java.util.concurrent.TimeUnit
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val container = (applicationContext as VaultChatApplication).container
-        val done = try {
-            withTimeoutOrNull(BUDGET_MS) {
-                val chat = container.chats.awaitCurrent() ?: return@withTimeoutOrNull true
-                chat.retain().use {
-                    val failure = chat.sync.syncNow()
-                    chat.notifier.check()
-                    failure == null
-                }
-            } ?: false
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            false
-        }
+        val done = syncAndNotify(container.chats, BUDGET_MS)
         return if (done || tags.contains(PERIODIC)) Result.success() else Result.retry()
     }
 

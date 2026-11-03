@@ -19,6 +19,10 @@ stores one device token per login.
   after it signs out or its session is revoked: the session stops posting, all
   of its notifications and a room waiting to open are removed. The notification
   of a room the user has left goes at the next check.
+- **Names.** A first-time sender's profile is read after the message is
+  stored, so a room with a sender whose name is not stored yet waits for it. The
+  background sync waits up to 10 seconds and then shows what it has, so a name
+  that cannot be read delays a notification only until the next sync at most.
 - **Privacy.** A notification is `VISIBILITY_PRIVATE` with a public version
   that says only "new message", so the lock screen follows the user's system
   choice: with "hide sensitive content" it shows that public version, and with

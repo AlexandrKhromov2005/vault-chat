@@ -268,6 +268,8 @@ data class NoticeItem(
     val sequence: Long,
     @ColumnInfo(name = "sender_id") val senderId: String,
     @ColumnInfo(name = "sender_name") val senderName: String?,
+    /** Whether the sender's profile is stored; [senderName] is null also for an account that no longer exists. */
+    @ColumnInfo(name = "sender_known") val senderKnown: Boolean,
     val text: String,
     val attachments: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,

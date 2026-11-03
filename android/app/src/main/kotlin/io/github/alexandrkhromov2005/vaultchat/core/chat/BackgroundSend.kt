@@ -22,3 +22,27 @@ suspend fun sendQueuedMessages(chats: ChatSessions, budgetMs: Long): Boolean = t
     // A database that failed or closed under the job: run again later.
     false
 }
+
+/**
+ * What the background sync does (SyncWorker): synchronises the current session
+ * and shows what is new, within [budgetMs]. Returns true when the sync
+ * succeeded, also when nobody is signed in; false asks for another run later.
+ */
+suspend fun syncAndNotify(chats: ChatSessions, budgetMs: Long, namesMs: Long = NAMES_MS): Boolean = try {
+    withTimeoutOrNull(budgetMs) {
+        val chat = chats.awaitCurrent() ?: return@withTimeoutOrNull true
+        chat.retain().use {
+            val failure = chat.sync.syncNow()
+            // A first-time sender's name is on its way; the notification lasts.
+            withTimeoutOrNull(namesMs) { chat.sync.awaitProfiles() }
+            chat.notifier.check()
+            failure == null
+        }
+    } ?: false
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    false
+}
+
+private const val NAMES_MS = 10_000L

@@ -348,8 +348,8 @@ abstract class ChatDao {
     protected abstract suspend fun noticeRooms(me: String): List<NoticeRoom>
 
     @Query(
-        "SELECT m.room_id, m.sequence, m.sender_id, p.username AS sender_name, m.text, m.attachments, " +
-            "m.created_at, r.kind AS room_kind, r.name AS room_name, rp.username AS peer_name FROM messages m " +
+        "SELECT m.room_id, m.sequence, m.sender_id, p.username AS sender_name, (p.user_id IS NOT NULL) AS sender_known, " +
+            "m.text, m.attachments, m.created_at, r.kind AS room_kind, r.name AS room_name, rp.username AS peer_name FROM messages m " +
             "JOIN timelines t ON t.room_id = m.room_id JOIN rooms r ON r.room_id = m.room_id " +
             "LEFT JOIN profiles p ON p.user_id = m.sender_id LEFT JOIN profiles rp ON rp.user_id = r.peer_id " +
             "WHERE m.room_id = :roomId AND m.sender_id != :me AND m.sequence > t.last_read " +
@@ -362,14 +362,16 @@ abstract class ChatDao {
      * each with up to [shown] of the room's newest unread messages, oldest first:
      * a notice replaces the room's previous one, so it also repeats what that one
      * showed and is still unread. They count as shown from here on, all of them
-     * or, when this fails, none.
+     * or, when this fails, none. With [waitForNames], a room with a sender whose
+     * profile is not stored yet stays for a later call.
      */
     @Transaction
-    open suspend fun takeNotices(me: String, shown: Int): List<RoomNotice> {
-        val rooms = noticeRooms(me)
-        val notices = rooms.map { RoomNotice(it.roomId, newestUnread(me, it.roomId, shown).asReversed()) }
-        markNotified(rooms.associate { it.roomId to it.newest })
-        return notices
+    open suspend fun takeNotices(me: String, shown: Int, waitForNames: Boolean = false): List<RoomNotice> {
+        val rooms = noticeRooms(me).associate { room ->
+            room to RoomNotice(room.roomId, newestUnread(me, room.roomId, shown).asReversed())
+        }.filterValues { notice -> !waitForNames || notice.messages.all { it.senderKnown } }
+        markNotified(rooms.keys.associate { it.roomId to it.newest })
+        return rooms.values.toList()
     }
 
     // Two statements, not an upsert: API 26 to 29 have SQLite older than 3.24.
@@ -459,9 +461,10 @@ abstract class ChatDao {
             "ORDER BY o.position DESC LIMIT 1"
 
         // Rooms with unread messages of others that no notification has shown.
+        // The join with profiles makes a name that arrives wake the observers.
         const val NOTICE_ROOMS = "SELECT m.room_id, MAX(m.sequence) AS newest FROM messages m " +
             "JOIN timelines t ON t.room_id = m.room_id JOIN rooms r ON r.room_id = m.room_id " +
-            "LEFT JOIN notified n ON n.room_id = m.room_id " +
+            "LEFT JOIN notified n ON n.room_id = m.room_id LEFT JOIN profiles p ON p.user_id = m.sender_id " +
             "WHERE m.sender_id != :me AND m.sequence > t.last_read AND m.sequence > COALESCE(n.sequence, 0) " +
             "GROUP BY m.room_id ORDER BY m.room_id LIMIT 200"
 

@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -117,6 +119,7 @@ class ChatSync(
     // before the user left it is not stored afterwards.
     private val departures = ConcurrentHashMap<String, Long>()
     private val profilesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val profilesReading = MutableStateFlow(0)
 
     // How often each room's roster has changed by an event or by the user;
     // a roster read meanwhile is read again (Membership.loadRoster).
@@ -572,6 +575,7 @@ class ChatSync(
      */
     private fun CoroutineScope.launchProfile(userId: String) {
         if (!profilesInFlight.add(userId)) return
+        profilesReading.update { it + 1 }
         launch(start = CoroutineStart.ATOMIC) {
             try {
                 if (isActive) loadProfile(userId)
@@ -581,8 +585,14 @@ class ChatSync(
                 // A database failure; the name is read the next time it is needed.
             } finally {
                 profilesInFlight.remove(userId)
+                profilesReading.update { it - 1 }
             }
         }
+    }
+
+    /** Until the profiles being read now are stored or have failed. */
+    suspend fun awaitProfiles() {
+        profilesReading.first { it == 0 }
     }
 
     private suspend fun unknownProfiles(userIds: List<String>): List<String> {

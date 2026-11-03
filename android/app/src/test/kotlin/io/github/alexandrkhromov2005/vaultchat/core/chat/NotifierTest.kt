@@ -4,12 +4,15 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -165,6 +168,42 @@ class NotifierTest {
         writable.execSQL("DROP TRIGGER no_mark")
         repeat(2) { notifier.check() }
         assertEquals(listOf("new 1"), texts())
+    }
+
+    @Test
+    fun aFirstTimeSenderIsShownByName() = runBlocking {
+        val room = server.addChannel(1)
+        server.profiles[bob] = "bob"
+        sync.syncNow()
+        val profiles = CompletableDeferred<Unit>()
+        server.beforeUser = { profiles.await() }
+        val live = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        Notifier(dao, me, foreground, board, "account", live)
+
+        server.post(room, sender = bob, text = "hi")
+        sync.syncNow()
+        // The change of the database has run through the collector by now.
+        delay(500)
+        assertEquals("posted before the sender's name was read", emptyList<String>(), texts())
+
+        profiles.complete(Unit)
+        withTimeout(5_000) { while (posted.isEmpty()) delay(10) }
+        assertEquals("bob", posted.single().single().messages.single().senderName)
+        live.cancel()
+    }
+
+    @Test
+    fun aNameThatCannotBeReadDoesNotHoldBackTheFinalCheck() = runBlocking {
+        val room = server.addChannel(1)
+        sync.syncNow()
+        server.intercept = { if (it.startsWith("user")) 503 else null }
+
+        server.post(room, sender = bob, text = "hi")
+        sync.syncNow()
+        notifier().check()
+
+        assertEquals(listOf("hi 1"), texts())
+        assertEquals(null, posted.single().single().messages.single().senderName)
     }
 
     @Test
