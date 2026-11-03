@@ -32,35 +32,49 @@ class Updates(
     /** The newer release, if one was found. */
     val update: StateFlow<AppUpdate?> = found
 
-    /** Checks GitHub if the last check is a day old; a failure waits for the next day. */
+    /**
+     * Checks GitHub if the last answer is a day old, or from a time that has not
+     * come yet, when the clock was ahead. Any answer waits for the next day; a
+     * cancelled check or no connection tries again the next time. Only a list of
+     * releases changes the offer: an error says nothing about what was found.
+     */
     suspend fun checkIfDue() {
-        if (now() - settings.updateCheckedAt < DAY_MS) return
-        settings.updateCheckedAt = now()
-        val latest = try {
+        if (now() - settings.updateCheckedAt in 0 until DAY_MS) return
+        val listing = try {
             withContext(Dispatchers.IO) { fetch() }
         } catch (e: IOException) {
             return
-        } catch (e: IllegalArgumentException) {
-            // Not the JSON GitHub describes.
-            return
         }
-        val update = latest?.takeIf { newer(it.version, current) }
+        settings.updateCheckedAt = now()
+        if (listing == null) return
+        val update = listing.latest?.takeIf { newer(it.version, current) }
         settings.updateVersion = update?.version
         settings.updatePage = update?.page
         found.value = update
     }
 
-    private fun fetch(): AppUpdate? {
+    /** What a list of releases says: the newest one of the app, if any. */
+    private class Listing(val latest: AppUpdate?)
+
+    /** The list GitHub answered with, or null for any other answer. */
+    private fun fetch(): Listing? {
         val request = Request.Builder().url(releases).header("Accept", "application/vnd.github+json").build()
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
             val source = response.body.source()
             if (source.request(MAX_BYTES + 1)) return null
-            val list = json.decodeFromString<List<Release>>(source.readUtf8())
-            return list.asSequence()
-                .filter { !it.draft && !it.prerelease && it.tag.startsWith(TAG_PREFIX) && it.page.startsWith(PAGE_PREFIX) }
-                .mapNotNull { release -> release.tag.removePrefix(TAG_PREFIX).takeIf(::isVersion)?.let { AppUpdate(it, release.page) } }
-                .maxWithOrNull { a, b -> compare(a.version, b.version) }
+            val list = try {
+                json.decodeFromString<List<Release>>(source.readUtf8())
+            } catch (e: IllegalArgumentException) {
+                // Not the JSON GitHub describes.
+                return null
+            }
+            return Listing(
+                list.asSequence()
+                    .filter { !it.draft && !it.prerelease && it.tag.startsWith(TAG_PREFIX) && it.page == PAGES + it.tag }
+                    .mapNotNull { release -> release.tag.removePrefix(TAG_PREFIX).takeIf(::isVersion)?.let { AppUpdate(it, release.page) } }
+                    .maxWithOrNull { a, b -> compare(a.version, b.version) },
+            )
         }
     }
 
@@ -76,8 +90,9 @@ class Updates(
         private const val REPOSITORY = "AlexandrKhromov2005/vault-chat"
         private const val RELEASES = "https://api.github.com/repos/$REPOSITORY/releases?per_page=30"
 
-        // Only a page of this repository is ever opened.
-        private const val PAGE_PREFIX = "https://github.com/$REPOSITORY/releases/"
+        // Only the page of the release itself is ever opened, spelled exactly so:
+        // a prefix alone would let dots in the path lead out of the repository.
+        private const val PAGES = "https://github.com/$REPOSITORY/releases/tag/"
         const val TAG_PREFIX = "android-v"
 
         private const val DAY_MS = 24 * 60 * 60 * 1000L

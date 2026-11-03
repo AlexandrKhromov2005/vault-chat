@@ -11,8 +11,12 @@ releases from the GitHub API and offers the newest release tagged
 (drafts and prereleases are skipped). It shows a banner whose button opens
 the release page in the browser; the user downloads and installs the APK
 there. The app never downloads or installs anything by itself, and opens
-only pages under `https://github.com/AlexandrKhromov2005/vault-chat/releases/`.
-A failed check waits for the next day. The answer is limited to 1 MiB.
+only the page `https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/<tag>`
+of the release, spelled exactly so. Any answer from GitHub waits for the next
+day; a cancelled check or no connection tries again the next time the room list
+opens. Only a list of releases changes the offer, so an error, an answer that is
+not the list or one over the 1 MiB limit keeps an offer already found. A check
+time ahead of the clock does not hold back the next check.
 
 Android installs an update only if it is signed with the same key, so the
 key must never change (see below).
