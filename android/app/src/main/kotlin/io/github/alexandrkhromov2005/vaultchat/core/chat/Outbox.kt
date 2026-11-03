@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.InterruptedIOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -359,7 +360,11 @@ class Outbox(
                     Outcome.PAUSED
                 }
                 // The connection broke: stored only if the closing boundary had begun to leave.
-                e.status == 0 && e.code == ApiException.NETWORK -> if (body.endStarted) fail(row, OutgoingEntity.ERROR_UPLOAD) else Outcome.RETRY
+                e.status == 0 && e.code == ApiException.NETWORK -> when {
+                    body.endStarted -> fail(row, OutgoingEntity.ERROR_UPLOAD)
+                    body.started && e.cause is InterruptedIOException -> ranOutOfTime(row, file)
+                    else -> Outcome.RETRY
+                }
                 // The session renewed its token and repeated once; Media is busy or down.
                 e.status == 401 || e.status == 503 -> Outcome.RETRY
                 e.status == 400 || e.status == 413 || e.status == 415 -> fail(row, OutgoingEntity.ERROR_FILE)
@@ -383,6 +388,18 @@ class Outbox(
         return Outcome.DONE
     }
 
+    /**
+     * An attempt that ran out of time while the file was being sent: a repeat
+     * starts from the first byte and may do no better on this network, so
+     * the transfer budget ends in an outcome after a few. A connection that
+     * could not be opened sends nothing and does not count.
+     */
+    private suspend fun ranOutOfTime(row: OutgoingEntity, file: OutgoingFileEntity): Outcome {
+        val timeouts = file.timeouts + 1
+        dao.setUploadTimeouts(row.clientMessageId, file.position, timeouts)
+        return if (timeouts >= MAX_UPLOAD_TIMEOUTS) fail(row, OutgoingEntity.ERROR_TOO_SLOW) else Outcome.RETRY
+    }
+
     private suspend fun fail(row: OutgoingEntity, error: String): Outcome {
         dao.markFailed(row.clientMessageId, error)
         return Outcome.DONE
@@ -394,6 +411,9 @@ class Outbox(
         // With sync's 60/min and burst 15, inside the Gateway's 120/min and 30.
         const val SENDS_PER_MINUTE = 30
         const val SEND_BURST = 10
+
+        /** Attempts of a file's upload that may run out of time before its message fails. */
+        const val MAX_UPLOAD_TIMEOUTS = 3
 
         private const val RESTART_AFTER_FAILURE_MS = 1_000L
     }

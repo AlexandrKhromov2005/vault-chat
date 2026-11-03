@@ -120,6 +120,9 @@ data class OutgoingEntity(
 
         /** The server did not accept a file. */
         const val ERROR_FILE = "file"
+
+        /** A file's upload kept running out of time before all of it had left; nothing is stored. */
+        const val ERROR_TOO_SLOW = "too_slow"
     }
 }
 
@@ -128,7 +131,8 @@ data class OutgoingEntity(
  * its `attachment_ids`. [staged] names the copy in the staging directory;
  * [fileId] is set once the file is uploaded and never changes after that.
  * [maybeStored] is set while the server may have stored the file but its
- * answer has not arrived.
+ * answer has not arrived. [timeouts] counts the attempts that ran out of time
+ * while the file was being sent.
  */
 @Entity(
     tableName = "outgoing_files",
@@ -153,6 +157,7 @@ data class OutgoingFileEntity(
     val staged: String,
     @ColumnInfo(name = "file_id") val fileId: String? = null,
     @ColumnInfo(name = "maybe_stored") val maybeStored: Boolean = false,
+    val timeouts: Int = 0,
 )
 
 /**

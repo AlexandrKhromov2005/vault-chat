@@ -98,6 +98,7 @@
     <string name="message_failed_rejected">Не отправлено: сервер отклонил сообщение</string>
     <string name="message_failed_upload">Не отправлено: неизвестно, загрузился ли файл</string>
     <string name="message_failed_file">Не отправлено: сервер не принял файл</string>
+    <string name="message_failed_too_slow">Не отправлено: сеть слишком медленная для этого файла</string>
     <string name="message_cancel">Отменить отправку</string>
     <string name="message_actions">Действия с сообщением</string>
     <string name="message_retry">Отправить ещё раз</string>

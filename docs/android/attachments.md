@@ -99,7 +99,8 @@ order of `attachment_ids`; follows a new key after a conflict, deleted with
 the row), `name`, `type` (sniffed), `size`, `staged` (the copy's name in the
 staging directory), `file_id` (null until uploaded) and `maybe_stored`
 (the last attempt's body may have reached the server whole, and no answer
-arrived). The queue row keeps its text, which may now be empty.
+arrived) and `timeouts` (attempts that ran out of time while the file was
+being sent). The queue row keeps its text, which may now be empty.
 
 Staged copies are in `noBackupFilesDir/outbox/<session>/`, cached content
 in `cacheDir/attachments/<session>/<file_id>/<name>`. A staged copy is moved
@@ -168,6 +169,7 @@ answer to a send must also carry the row's file IDs in order.
 |---|---|---|
 | `201` matching | stored | file ID stored, copy moved to the cache, next file |
 | connection failed before the closing boundary | not stored | repeated after the backoff |
+| out of time before the closing boundary, the 3rd time for this file | not stored | `FAILED` (`too_slow`) |
 | `401` | not stored | the session renews the token and repeats once |
 | `429` | not stored | everything waits for `Retry-After`, then repeats |
 | `503` | not stored (capacity, Media down) | repeated after the backoff |
@@ -177,6 +179,15 @@ answer to a send must also carry the row's file IDs in order.
 
   Sending the message then follows [send.md](send.md); its `400` (`invalid
   attachment`) is `FAILED` (`invalid`).
+- **Running out of time.** Below about 270 kbit/s a file of 10 MiB cannot
+  leave within the request deadline, and a repeat starts from the first
+  byte, so that repeating without an end would use data for nothing and hold
+  the session's one upload. An attempt that runs out of time (the deadline,
+  or no progress within 35 s) while the file is being sent counts in
+  `timeouts`, on disk; the third fails the message with `too_slow`. One that
+  never began to send, such as a connection that cannot be opened during an
+  outage, does not count, and neither does a broken connection. Retry starts
+  the count over.
 - **Retry** of a failed message uploads only the files without an ID; after
   `409` it takes a new key and keeps the IDs; the key changes in place, so
   the message's files follow it. **Cancel** is offered while a file of the
@@ -211,6 +222,7 @@ that is closed keeps running, as it runs in the session's scope.
 | Staged copies | at most 5 per draft and 5 per queued message, 10 MiB each | Chosen by the user's own hand |
 | Download cache | 100 MiB per session, least recently used first; the system may clear it any time | A cleared file is downloaded again |
 | Request deadline | 5 minutes, progress within 30 s (writing and reading) | The Gateway's transfer budget |
+| Upload attempts that run out of time | 3 per file, counted on disk, until Retry | At most about 16 minutes and 3 times the file's data; then the user decides |
 | Decoded thumbnails | scaled to the size shown, kept in Coil's memory cache | A 40-megapixel image is never decoded whole |
 
 ## Failure behaviour
@@ -219,6 +231,7 @@ that is closed keeps running, as it runs in the session's scope.
 |---|---|
 | No network while sending | The message waits with its files, as text does |
 | Connection lost during an upload | Repeated after the backoff from the first byte |
+| Upload keeps running out of time | The message fails (`too_slow`) after 3 attempts; the next messages go on; Retry starts over |
 | Connection lost after the whole file was sent | The message fails (`upload`); Retry uploads the file again; the first copy may stay on the server unused |
 | Process killed during an upload | The next run repeats it, or fails it if the closing boundary had left |
 | The flag cannot be written (disk full) | The call fails like a broken connection, on OkHttp's thread too, and the closing boundary does not leave; the message stays queued and repeats after the backoff |
@@ -242,7 +255,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    the copies are in place without a download.
 2. A connection broken before the closing boundary repeats the upload
    after the backoff; broken after it fails the message without a repeat;
-   the flag is set exactly before the closing boundary leaves.
+   the flag is set exactly before the closing boundary leaves. Running out of
+   time 3 times fails the message, also across a new session; Retry starts
+   over; a connection that breaks or cannot be opened is not counted.
 3. A process killed during an upload: a new session repeats it, or fails it
    if the flag is set. The flag is on disk as the closing boundary arrives,
    a new queue started at that moment fails the message with one upload, and

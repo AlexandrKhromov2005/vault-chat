@@ -421,6 +421,10 @@ class FakeChatServer(val me: String) : GatewayApi {
     @Volatile
     var uploadSink: () -> okio.Sink = { okio.blackholeSink() }
 
+    /** Runs before an upload's body is written; throwing an IOException here is a connection that cannot be opened. */
+    @Volatile
+    var beforeUpload: () -> Unit = {}
+
     /** Answers an upload with this status once its whole body has arrived, when it returns one. */
     @Volatile
     var uploadStatus: () -> Int? = { null }
@@ -431,6 +435,7 @@ class FakeChatServer(val me: String) : GatewayApi {
     override suspend fun uploadFile(authorization: String, roomId: String, body: RequestBody): Response<FileDto> {
         log += "upload $roomId"
         intercept("upload $roomId")?.let { return error(it) }
+        beforeUpload()
         val buffer = okio.Buffer()
         val sink = uploadSink()
         // Through a tee: what reaches the server, and what the test's sink lets through.

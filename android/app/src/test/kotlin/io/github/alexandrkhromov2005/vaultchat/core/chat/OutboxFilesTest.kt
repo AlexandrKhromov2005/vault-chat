@@ -33,6 +33,8 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -225,6 +227,94 @@ class OutboxFilesTest {
         eventually { row(roomId).state == OutgoingEntity.FAILED && dao.storedOutgoing(other).isEmpty() }
         assertEquals(OutgoingEntity.ERROR_UPLOAD, row(roomId).error)
         assertEquals(listOf("never.txt"), server.uploads().map { it.filename })
+    }
+
+    /** A connection on which writing runs out of time. */
+    private fun timingOut(error: () -> IOException = { InterruptedIOException("timeout") }): () -> Sink = {
+        object : ForwardingSink(blackholeSink()) {
+            override fun write(source: Buffer, byteCount: Long) = throw error()
+        }
+    }
+
+    @Test
+    fun anUploadThatKeepsRunningOutOfTimeFails() = runBlocking {
+        val roomId = loadedChannel(1)
+        server.uploadSink = timingOut()
+        val box = outbox()
+        box.send(roomId, "slow", listOf(text("a.txt")))
+        eventually { row(roomId).state == OutgoingEntity.FAILED }
+        assertEquals(OutgoingEntity.ERROR_TOO_SLOW, row(roomId).error)
+        assertEquals(Outbox.MAX_UPLOAD_TIMEOUTS, uploads())
+        delay(300)
+        assertEquals(Outbox.MAX_UPLOAD_TIMEOUTS, uploads())
+        // Other messages go on, and the file stays for Retry.
+        box.send(loadedChannel(2), "next")
+        eventually { server.sent(server.id(1, 2)).isNotEmpty() }
+        assertEquals(1, stagedCopies().size)
+    }
+
+    @Test
+    fun aStalledConnectionCountsAsRunningOutOfTime() = runBlocking {
+        val roomId = loadedChannel(1)
+        server.uploadSink = timingOut { SocketTimeoutException("timeout") }
+        outbox().send(roomId, "stalled", listOf(text("a.txt")))
+        eventually { row(roomId).state == OutgoingEntity.FAILED }
+        assertEquals(OutgoingEntity.ERROR_TOO_SLOW, row(roomId).error)
+    }
+
+    @Test
+    fun attemptsThatRanOutOfTimeAreCountedAcrossProcesses() = runBlocking {
+        val roomId = loadedChannel(1)
+        server.uploadSink = timingOut()
+        val process = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
+        outbox(on = process, delays = { Backoff(60_000, 60_000) }).send(roomId, "slow", listOf(text("a.txt")))
+        eventually { dao.filesOf(key(1)).single().timeouts == 1 }
+        process.cancel()
+
+        outbox()
+        eventually { row(roomId).state == OutgoingEntity.FAILED }
+        assertEquals(Outbox.MAX_UPLOAD_TIMEOUTS, uploads())
+    }
+
+    @Test
+    fun retryOfAnUploadThatRanOutOfTimeStartsOver() = runBlocking {
+        val roomId = loadedChannel(1)
+        server.uploadSink = timingOut()
+        val box = outbox()
+        box.send(roomId, "slow", listOf(text("a.txt")))
+        eventually { row(roomId).state == OutgoingEntity.FAILED }
+
+        box.retry(key(1))
+        eventually { uploads() == 2 * Outbox.MAX_UPLOAD_TIMEOUTS && row(roomId).state == OutgoingEntity.FAILED }
+        assertEquals(2 * Outbox.MAX_UPLOAD_TIMEOUTS, uploads())
+
+        server.uploadSink = { blackholeSink() }
+        box.retry(key(1))
+        eventually { dao.storedOutgoing(roomId).isEmpty() }
+        assertEquals("slow", server.sent(roomId).single().text)
+    }
+
+    @Test
+    fun aConnectionBrokenWithoutATimeoutIsNotCounted() = runBlocking {
+        val roomId = loadedChannel(1)
+        val breaks = AtomicInteger(Outbox.MAX_UPLOAD_TIMEOUTS + 2)
+        server.uploadSink = {
+            if (breaks.getAndDecrement() > 0) timingOut { IOException("connection reset") }() else blackholeSink()
+        }
+        outbox().send(roomId, "flaky", listOf(text("a.txt")))
+        eventually { dao.storedOutgoing(roomId).isEmpty() }
+        assertEquals(1, server.sent(roomId).size)
+    }
+
+    @Test
+    fun aConnectionThatCannotBeOpenedIsNotCounted() = runBlocking {
+        val roomId = loadedChannel(1)
+        val outage = AtomicInteger(Outbox.MAX_UPLOAD_TIMEOUTS + 2)
+        // No byte has left: an outage, during which text messages wait as well.
+        server.beforeUpload = { if (outage.getAndDecrement() > 0) throw SocketTimeoutException("connect timed out") }
+        outbox().send(roomId, "later", listOf(text("a.txt")))
+        eventually { dao.storedOutgoing(roomId).isEmpty() }
+        assertEquals(1, server.sent(roomId).size)
     }
 
     /** The flag on disk as the closing boundary arrives; [also] runs then, before it is let through. */

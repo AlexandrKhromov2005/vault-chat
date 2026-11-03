@@ -41,6 +41,11 @@ class FileUpload(
     private val tail = "\r\n--$boundary--\r\n".encodeUtf8()
     private val size = file.length()
 
+    /** Whether writing began, so that bytes may have left. */
+    @Volatile
+    var started = false
+        private set
+
     /** Whether the last attempt began to send the closing boundary. */
     @Volatile
     var endStarted = false
@@ -61,6 +66,7 @@ class FileUpload(
     }
 
     private fun write(sink: BufferedSink) {
+        started = true
         endStarted = false
         onStart()
         sink.write(head)

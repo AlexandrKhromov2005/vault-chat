@@ -901,6 +901,7 @@ private fun OutgoingBubble(
         entity.error == OutgoingEntity.ERROR_NO_ACCESS -> stringResource(R.string.message_failed_no_access)
         entity.error == OutgoingEntity.ERROR_UPLOAD -> stringResource(R.string.message_failed_upload)
         entity.error == OutgoingEntity.ERROR_FILE -> stringResource(R.string.message_failed_file)
+        entity.error == OutgoingEntity.ERROR_TOO_SLOW -> stringResource(R.string.message_failed_too_slow)
         else -> stringResource(R.string.message_failed_rejected)
     }
     // Never sent while a file waits for its upload, so it can be cancelled.

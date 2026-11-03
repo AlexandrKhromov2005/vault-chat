@@ -16,7 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -152,6 +154,21 @@ class GatewayCallTest {
     fun noContentBecomesAUnitBody() = runBlocking {
         server.enqueue(MockResponse.Builder().code(204).build())
         assertEquals(Unit, call { api.leave("Bearer t", "00000000-0000-4000-8000-000000000001").noContent() }.body)
+    }
+
+    @Test
+    fun anUploadOutOfTimeIsATimeoutInTheCause() {
+        val file = File.createTempFile("upload", ".txt").apply { writeText("hello") }
+        try {
+            val http = OkHttpClient.Builder().callTimeout(200, TimeUnit.MILLISECONDS).build()
+            val short = Gateway(http).api(ServerAddress.parse("http://127.0.0.1:${server.port}", allowLocalCleartext = true))
+            val body = FileUpload(file, "a.txt", beforeEnd = { Thread.sleep(1_000) })
+            val error = failure { short.uploadFile("Bearer t", "00000000-0000-4000-8000-000000000001", body) }
+            assertEquals(ApiException.NETWORK, error.code)
+            assertTrue("the cause was ${error.cause}", error.cause is InterruptedIOException)
+        } finally {
+            file.delete()
+        }
     }
 
     private val fileId = "00000000-0000-4000-8005-000000000001"
