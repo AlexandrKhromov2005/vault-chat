@@ -223,10 +223,22 @@ abstract class ChatDao {
     )
     protected abstract suspend fun resolveOutgoing(roomId: String)
 
+    @Query("SELECT EXISTS (SELECT 1 FROM rooms_listed)")
+    protected abstract suspend fun roomsListed(): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    protected abstract suspend fun insertRoomsListed(listed: RoomsListedEntity)
+
     /**
      * Stores a room listing in its order, above every stored room; their
      * activity is assigned here. With [complete], rooms that are not listed
      * are deleted with their messages; returns their IDs.
+     *
+     * A dialog in the listing that an earlier complete listing did not have was
+     * opened with the user since: all of it is unread. An empty block says so
+     * for as long as the room takes to load, and however often that fails. What
+     * the first listing of a device finds is history, and counts as read when
+     * it loads (Timeline.latest), as does a channel the user was added to.
      */
     @Transaction
     open suspend fun storeRoomList(rooms: List<RoomEntity>, complete: Boolean): List<String> {
@@ -234,7 +246,12 @@ abstract class ChatDao {
         val base = maxActivity() + rooms.size + 1
         val stored = rooms.mapIndexed { index, room -> room.copy(activity = base - index) }
         upsertRooms(stored)
+        if (roomsListed()) {
+            stored.filter { it.kind == RoomEntity.DIRECT && it.roomId !in before }
+                .forEach { upsertTimeline(TimelineEntity(it.roomId, newest = 0, oldest = 1, lastRead = 0)) }
+        }
         if (!complete) return emptyList()
+        insertRoomsListed(RoomsListedEntity())
         val listed = stored.mapTo(HashSet()) { it.roomId }
         // A listing may miss a room that moved meanwhile; a room with unsent
         // messages is deleted only once the server confirms it (ChatSync).

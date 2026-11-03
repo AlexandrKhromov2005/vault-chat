@@ -256,6 +256,13 @@ data class NotifiedEntity(
     val sequence: Long,
 )
 
+/**
+ * Has a row once a complete room list of the account has been stored on this
+ * device, so that a room in a later listing is known to be new (ChatDao).
+ */
+@Entity(tableName = "rooms_listed")
+data class RoomsListedEntity(@PrimaryKey val id: Int = 1)
+
 /** A room with messages that no notification has shown, up to [newest]. */
 data class NoticeRoom(
     @ColumnInfo(name = "room_id") val roomId: String,

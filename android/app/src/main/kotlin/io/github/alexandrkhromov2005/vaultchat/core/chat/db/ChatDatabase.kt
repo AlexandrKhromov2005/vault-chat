@@ -17,7 +17,7 @@ import java.security.MessageDigest
     entities = [
         RoomEntity::class, TimelineEntity::class, MessageEntity::class, ProfileEntity::class, OutgoingEntity::class,
         MemberEntity::class, RosterEntity::class, FileEntity::class, OutgoingFileEntity::class,
-        NotifiedEntity::class,
+        NotifiedEntity::class, RoomsListedEntity::class,
     ],
     // 2: times in microseconds instead of milliseconds.
     // 3: the outgoing queue.
@@ -25,7 +25,8 @@ import java.security.MessageDigest
     // 5: rosters of rooms.
     // 6: metadata of files, files of queued messages.
     // 7: what notifications have shown.
-    version = 7,
+    // 8: whether a complete room list has been stored.
+    version = 8,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun dao(): ChatDao

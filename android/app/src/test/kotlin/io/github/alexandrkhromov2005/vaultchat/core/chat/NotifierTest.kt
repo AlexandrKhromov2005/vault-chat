@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -168,6 +169,86 @@ class NotifierTest {
         writable.execSQL("DROP TRIGGER no_mark")
         repeat(2) { notifier.check() }
         assertEquals(listOf("new 1"), texts())
+    }
+
+    private val carol = "00000000-0000-4000-8000-0000000000cc"
+
+    private suspend fun unread(roomId: String) = dao.roomItem(me, roomId).first()!!.unread
+
+    @Test
+    fun theFirstMessageOfANewDialogNotifiesAndIsUnread() = runBlocking {
+        server.addDialog(1, bob, "bob")
+        sync.syncNow()
+
+        val room = server.addDialog(2, carol, "carol")
+        server.post(room, sender = carol, text = "hi")
+        sync.syncNow()
+        notifier().check()
+
+        assertEquals(listOf("hi 1"), texts())
+        assertEquals(1, unread(room))
+        assertEquals("carol", posted.single().single().messages.single().peerName)
+    }
+
+    @Test
+    fun theFirstDialogOfAnAccountWithoutRoomsNotifies() = runBlocking {
+        // Nothing stored after the first sync, and the process has gone since.
+        sync.syncNow()
+        val restarted = ChatSync(dao, me, server.requests, scope, System::currentTimeMillis)
+
+        val room = server.addDialog(1, carol, "carol")
+        server.post(room, sender = carol, text = "hi")
+        restarted.syncNow()
+        notifier().check()
+
+        assertEquals(listOf("hi 1"), texts())
+        assertEquals(1, unread(room))
+    }
+
+    @Test
+    fun aNewDialogThatFailedToLoadStaysNew() = runBlocking {
+        sync.syncNow()
+        val room = server.addDialog(1, carol, "carol")
+        server.post(room, sender = carol, text = "hi")
+        server.intercept = { if (it == "messages $room") 503 else null }
+        sync.syncNow()
+
+        server.intercept = { null }
+        sync.syncNow()
+        notifier().check()
+
+        assertEquals(listOf("hi 1"), texts())
+    }
+
+    @Test
+    fun theHistoryOfTheFirstLoadOfADeviceStaysSilent() = runBlocking {
+        // More dialogs than one sync preloads: later syncs load the rest of the first listing.
+        val rooms = (1..(ChatSync.Limits().preloadedRooms + 3)).map { n ->
+            val peer = "00000000-0000-4000-8000-0000000001%02d".format(n)
+            server.addDialog(n, peer, "peer $n").also { server.post(it, sender = peer, text = "old") }
+        }
+        repeat(3) { sync.syncNow() }
+        notifier().check()
+
+        assertEquals(emptyList<String>(), texts())
+        rooms.forEach { assertEquals(0, unread(it)) }
+    }
+
+    @Test
+    fun aChannelTheUserWasAddedToKeepsItsHistoryRead() = runBlocking {
+        sync.syncNow()
+        val room = server.addForeignChannel(1, bob)
+        server.post(room, sender = bob, text = "before the user came")
+        sync.syncNow()
+        notifier().check()
+
+        assertEquals(emptyList<String>(), texts())
+        assertEquals(0, unread(room))
+
+        server.post(room, sender = bob, text = "after")
+        sync.syncNow()
+        notifier().check()
+        assertEquals(listOf("after 2"), texts())
     }
 
     @Test

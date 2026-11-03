@@ -404,7 +404,8 @@ class ChatSync(
      * Lists a room the user has just joined, then loads its messages, in the
      * background. [readThrough] is the position up to which its messages
      * count as read; without one, a new dialog is unread and a channel's
-     * history is not. Events for the room while it is being added lower it
+     * history is not, as for a room a sync finds (ChatDao.storeRoomList).
+     * Events for the room while it is being added lower it
      * and make the attempt run once more after this one, so that a user who
      * left and joined again meanwhile still gets the room.
      */

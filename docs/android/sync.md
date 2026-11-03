@@ -60,10 +60,13 @@ Unread counts are local: messages of others after the newest one seen on
 this device, which is when the newest message is on screen. History present
 when a room is first loaded by a sync or by opening it counts as read; a room
 loaded because of a live message shows that message as unread. In a dialog
-that someone has just opened with the user every message is unread; in a
-channel the user was added to, history from before counts as read. When unread
-messages lie before the stored block, the count is shown as a lower bound
-("10+").
+that someone has just opened with the user every message is unread, whether a
+live event or a sync finds it: a dialog in a listing that an earlier complete
+listing of this device did not have counts as just opened, while what the first
+listing finds is history. In a channel the user was added to, history from
+before counts as read, also what was written between being added and the next
+sync when the app was not running. When unread messages lie before the stored
+block, the count is shown as a lower bound ("10+").
 
 ## Synchronisation
 
