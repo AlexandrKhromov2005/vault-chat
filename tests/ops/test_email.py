@@ -1,4 +1,4 @@
-"""Email opt-in must preserve legacy deployments and refuse incompatible images."""
+"""Email and push opt-ins must preserve legacy deployments; email also refuses incompatible images."""
 import hashlib
 import io
 import json
@@ -269,6 +269,7 @@ sys.exit(0)
             'secrets/mail/outbox.key': b'synthetic-key-fixture',
             'secrets/mail/smtp_password': b'synthetic-password-fixture',
         }
+        members.update(getattr(self, 'extra_members', {}))
         if dot_mail:
             members['./.env.email'] = members.pop('.env.email')
         if not delivery:
@@ -389,7 +390,7 @@ pathlib.Path(sys.argv[2]).write_bytes(b'synthetic encrypted output')
             (self.root / '.env.email').write_text('AUTH_PUBLIC_URL=https://vault.example.invalid\n')
         (self.root / 'secrets/mail').mkdir(parents=True, mode=0o700)
         (self.root / 'secrets/mail/outbox.key').write_bytes(b'synthetic-key-fixture')
-        (self.root / 'deployments').mkdir()
+        (self.root / 'deployments').mkdir(exist_ok=True)
         for name in ('docker-compose.vps.yml', 'docker-compose.email.yml'):
             (self.root / 'deployments' / name).write_text('services: {}\n')
         (self.root / 'minio-created').touch()
@@ -405,6 +406,55 @@ pathlib.Path(sys.argv[2]).write_bytes(b'synthetic encrypted output')
         else:
             self.assertNotIn('.env.email', names)
         self.assertIn('secrets/mail/outbox.key', names)
+
+    def test_push_stays_off_without_its_opt_in(self):
+        result = self.shell('compose config --quiet')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('docker-compose.push.yml' in ' '.join(args) for args in self.calls()))
+
+    def test_push_opt_in_adds_its_overlay(self):
+        (self.root / '.env.push').write_text('AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json\n')
+        result = self.shell('compose config --quiet')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        composed = next(args for args in self.calls() if args[0] == 'compose')
+        self.assertIn(str(self.root / '.env.push'), composed)
+        self.assertIn(str(self.root / 'deployments/docker-compose.push.yml'), composed)
+
+    def test_push_backup_is_accepted_and_restore_keeps_the_key_private(self):
+        # Auth refuses a credentials file others can read, and a backup does not
+        # keep owners: without this repair a restored Auth would not start.
+        self.extra_members = {
+            '.env.push': b'AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json\n',
+            'deployments/docker-compose.push.yml': b'services: {}\n',
+            'secrets/push/fcm.json': b'{"synthetic": "fixture"}',
+        }
+        result, target = self.restore_fixture(True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((target / 'secrets/push/fcm.json').stat().st_mode & 0o777, 0o400)
+        self.assertEqual((target / 'secrets/push').stat().st_mode & 0o777, 0o700)
+        self.assertEqual((target / '.env.push').stat().st_mode & 0o777, 0o600)
+        self.assertIn(['chown', '-R', '65532:65532', str(target / 'secrets/push')], self.calls())
+
+    def test_restore_refuses_a_checkout_with_a_push_opt_in(self):
+        target = self.root / 'restored'
+        target.mkdir()
+        (target / '.env.push').write_text('AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json\n')
+        self.environment['VAULT_ROOT'] = str(target)
+        backup = self.make_backup()
+        result = subprocess.run(['sh', str(ROOT / 'scripts/vps/restore.sh'), str(backup)],
+                                env=self.environment, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('fresh checkout', result.stderr)
+
+    def test_backup_configuration_keeps_the_push_opt_in(self):
+        (self.root / '.env.push').write_text('AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json\n')
+        (self.root / 'deployments').mkdir()
+        (self.root / 'deployments/docker-compose.push.yml').write_text('services: {}\n')
+        self.backup_configuration_fixture(delivery=True)
+        with tarfile.open(self.root / 'captured-config.tar.gz') as archive:
+            names = set(archive.getnames())
+        self.assertIn('.env.push', names)
+        self.assertIn('deployments/docker-compose.push.yml', names)
 
 
 if __name__ == '__main__':
