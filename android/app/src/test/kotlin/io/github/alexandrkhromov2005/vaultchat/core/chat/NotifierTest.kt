@@ -61,8 +61,12 @@ class NotifierTest {
         database.close()
     }
 
-    // Checked explicitly, as the background sync does; the collector of changes does the same.
+    // Without its collector, which never runs in a cancelled scope: these tests
+    // check explicitly, as the background sync does, and exactly when they mean to.
     private fun notifier() = Notifier(dao, me, foreground, board, "account", CoroutineScope(Dispatchers.Unconfined + SupervisorJob()).also { it.cancel() })
+
+    // With its collector, as in a session.
+    private fun collecting() = Notifier(dao, me, foreground, board, "account", scope)
 
     private fun texts() = posted.flatten().flatMap { notice -> notice.messages.map { it.text } }
 
@@ -258,8 +262,7 @@ class NotifierTest {
         sync.syncNow()
         val profiles = CompletableDeferred<Unit>()
         server.beforeUser = { profiles.await() }
-        val live = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        Notifier(dao, me, foreground, board, "account", live)
+        collecting()
 
         server.post(room, sender = bob, text = "hi")
         sync.syncNow()
@@ -270,7 +273,35 @@ class NotifierTest {
         profiles.complete(Unit)
         withTimeout(5_000) { while (posted.isEmpty()) delay(10) }
         assertEquals("bob", posted.single().single().messages.single().senderName)
-        live.cancel()
+    }
+
+    @Test
+    fun aChangeOfTheDatabaseShowsANoticeWithoutACheck() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        collecting()
+
+        server.post(room, sender = bob, text = "new")
+        sync.syncNow()
+
+        withTimeout(5_000) { while (posted.isEmpty()) delay(10) }
+        assertEquals(listOf("new 1"), texts())
+    }
+
+    @Test
+    fun whatArrivedOnScreenDoesNotPopUpOnLeavingIt() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        foreground.value = true
+        collecting()
+
+        server.post(room, sender = bob, text = "seen")
+        sync.syncNow()
+        withTimeout(5_000) { dao.noticeRoomsFlow(me).first { it.isEmpty() } }
+        foreground.value = false
+        delay(300)
+
+        assertEquals(emptyList<String>(), texts())
     }
 
     @Test
