@@ -51,7 +51,7 @@ class OldSqliteTest {
             it.getString(0)
         }
         val (major, minor) = version.split('.').map(String::toInt)
-        assertTrue("SQLite $version has the syntax of newer phones", major == 3 && minor < 24)
+        assertTrue("SQLite $version is newer than the 3.18 of API 26", major == 3 && minor <= 18)
     }
 
     @Test
