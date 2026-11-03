@@ -4,14 +4,24 @@ import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import java.io.IOException
+import java.io.InterruptedIOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 class GatewayCallTest {
     private val server = MockWebServer()
@@ -144,6 +154,70 @@ class GatewayCallTest {
     fun noContentBecomesAUnitBody() = runBlocking {
         server.enqueue(MockResponse.Builder().code(204).build())
         assertEquals(Unit, call { api.leave("Bearer t", "00000000-0000-4000-8000-000000000001").noContent() }.body)
+    }
+
+    @Test
+    fun anUploadOutOfTimeIsATimeoutInTheCause() {
+        val file = File.createTempFile("upload", ".txt").apply { writeText("hello") }
+        try {
+            val http = OkHttpClient.Builder().callTimeout(200, TimeUnit.MILLISECONDS).build()
+            val short = Gateway(http).api(ServerAddress.parse("http://127.0.0.1:${server.port}", allowLocalCleartext = true))
+            val body = FileUpload(file, "a.txt", beforeEnd = { Thread.sleep(1_000) })
+            val error = failure { short.uploadFile("Bearer t", "00000000-0000-4000-8000-000000000001", body) }
+            assertEquals(ApiException.NETWORK, error.code)
+            assertTrue("the cause was ${error.cause}", error.cause is InterruptedIOException)
+        } finally {
+            file.delete()
+        }
+    }
+
+    private val fileId = "00000000-0000-4000-8005-000000000001"
+
+    private fun transferApi(http: OkHttpClient = OkHttpClient()) =
+        Gateway(http).transferApi(ServerAddress.parse("http://127.0.0.1:${server.port}", allowLocalCleartext = true))
+
+    @Test
+    fun closingATransferBodyStopsAReadBlockedOnTheNetwork() {
+        val cancelled = CountDownLatch(1)
+        val http = OkHttpClient.Builder()
+            .eventListener(
+                object : EventListener() {
+                    override fun canceled(call: Call) = cancelled.countDown()
+                },
+            )
+            .build()
+        server.enqueue(MockResponse.Builder().body(Buffer().write(ByteArray(64 * 1024))).onResponseBody(SocketEffect.Stall).build())
+        val body = runBlocking { transferApi(http).fileContent("Bearer t", fileId).body()!! }
+        val ended = CountDownLatch(1)
+        var failure: Throwable? = null
+        thread(isDaemon = true) {
+            try {
+                val stream = body.byteStream()
+                val buffer = ByteArray(8192)
+                while (stream.read(buffer) >= 0) Unit
+            } catch (e: Throwable) {
+                failure = e
+            } finally {
+                ended.countDown()
+            }
+        }
+        assertFalse("the read did not block", ended.await(500, TimeUnit.MILLISECONDS))
+
+        body.close()
+        assertTrue("the read did not end within a second", ended.await(1, TimeUnit.SECONDS))
+        assertTrue("the call was not cancelled", cancelled.await(1, TimeUnit.SECONDS))
+        assertTrue("the read ended with $failure", failure is IOException)
+    }
+
+    @Test
+    fun aTransferBodyReadToItsEndKeepsItsConnection() = runBlocking {
+        server.enqueue(MockResponse.Builder().body("first").build())
+        server.enqueue(MockResponse.Builder().body("second").build())
+        val api = transferApi()
+        assertEquals("first", api.fileContent("Bearer t", fileId).body()!!.use { it.string() })
+        assertEquals("second", api.fileContent("Bearer t", fileId).body()!!.use { it.string() })
+        server.takeRequest()
+        assertEquals(1, server.takeRequest().exchangeIndex)
     }
 
     private fun <T : Any> failure(request: suspend () -> retrofit2.Response<T>): ApiException = runBlocking {

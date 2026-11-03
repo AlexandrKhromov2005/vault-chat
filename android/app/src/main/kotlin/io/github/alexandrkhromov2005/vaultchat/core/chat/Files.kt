@@ -64,7 +64,12 @@ enum class FileKind(val mime: String, val extension: String) {
  * Whether [file] starts with the signature of [kind]. Only a PNG or JPEG
  * whose content says so is decoded, whatever the metadata claims.
  */
-fun hasSignature(file: File, kind: FileKind): Boolean {
+fun hasSignature(file: File, kind: FileKind): Boolean = head(file)?.let { FileKind.bySignature(it) == kind } ?: false
+
+/** Like the other [viewableType], for the content of [file]; null if it cannot be read. */
+fun viewableType(kind: FileKind, file: File): String? = head(file)?.let { viewableType(kind, it) }
+
+private fun head(file: File): ByteArray? {
     val head = ByteArray(FileKind.SIGNATURE_BYTES)
     var read = 0
     try {
@@ -76,9 +81,26 @@ fun hasSignature(file: File, kind: FileKind): Boolean {
             }
         }
     } catch (e: IOException) {
-        return false
+        return null
     }
-    return FileKind.bySignature(head.copyOf(read)) == kind
+    return head.copyOf(read)
+}
+
+/**
+ * The type under which content starting with [head] may be handed to another
+ * app as a file of [kind]; null if the content is not what the metadata says.
+ * An app picks its parser by this type, so that metadata that lies could
+ * reach a parser the file was not checked for. Content of no known type goes
+ * as a generic binary.
+ */
+fun viewableType(kind: FileKind, head: ByteArray): String? {
+    val signature = FileKind.bySignature(head)
+    val matches = when (kind) {
+        FileKind.PNG, FileKind.JPEG, FileKind.PDF -> signature == kind
+        FileKind.TEXT -> signature == null && head.none { it == 0.toByte() }
+        FileKind.OTHER -> true
+    }
+    return kind.mime.takeIf { matches }
 }
 
 object FileNames {

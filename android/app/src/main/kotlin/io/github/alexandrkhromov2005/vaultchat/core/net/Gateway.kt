@@ -34,7 +34,8 @@ import java.util.concurrent.TimeUnit
  * server's retry window (see SessionManager). Requests tagged
  * [NotRepeatable] are not repeated by OkHttp either, once they began to be
  * sent. [transferApi] moves file content, with the Gateway's transfer budget
- * and bodies up to a file's size.
+ * and bodies up to a file's size, and closing such a body from another thread
+ * stops a read blocked on the network ([CancelOnClose]).
  */
 class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
     // A WebSocket has no read deadline: the server pings every 30 s, and our
@@ -60,6 +61,7 @@ class Gateway(http: OkHttpClient, private val json: Json = GatewayJson) {
 
     // The Gateway ends a transfer after 5 minutes, or after 30 s without progress.
     private val transferHttp = http.newBuilder()
+        .addInterceptor(CancelOnClose)
         .addInterceptor(OneShotBodies)
         .addInterceptor(ResponseSizeLimit(MAX_TRANSFER_BYTES))
         .readTimeout(TRANSFER_IDLE_SECONDS, TimeUnit.SECONDS)
@@ -213,6 +215,52 @@ private class OneShotBody(private val body: RequestBody) : RequestBody() {
     override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
 
     override fun isOneShot() = true
+}
+
+/**
+ * Makes a response body safe to close from another thread while it is read.
+ * A read blocks on the socket, and OkHttp's sources must not be closed under
+ * a read; cancelling the call closes the socket, which ends the read with an
+ * IOException. A body read to its end has released its connection by then,
+ * so that the connection stays in the pool.
+ */
+internal object CancelOnClose : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
+        val response = chain.proceed(chain.request())
+        return response.newBuilder().body(CancellableBody(response.body, chain.call())).build()
+    }
+}
+
+private class CancellableBody(private val body: ResponseBody, private val call: Call) : ResponseBody() {
+    private val lock = Any()
+
+    // Guarded by lock, as are reads, so that the body is closed only between them.
+    private var closed = false
+
+    private val source = object : ForwardingSource(body.source()) {
+        override fun read(sink: Buffer, byteCount: Long): Long = synchronized(lock) {
+            if (closed) throw IOException("closed")
+            super.read(sink, byteCount)
+        }
+
+        override fun close() = this@CancellableBody.close()
+    }.buffer()
+
+    override fun contentType() = body.contentType()
+
+    override fun contentLength() = body.contentLength()
+
+    override fun source() = source
+
+    override fun close() {
+        call.cancel()
+        synchronized(lock) {
+            if (!closed) {
+                closed = true
+                body.close()
+            }
+        }
+    }
 }
 
 class ResponseTooLargeException(limit: Long) : IOException("response body exceeds $limit bytes")

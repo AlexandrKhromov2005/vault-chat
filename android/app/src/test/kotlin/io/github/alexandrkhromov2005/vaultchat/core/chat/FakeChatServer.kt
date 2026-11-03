@@ -422,12 +422,21 @@ class FakeChatServer(val me: String) : GatewayApi {
     @Volatile
     var uploadSink: () -> okio.Sink = { okio.blackholeSink() }
 
+    /** Runs before an upload's body is written; throwing an IOException here is a connection that cannot be opened. */
+    @Volatile
+    var beforeUpload: () -> Unit = {}
+
+    /** Answers an upload with this status once its whole body has arrived, when it returns one. */
+    @Volatile
+    var uploadStatus: () -> Int? = { null }
+
     private var uploaded = 0
 
     /** Reads the multipart body as the Gateway does and stores the file unless the body broke off. */
     override suspend fun uploadFile(authorization: String, roomId: String, body: RequestBody): Response<FileDto> {
         log += "upload $roomId"
         intercept("upload $roomId")?.let { return error(it) }
+        beforeUpload()
         val buffer = okio.Buffer()
         val sink = uploadSink()
         // Through a tee: what reaches the server, and what the test's sink lets through.
@@ -447,6 +456,7 @@ class FakeChatServer(val me: String) : GatewayApi {
         val boundary = body.contentType()!!.parameter("boundary")!!
         val closing = "\r\n--$boundary--\r\n".encodeUtf8()
         if (!text.endsWith(closing)) return error(400)
+        uploadStatus()?.let { return error(it) }
         val headEnd = text.indexOf("\r\n\r\n".encodeUtf8())
         val head = text.substring(0, headEnd).utf8()
         val name = Regex("filename=\"((?:[^\"\\\\]|\\\\.)*)\"").find(head)!!.groupValues[1].replace(Regex("\\\\(.)"), "$1")

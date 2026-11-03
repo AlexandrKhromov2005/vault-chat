@@ -77,7 +77,7 @@ internal fun rememberMessageFiles(roomId: String, fileIds: List<String>, stored:
     val source = LocalFileSource.current
     return fileIds.map { fileId ->
         key(fileId) {
-            val initial = stored[fileId]?.let { FileState.Known(it) } ?: source.known(fileId) ?: FileState.Loading
+            val initial = stored[fileId]?.let { FileState.Known(it) } ?: source.known(roomId, fileId) ?: FileState.Loading
             val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(initial)
             MessageFile(fileId, state)
         }
@@ -101,7 +101,7 @@ internal fun rememberOutgoingFiles(
         val fileId = file.fileId
         if (fileId != null) {
             key(fileId) {
-                val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(source.known(fileId) ?: FileState.Loading)
+                val state by remember(source, roomId, fileId) { source.metadata(roomId, fileId) }.collectAsState(source.known(roomId, fileId) ?: FileState.Loading)
                 MessageFile(fileId, state, kind = FileKind.of(file.type))
             }
         } else {

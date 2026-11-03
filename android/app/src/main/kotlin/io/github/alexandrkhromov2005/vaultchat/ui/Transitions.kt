@@ -8,8 +8,12 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.IntOffset
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
 
 /**
  * Screens slide sideways, as in other messengers: a new screen comes in from
@@ -20,27 +24,43 @@ import androidx.navigation.NavBackStackEntry
  * its own background, so the one below does not show through.
  */
 object ScreenTransitions {
-    val enter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+    /** A navigation host whose screens move as described above. */
+    @Composable
+    fun Host(navController: NavHostController, startDestination: Any, builder: NavGraphBuilder.() -> Unit) {
+        NavHost(
+            navController,
+            startDestination = startDestination,
+            enterTransition = enter,
+            exitTransition = exit,
+            popEnterTransition = popEnter,
+            popExitTransition = popExit,
+            predictivePopEnterTransition = gestureEnter,
+            predictivePopExitTransition = gestureExit,
+            builder = builder,
+        )
+    }
+
+    private val enter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
         slideIntoContainer(SlideDirection.Start, spec())
     }
 
-    val exit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+    private val exit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
         slideOutOfContainer(SlideDirection.Start, spec()) { it / PARALLAX }
     }
 
-    val popEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+    private val popEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
         slideIntoContainer(SlideDirection.End, spec()) { it / PARALLAX }
     }
 
-    val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+    private val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
         slideOutOfContainer(SlideDirection.End, spec())
     }
 
-    val gestureEnter: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> EnterTransition = {
+    private val gestureEnter: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> EnterTransition = {
         slideIntoContainer(SlideDirection.End, spec(LinearEasing)) { it / PARALLAX }
     }
 
-    val gestureExit: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition = {
+    private val gestureExit: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition = {
         slideOutOfContainer(SlideDirection.End, spec(LinearEasing))
     }
 

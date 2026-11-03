@@ -1,5 +1,6 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
+import android.content.Context
 import android.net.Uri
 import android.os.Looper
 import androidx.lifecycle.ViewModelProvider
@@ -15,6 +16,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.FileKind
 import io.github.alexandrkhromov2005.vaultchat.core.chat.SessionFiles
 import io.github.alexandrkhromov2005.vaultchat.core.chat.Staging
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
 import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
@@ -92,7 +94,11 @@ class ConversationDraftTest {
 
     private fun model(): ConversationViewModel = ViewModelProvider.create(
         store,
-        viewModelFactory { initializer { ConversationViewModel(chat, roomId) { uri -> picked.getValue(uri) } } },
+        viewModelFactory {
+            initializer {
+                ConversationViewModel(chat, roomId, ApplicationProvider.getApplicationContext<Context>().packageName) { uri -> picked.getValue(uri) }
+            }
+        },
     )[ConversationViewModel::class.java]
 
     private fun pick(name: String, content: ByteArray): Uri {
@@ -111,6 +117,14 @@ class ConversationDraftTest {
     }
 
     private fun staged() = staging.list().orEmpty().toSet()
+
+    @Test
+    fun filesStoredForAnotherRoomAreNotReadWithAMessage() = runBlocking {
+        val fileId = server.id(5, 1)
+        database.dao().storeFile(FileEntity(fileId, roomId, me, "a.txt", "text/plain", 1, 0))
+        assertEquals(setOf(fileId), chat.storedFiles(roomId, listOf(fileId)).keys)
+        assertEquals(emptySet<String>(), chat.storedFiles(server.id(1, 2), listOf(fileId)).keys)
+    }
 
     @Test
     fun pickedFilesAreCheckedAndAtMostFiveAreKept() {
@@ -137,6 +151,47 @@ class ConversationDraftTest {
         settle { notices.size == 3 }
         assertEquals(DraftNotice(null, null), notices.last())
         assertEquals(5, staged().size)
+    }
+
+    private fun attachReading(model: ConversationViewModel, uri: Uri, content: () -> java.io.InputStream, opened: MutableList<Uri>) {
+        picked[uri] = PickedFile(uri.lastPathSegment.orEmpty()) {
+            opened += uri
+            content()
+        }
+        model.attach(listOf(uri))
+        settle { model.staging.value == 0 }
+    }
+
+    @Test
+    fun onlyContentOfOtherAppsIsAttached() {
+        val model = model()
+        val notices = mutableListOf<DraftNotice>()
+        CoroutineScope(Dispatchers.Main).launch { model.notices.collect { notices += it } }
+        shadowOf(Looper.getMainLooper()).idle()
+        val secret = temporary.newFile("private.db").apply { writeText("secret") }
+        val own = ApplicationProvider.getApplicationContext<Context>().packageName
+        val opened = mutableListOf<Uri>()
+        val refused = listOf(
+            Uri.fromFile(secret),
+            Uri.parse("http://example.org/a.txt"),
+            // The app's own providers, one of which serves the attachment cache.
+            Uri.parse("content://$own/a.txt"),
+            Uri.parse("content://$own.files/attachments/a.txt"),
+            Uri.parse("content://$own.androidx-startup/a.txt"),
+            // The same provider, addressed for a user.
+            Uri.parse("content://0@$own.files/attachments/a.txt"),
+        )
+        for (uri in refused) {
+            attachReading(model, uri, { secret.inputStream() }, opened)
+            assertEquals("attached $uri", emptyList<Any>(), model.draft.value)
+        }
+        assertEquals("opened", emptyList<Uri>(), opened)
+        settle { notices.size == refused.size }
+        assertEquals(refused.map { DraftNotice(it.lastPathSegment, Staging.Problem.UNREADABLE) }, notices)
+
+        // Another app's provider, even with a name that starts like this app's.
+        attachReading(model, Uri.parse("content://${own}x.files/b.txt"), { "b".toByteArray().inputStream() }, opened)
+        assertEquals(listOf("b.txt"), model.draft.value.map { it.name })
     }
 
     @Test

@@ -181,6 +181,9 @@ abstract class ChatDao {
     @Query("UPDATE outgoing_files SET maybe_stored = :maybe WHERE client_message_id = :clientMessageId AND position = :position")
     abstract fun setMaybeStored(clientMessageId: String, position: Int, maybe: Boolean)
 
+    @Query("UPDATE outgoing_files SET timeouts = :timeouts WHERE client_message_id = :clientMessageId AND position = :position")
+    abstract suspend fun setUploadTimeouts(clientMessageId: String, position: Int, timeouts: Int)
+
     /** Records an uploaded file; false if its message is gone. */
     @Query(
         "UPDATE outgoing_files SET file_id = :fileId, maybe_stored = 0 " +
@@ -198,9 +201,9 @@ abstract class ChatDao {
     )
     protected abstract suspend fun updateRequeued(failedId: String, clientMessageId: String, position: Long, afterSequence: Long)
 
-    // The user decided to upload again what may already be stored.
-    @Query("UPDATE outgoing_files SET maybe_stored = 0 WHERE client_message_id = :clientMessageId")
-    protected abstract suspend fun clearMaybeStored(clientMessageId: String)
+    // The user decided to upload again what may already be stored, and on a network that may do better.
+    @Query("UPDATE outgoing_files SET maybe_stored = 0, timeouts = 0 WHERE client_message_id = :clientMessageId")
+    protected abstract suspend fun resetUploads(clientMessageId: String)
 
     /**
      * Deletes the rows of a room that its stored block now shows: those that a
@@ -283,7 +286,7 @@ abstract class ChatDao {
     open suspend fun requeue(failedId: String, clientMessageId: String): Boolean {
         val row = outgoingRow(failedId)?.takeIf { it.state == OutgoingEntity.FAILED } ?: return false
         updateRequeued(failedId, clientMessageId, maxPosition() + 1, timeline(row.roomId)?.newest ?: 0)
-        clearMaybeStored(clientMessageId)
+        resetUploads(clientMessageId)
         return true
     }
 

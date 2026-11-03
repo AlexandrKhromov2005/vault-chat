@@ -61,6 +61,28 @@ class FilesTest {
     }
 
     @Test
+    fun otherAppsGetContentOnlyUnderTheTypeItHas() {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+        val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xe0.toByte())
+        val pdf = "%PDF-1.7".toByteArray()
+        val text = "<svg on".toByteArray()
+
+        assertEquals("image/png", viewableType(FileKind.PNG, png))
+        assertEquals("image/jpeg", viewableType(FileKind.JPEG, jpeg))
+        assertEquals("application/pdf", viewableType(FileKind.PDF, pdf))
+        assertEquals("text/plain", viewableType(FileKind.TEXT, text))
+
+        // Metadata that claims a type does not make other bytes of that type.
+        for (head in listOf(jpeg, pdf, text, ByteArray(0))) assertNull(viewableType(FileKind.PNG, head))
+        for (head in listOf(png, pdf, text, ByteArray(0))) assertNull(viewableType(FileKind.JPEG, head))
+        for (head in listOf(png, jpeg, text, ByteArray(0))) assertNull(viewableType(FileKind.PDF, head))
+        for (head in listOf(png, jpeg, pdf, byteArrayOf(0x41, 0, 0x42))) assertNull(viewableType(FileKind.TEXT, head))
+
+        // Generic whatever it is: no app takes it for a known type.
+        for (head in listOf(png, jpeg, pdf, text)) assertEquals("application/octet-stream", viewableType(FileKind.OTHER, head))
+    }
+
+    @Test
     fun shownNamesLoseFormatAndControlCharacters() {
         // U+202E reverses the visible order: "report‮gpj.exe" looks like "reportexe.jpg".
         assertEquals("reportgpj.exe", FileNames.display("report‮gpj.exe"))

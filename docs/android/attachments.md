@@ -54,7 +54,11 @@ only in the documentation:
 
 ## Trust boundaries
 
-- **Picked files.** Read once through the content URI the picker granted,
+- **Picked files.** Only `content://` URIs of other apps are read: reading
+  runs with this app's rights, so a `file://` URI or one of its own providers
+  from a picker that is not the system's could attach its private files. The
+  rest is refused as unreadable, before anything is opened. A file is read
+  once through the content URI the picker granted,
   copied into the app's private storage and checked there: 1 byte to
   10 MiB, a PNG, JPEG or PDF signature or UTF-8 text without NUL, so that
   a HEIC photo or a document of another type is refused before it is
@@ -66,7 +70,9 @@ only in the documentation:
   and the staged size; metadata must name the requested file and the
   message's room, a size of 1 byte to 10 MiB and a name of at most 255
   bytes. Content must not exceed the metadata's size, and must have exactly
-  it. Anything else is an invalid response and is not stored.
+  it. Anything else is an invalid response and is not stored. A file stored
+  for one room shows as unavailable in a message of another that lists it,
+  without its name or content.
 - **File names and types from the server** are untrusted. Names are shown
   as plain text with bidirectional and other format characters removed,
   and never used as paths: a cached file is stored under its file ID, in a
@@ -78,7 +84,13 @@ only in the documentation:
 - **Other apps.** They get a `content://` URI of a cached copy from a
   `FileProvider` that is not exported and serves only the attachment
   cache, with a temporary read grant. The access token never leaves the
-  app, not even in a URL.
+  app, not even in a URL. An app picks its parser by the type it is given,
+  so that a file goes to another app only if its first bytes match the
+  metadata's type: a PNG, JPEG or PDF signature, or for text none of these
+  and no NUL. Otherwise Open is refused with a message, the simpler of the
+  safe choices: offering it as a generic binary would still show the
+  metadata's name and extension. Save still works, since it runs nothing:
+  it stores the bytes under the metadata's name where the user chose.
 - **Session binding.** Requests go through the session like all others.
   Staged copies and cached content live in directories named after the
   session's database (`ChatDatabases.fileName`), are deleted on sign-out
@@ -99,7 +111,8 @@ order of `attachment_ids`; follows a new key after a conflict, deleted with
 the row), `name`, `type` (sniffed), `size`, `staged` (the copy's name in the
 staging directory), `file_id` (null until uploaded) and `maybe_stored`
 (the last attempt's body may have reached the server whole, and no answer
-arrived). The queue row keeps its text, which may now be empty.
+arrived) and `timeouts` (attempts that ran out of time while the file was
+being sent). The queue row keeps its text, which may now be empty.
 
 Staged copies are in `noBackupFilesDir/outbox/<session>/`, cached content
 in `cacheDir/attachments/<session>/<file_id>/<name>`. A staged copy is moved
@@ -135,6 +148,10 @@ answer to a send must also carry the row's file IDs in order.
   Save. Save uses the system's document creation (`CreateDocument`), so no
   storage permission is needed; Open hands the cached copy to another app
   (`ACTION_VIEW`, type from the allowlist).
+- The system has created the document by the time the user has chosen where,
+  so a save ends with the file in it, or with no document and a message. The
+  file to save is kept in the saved state while the system asks; a save also
+  goes on while Open fetches the same file.
 
 ## Sending
 
@@ -168,6 +185,7 @@ answer to a send must also carry the row's file IDs in order.
 |---|---|---|
 | `201` matching | stored | file ID stored, copy moved to the cache, next file |
 | connection failed before the closing boundary | not stored | repeated after the backoff |
+| out of time before the closing boundary, the 3rd time for this file | not stored | `FAILED` (`too_slow`) |
 | `401` | not stored | the session renews the token and repeats once |
 | `429` | not stored | everything waits for `Retry-After`, then repeats |
 | `503` | not stored (capacity, Media down) | repeated after the backoff |
@@ -177,6 +195,15 @@ answer to a send must also carry the row's file IDs in order.
 
   Sending the message then follows [send.md](send.md); its `400` (`invalid
   attachment`) is `FAILED` (`invalid`).
+- **Running out of time.** Below about 270 kbit/s a file of 10 MiB cannot
+  leave within the request deadline, and a repeat starts from the first
+  byte, so that repeating without an end would use data for nothing and hold
+  the session's one upload. An attempt that runs out of time (the deadline,
+  or no progress within 35 s) while the file is being sent counts in
+  `timeouts`, on disk; the third fails the message with `too_slow`. One that
+  never began to send, such as a connection that cannot be opened during an
+  outage, does not count, and neither does a broken connection. Retry starts
+  the count over.
 - **Retry** of a failed message uploads only the files without an ID; after
   `409` it takes a new key and keeps the IDs; the key changes in place, so
   the message's files follow it. **Cancel** is offered while a file of the
@@ -203,13 +230,15 @@ that is closed keeps running, as it runs in the session's scope.
 | Budget | Value | Why |
 |---|---|---|
 | Gateway rate limit per user and IP | 120/min, burst 30, shared | File requests (metadata, downloads, uploads) keep to their own 30/min, burst 5, next to sync's 60/min and sending's 30/min: 120 together. A file shown on screen goes at once while the budget is in debt of less than its burst, so that a screen of pictures loads without waiting; uploads wait for a token; a tap takes one at once |
-| Concurrent metadata reads and downloads | 2 | Pictures of one screen arrive in parallel without crowding out other requests |
+| Concurrent metadata reads | 2 | Bubbles of one screen arrive in parallel without crowding out other requests |
+| Concurrent downloads | 2, each until its body is read | Pictures of one screen arrive in parallel; a slow download never holds up metadata |
 | Concurrent uploads | 1 per session | The Gateway allows 2 per user; one is left for another device |
 | File size | 10 MiB | Server limit, checked before queuing and while downloading |
 | Files per message | 5 | Server limit |
 | Staged copies | at most 5 per draft and 5 per queued message, 10 MiB each | Chosen by the user's own hand |
 | Download cache | 100 MiB per session, least recently used first; the system may clear it any time | A cleared file is downloaded again |
 | Request deadline | 5 minutes, progress within 30 s (writing and reading) | The Gateway's transfer budget |
+| Upload attempts that run out of time | 3 per file, counted on disk, until Retry | At most about 16 minutes and 3 times the file's data; then the user decides |
 | Decoded thumbnails | scaled to the size shown, kept in Coil's memory cache | A 40-megapixel image is never decoded whole |
 
 ## Failure behaviour
@@ -218,14 +247,20 @@ that is closed keeps running, as it runs in the session's scope.
 |---|---|
 | No network while sending | The message waits with its files, as text does |
 | Connection lost during an upload | Repeated after the backoff from the first byte |
+| Upload keeps running out of time | The message fails (`too_slow`) after 3 attempts; the next messages go on; Retry starts over |
 | Connection lost after the whole file was sent | The message fails (`upload`); Retry uploads the file again; the first copy may stay on the server unused |
 | Process killed during an upload | The next run repeats it, or fails it if the closing boundary had left |
+| The flag cannot be written (disk full) | The call fails like a broken connection, on OkHttp's thread too, and the closing boundary does not leave; the message stays queued and repeats after the backoff |
 | A picked file is too large, empty or of another type | Refused when picked, with a message; nothing is queued |
 | The server rejects a file | The message fails (`file`); Delete or Retry |
 | Media down | Uploads and sends with files repeat after the backoff; text messages are not affected |
 | Metadata or content not available (`404`) | "File unavailable"; the message is shown otherwise |
 | Download broken or larger than announced | Discarded; the file shows a retry |
+| Nobody waits for a download any more (scrolled away, sign-out) | The call is cancelled, which ends a read blocked on the network at once; what arrived is discarded. A new download of the file waits for the old one to end and looks in the cache first |
 | No app opens the file | A message says so; Save still works |
+| Content is not of the type in its metadata | Open is refused with a message; Save still works |
+| Saving fails (download, copy, no file to save) | The document is deleted, or emptied if the provider cannot delete it, and a message says so |
+| The screen goes away during a save | Saving stops, the document is deleted and a toast says so, since the screen's messages went with it |
 | Access lost to a room | Its files fail like its messages; metadata goes with the room |
 | Sign-out, session end | Staged copies and the cache are deleted with the database |
 
@@ -239,9 +274,13 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    the copies are in place without a download.
 2. A connection broken before the closing boundary repeats the upload
    after the backoff; broken after it fails the message without a repeat;
-   the flag is set exactly before the closing boundary leaves.
+   the flag is set exactly before the closing boundary leaves. Running out of
+   time 3 times fails the message, also across a new session; Retry starts
+   over; a connection that breaks or cannot be opened is not counted.
 3. A process killed during an upload: a new session repeats it, or fails it
-   if the flag is set.
+   if the flag is set. The flag is on disk as the closing boundary arrives,
+   a new queue started at that moment fails the message with one upload, and
+   a `201` and a `503` clear the flag.
 4. Answers: `401` repeats once, `429` pauses everything, `503` repeats, `400`
    and `413` fail with `file`, `404` with `no_access`, `504` with `upload`.
 5. Retry after `upload` uploads only the files without an ID; after `409`
@@ -255,11 +294,19 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    server's rules; orphaned copies are swept when the session starts.
 9. Metadata: stored once, a file of another room or a bogus size is
    refused, `404` is remembered, loads are shared and keep to the budget and
-   the concurrency.
+   the concurrency; a stored file asked for by a message of another room is
+   not shown there, by any of the ways it is read.
 10. Downloads: written whole or not at all, larger or shorter than
     announced is discarded, the cache keeps to its size, sign-out deletes it.
-11. Only PNG and JPEG with a matching signature are decoded; names are shown
-    without format characters; the `FileProvider` serves only the cache and
+    A collector leaving, or the session ending, closes a body blocked in a
+    read within a second, while another collector keeps the download going;
+    closing a real call's body from another thread cancels the call; a copy
+    stored while a download was stopping or waiting for its turn is not
+    requested again. At most 2 bodies are read at once, whatever metadata
+    needs meanwhile.
+11. Only PNG and JPEG with a matching signature are decoded; Open refuses
+    content that does not match its type; names are shown without format
+    characters; the `FileProvider` serves only the cache and
     is not exported (checked by its configuration: FileProvider compares
     paths with `/` and cannot run on a Windows build machine).
 12. Compose: a bubble with pictures and files keeps its size while they
@@ -267,13 +314,23 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     hand-over to the stored message keeps the files on screen.
 13. The conversation's draft (its model): picked files are checked, kept in
     the order they were picked, at most 5; a removed file and an unsent
-    draft are deleted, while files of a message being queued stay.
-14. The upload body: one part named `file` with a quoted name, the mark set
+    draft are deleted, while files of a message being queued stay; `file://`
+    URIs and the app's own providers are refused without being opened.
+14. Saving through a document provider: the file arrives, also while Open
+    fetches it and after the Activity was recreated while the system asked
+    where; a failed download or copy and a screen that went away leave no
+    document and say so; a cancelled picker says nothing.
+15. The upload body: one part named `file` with a quoted name, the mark set
     after everything before the closing boundary has left and before it,
-    not set when the body breaks off earlier, one-shot.
+    not set when the body breaks off earlier, one-shot. A mark that throws
+    fails an enqueued call as an ordinary error; nothing reaches the thread's
+    uncaught exception handler, and the message stays queued.
 
 Not covered by automated tests: the pickers, the viewer, other apps opening
 files, decoding real photos (EXIF rotation), checked by hand on a device.
+
+A process killed during a save leaves what the document had by then: nothing
+runs to clean it up, and the app does not remember the document afterwards.
 
 ## Not in this stage
 

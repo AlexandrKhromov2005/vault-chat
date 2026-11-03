@@ -157,6 +157,8 @@ sealed interface RoomView {
 class ConversationViewModel(
     private val chat: ChatSession,
     private val roomId: String,
+    /** This app's package, whose providers are not read as picked files. */
+    private val ownPackage: String,
     /** Reads picked files; their URIs come from the system pickers. */
     private val pick: (Uri) -> PickedFile,
 ) : ViewModel() {
@@ -178,7 +180,7 @@ class ConversationViewModel(
 
     val rows: Flow<PagingData<ChatRow>> = chat.messages(roomId)
         .map { page ->
-            page.map { ChatRow.Message(it, chat.storedFiles(it.message.attachmentIds)) as ChatRow }
+            page.map { ChatRow.Message(it, chat.storedFiles(roomId, it.message.attachmentIds)) as ChatRow }
                 .insertSeparators { newer, older ->
                     // A heading above the oldest message of each day; the list is
                     // newest first, so it goes after that message.
@@ -259,6 +261,10 @@ class ConversationViewModel(
     }
 
     private fun stage(uri: Uri) {
+        if (!isPickable(uri, ownPackage)) {
+            _notices.tryEmit(DraftNotice(uri.lastPathSegment, Staging.Problem.UNREADABLE))
+            return
+        }
         val picked = pick(uri)
         val input = try {
             picked.open()
@@ -347,8 +353,8 @@ class ConversationViewModel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, onMembers: () -> Unit) {
-    val resolver = LocalContext.current.applicationContext.contentResolver
-    val model = viewModel { ConversationViewModel(chat, roomId, resolver::picked) }
+    val application = LocalContext.current.applicationContext
+    val model = viewModel { ConversationViewModel(chat, roomId, application.packageName, application.contentResolver::picked) }
     val room by model.room.collectAsStateWithLifecycle()
     val connection by model.connection.collectAsStateWithLifecycle()
     val rows = model.rows.collectAsLazyPagingItems()
@@ -904,6 +910,7 @@ private fun OutgoingBubble(
         entity.error == OutgoingEntity.ERROR_NO_ACCESS -> stringResource(R.string.message_failed_no_access)
         entity.error == OutgoingEntity.ERROR_UPLOAD -> stringResource(R.string.message_failed_upload)
         entity.error == OutgoingEntity.ERROR_FILE -> stringResource(R.string.message_failed_file)
+        entity.error == OutgoingEntity.ERROR_TOO_SLOW -> stringResource(R.string.message_failed_too_slow)
         else -> stringResource(R.string.message_failed_rejected)
     }
     // Never sent while a file waits for its upload, so it can be cancelled.

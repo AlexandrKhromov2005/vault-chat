@@ -7,6 +7,7 @@ import okio.BufferedSink
 import okio.ByteString.Companion.encodeUtf8
 import okio.source
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -18,6 +19,11 @@ import java.util.UUID
  * first byte leaves: a failure before that cannot have stored the file.
  * [onStart] runs before the first byte of every attempt. The body is
  * one-shot, so OkHttp never sends it again by itself.
+ *
+ * Writing runs on OkHttp's own thread, which rethrows anything but an
+ * IOException where nothing catches it and so ends the process. The marks
+ * write to the database, which may fail, so such a failure leaves as an
+ * IOException: the call fails, and the closing boundary has not left.
  */
 class FileUpload(
     private val file: File,
@@ -35,6 +41,11 @@ class FileUpload(
     private val tail = "\r\n--$boundary--\r\n".encodeUtf8()
     private val size = file.length()
 
+    /** Whether writing began, so that bytes may have left. */
+    @Volatile
+    var started = false
+        private set
+
     /** Whether the last attempt began to send the closing boundary. */
     @Volatile
     var endStarted = false
@@ -47,6 +58,15 @@ class FileUpload(
     override fun isOneShot(): Boolean = true
 
     override fun writeTo(sink: BufferedSink) {
+        try {
+            write(sink)
+        } catch (e: RuntimeException) {
+            throw IOException("the upload could not go on", e)
+        }
+    }
+
+    private fun write(sink: BufferedSink) {
+        started = true
         endStarted = false
         onStart()
         sink.write(head)
@@ -56,11 +76,11 @@ class FileUpload(
                 val read = source.read(sink.buffer, SEGMENT_BYTES)
                 if (read < 0) break
                 sent += read
-                if (sent > size) throw java.io.IOException("the file grew while it was sent")
+                if (sent > size) throw IOException("the file grew while it was sent")
                 sink.emitCompleteSegments()
                 onProgress(sent)
             }
-            if (sent != size) throw java.io.IOException("the file shrank while it was sent")
+            if (sent != size) throw IOException("the file shrank while it was sent")
         }
         sink.flush()
         beforeEnd()

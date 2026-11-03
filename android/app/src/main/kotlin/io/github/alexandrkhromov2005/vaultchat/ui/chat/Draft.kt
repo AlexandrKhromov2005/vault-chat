@@ -47,6 +47,19 @@ import java.io.InputStream
 /** A picked file: its name and a way to read it once. */
 class PickedFile(val name: String, val open: () -> InputStream?)
 
+/**
+ * Whether a picked URI may be read: only content of another app. Reading runs
+ * with this app's own rights, so that a `file://` URI or one of its own
+ * providers, returned by a picker that is not the system's, could otherwise
+ * attach its private files to a message and send them.
+ */
+internal fun isPickable(uri: Uri, ownPackage: String): Boolean {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+    // A prefix addresses the same provider for a user: content://0@authority.
+    val authority = uri.authority?.substringAfterLast('@') ?: return false
+    return authority != ownPackage && !authority.startsWith("$ownPackage.")
+}
+
 /** Reads picked content URIs with the grant the picker gave. */
 fun ContentResolver.picked(uri: Uri): PickedFile {
     val name = try {
