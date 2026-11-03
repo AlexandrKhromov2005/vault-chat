@@ -22,7 +22,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -32,6 +35,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class SessionManagerTest {
+    @get:Rule
+    val folder = TemporaryFolder()
+
     private val server = MockWebServer()
     private val store = MemoryStore()
     private val requests: MutableList<String> = Collections.synchronizedList(mutableListOf())
@@ -484,6 +490,25 @@ class SessionManagerTest {
 
         assertTrue(auth.presented.isEmpty())
         assertEquals("refresh-0", store.session?.refreshToken)
+    }
+
+    @Test
+    fun aRefreshIsNotSentWhenTheRealStoreCanNeitherMarkNorForgetTheToken() = runBlocking {
+        val auth = FakeAuth()
+        val cipher = JvmCipher()
+        val disk = EncryptedFileSessionStore(UndeletableFile(File(folder.newFolder(), "session.bin").path), cipher)
+        val stored = StoredSession(address.toString(), "user-1", "alice", "refresh-0")
+        disk.save(stored)
+        val manager = SessionManager(disk, gateway, allowLocalCleartext = true, now = { deviceNow }, elapsed = { deviceElapsed })
+        manager.restore()
+        // The mark cannot be saved, and neither the file nor the key can be removed.
+        cipher.failEncryptions = 2
+        cipher.failDestroy = keystoreFailure
+
+        failure { manager.accessToken() }
+
+        assertTrue(auth.presented.isEmpty())
+        assertEquals(stored, disk.load())
     }
 
     @Test

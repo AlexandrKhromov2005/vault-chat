@@ -56,9 +56,10 @@ type AuthServiceClient interface {
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
-	// refresh token is revoked (rotation). Presenting a token that was already
-	// rotated means it leaked, so every session of its owner is revoked; a
-	// logged-out token is just rejected.
+	// refresh token is revoked (rotation). A prompt retry of a rotation whose
+	// response was lost gets a pair for the same successor session. Any other
+	// use of a rotated token means it leaked, so every session of its owner is
+	// revoked; a logged-out token is just rejected.
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
 	// Logout ends the login of the given refresh token: its session and the
 	// sessions it was rotated into are revoked. It is idempotent.
@@ -261,9 +262,10 @@ type AuthServiceServer interface {
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(context.Context, *ValidateTokenRequest) (*ValidateTokenResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
-	// refresh token is revoked (rotation). Presenting a token that was already
-	// rotated means it leaked, so every session of its owner is revoked; a
-	// logged-out token is just rejected.
+	// refresh token is revoked (rotation). A prompt retry of a rotation whose
+	// response was lost gets a pair for the same successor session. Any other
+	// use of a rotated token means it leaked, so every session of its owner is
+	// revoked; a logged-out token is just rejected.
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
 	// Logout ends the login of the given refresh token: its session and the
 	// sessions it was rotated into are revoked. It is idempotent.
