@@ -27,6 +27,19 @@ class NotifierTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val foreground = MutableStateFlow(false)
     private val posted = Collections.synchronizedList(mutableListOf<List<RoomNotice>>())
+    private val shown = Collections.synchronizedSet(mutableSetOf<String>())
+    private val board = object : NoticeBoard {
+        override fun post(account: String, notices: List<RoomNotice>) {
+            posted += notices
+            shown += notices.map { it.roomId }
+        }
+
+        override fun shownRooms(): Set<String> = shown.toSet()
+
+        override fun cancel(roomId: String) {
+            shown -= roomId
+        }
+    }
     private lateinit var database: ChatDatabase
     private lateinit var dao: ChatDao
     private lateinit var sync: ChatSync
@@ -45,7 +58,7 @@ class NotifierTest {
     }
 
     // Checked explicitly, as the background sync does; the collector of changes does the same.
-    private fun notifier() = Notifier(dao, me, foreground, { posted += it }, CoroutineScope(Dispatchers.Unconfined + SupervisorJob()).also { it.cancel() })
+    private fun notifier() = Notifier(dao, me, foreground, board, "account", CoroutineScope(Dispatchers.Unconfined + SupervisorJob()).also { it.cancel() })
 
     private fun texts() = posted.flatten().flatMap { notice -> notice.messages.map { it.text } }
 
@@ -152,6 +165,24 @@ class NotifierTest {
         writable.execSQL("DROP TRIGGER no_mark")
         repeat(2) { notifier.check() }
         assertEquals(listOf("new 1"), texts())
+    }
+
+    @Test
+    fun aRoomTheUserLeftLosesItsNotification() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        val other = server.addChannel(2)
+        sync.syncNow()
+        server.post(room, sender = bob, text = "new")
+        server.post(other, sender = bob, text = "other")
+        sync.syncNow()
+        val notifier = notifier()
+        notifier.check()
+        assertEquals(setOf(room, other), shown.toSet())
+
+        sync.forget(room)
+        notifier.check()
+
+        assertEquals(setOf(other), shown.toSet())
     }
 
     @Test

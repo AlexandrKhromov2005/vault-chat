@@ -3,6 +3,7 @@ package io.github.alexandrkhromov2005.vaultchat.core.chat
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
@@ -286,6 +287,88 @@ class ChatSessionsTest {
         sessions.follow(MutableStateFlow(SessionState.SignedOut(SessionState.Reason.NONE)))
 
         assertTrue(withTimeout(1_000) { sendQueuedMessages(sessions, budgetMs = 60_000) })
+    }
+
+    /** Records what is posted; [posting] holds a post under way until it is released. */
+    private class WatchedBoard : NoticeBoard {
+        val shown: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+        var entered = CountDownLatch(0)
+        var release = CountDownLatch(0)
+
+        override fun post(account: String, notices: List<RoomNotice>) {
+            entered.countDown()
+            release.await()
+            shown += notices.map { it.roomId }
+        }
+
+        override fun shownRooms(): Set<String> = shown.toSet()
+
+        override fun cancel(roomId: String) {
+            shown -= roomId
+        }
+    }
+
+    /** Stores an unread message of someone else, as a sync would. */
+    private suspend fun leaveAnUnshownMessage(): String {
+        val roomId = "00000000-0000-4000-8000-000000000001"
+        val database = databases.open(server.toString(), alice.userId)
+        val dao = database.dao()
+        dao.storeRoomList(listOf(RoomEntity(roomId, RoomEntity.CHANNEL, "general", null, false, 0, null, null, 0)), complete = true)
+        val message = MessageEntity(roomId, 1, "m-1", "00000000-0000-4000-8000-0000000000bb", "c-1", "synthetic", attachments = "", createdAt = 1)
+        dao.applyLatest(roomId, listOf(message), readThrough = 0)
+        database.close()
+        return roomId
+    }
+
+    @Test
+    fun anEndedSessionPostsNothing() = runBlocking {
+        val board = WatchedBoard()
+        val noticing = object : ChatSessionDeps by deps {
+            override val notices: NoticeBoard = board
+        }
+        val sessions = ChatSessions(databases, noticing, scope)
+        sessions.follow(MutableStateFlow(alice))
+        val chat = sessions.get(alice)
+        val screen = chat.retain()
+
+        // As when the background job's sync failed because the session ended,
+        // and the wipe has not run yet.
+        chat.end(scope)
+        leaveAnUnshownMessage()
+        chat.notifier.check()
+
+        assertEquals(emptySet<String>(), board.shown.toSet())
+        screen.close()
+    }
+
+    @Test
+    fun aPostUnderWayAtSignOutDoesNotOutliveTheCleanUp() = runBlocking {
+        val board = WatchedBoard()
+        val noticing = object : ChatSessionDeps by deps {
+            override val notices: NoticeBoard = board
+
+            override fun accountEnded() {
+                board.shown.clear()
+            }
+        }
+        board.entered = CountDownLatch(1)
+        board.release = CountDownLatch(1)
+        leaveAnUnshownMessage()
+        val state = MutableStateFlow<SessionState>(alice)
+        val sessions = ChatSessions(databases, noticing, scope)
+        sessions.follow(state)
+        val chat = sessions.get(alice)
+        val screen = chat.retain()
+        withTimeout(5_000) { while (board.entered.count > 0) delay(10) }
+
+        // The post has its notice and is about to show it.
+        state.value = SessionState.SignedOut(SessionState.Reason.LOGOUT)
+        delay(300)
+        board.release.countDown()
+        delay(500)
+
+        assertEquals("a notice appeared after the clean-up", emptySet<String>(), board.shown.toSet())
+        screen.close()
     }
 
     @Test

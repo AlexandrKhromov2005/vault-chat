@@ -9,9 +9,16 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileNames
+import io.github.alexandrkhromov2005.vaultchat.core.chat.NoticeBoard
 import io.github.alexandrkhromov2005.vaultchat.core.chat.RoomNotice
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.NoticeItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.isUuid
+import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 
 /**
  * The app's notifications (docs/android/push.md): one per room with its new
@@ -23,6 +30,7 @@ object Notifications {
     const val MESSAGES = "messages"
     const val SYNC = "sync"
     const val EXTRA_ROOM = "io.github.alexandrkhromov2005.vaultchat.ROOM"
+    const val EXTRA_ACCOUNT = "io.github.alexandrkhromov2005.vaultchat.ACCOUNT"
 
     /** The id of the background sync's own notification, below Android 12 only. */
     const val SYNC_ID = 1
@@ -37,12 +45,12 @@ object Notifications {
         )
     }
 
-    fun post(context: Context, notices: List<RoomNotice>) {
+    fun post(context: Context, account: String, notices: List<RoomNotice>) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
         for (notice in notices) {
             try {
-                manager.notify(notice.roomId, MESSAGE_ID, build(context, notice))
+                manager.notify(notice.roomId, MESSAGE_ID, build(context, account, notice))
             } catch (e: SecurityException) {
                 // The permission was taken back meanwhile.
                 return
@@ -50,12 +58,27 @@ object Notifications {
         }
     }
 
-    /** Removes the notification of a room the user has opened. */
+    /** Removes the notification of a room the user has opened or left. */
     fun cancel(context: Context, roomId: String) {
         NotificationManagerCompat.from(context).cancel(roomId, MESSAGE_ID)
     }
 
-    private fun build(context: Context, notice: RoomNotice): android.app.Notification {
+    /**
+     * Removes every notification of the app, for when its account is gone. The
+     * background sync's own notification belongs to a foreground service, which
+     * this leaves alone.
+     */
+    fun cancelAll(context: Context) {
+        NotificationManagerCompat.from(context).cancelAll()
+    }
+
+    /** The rooms with a notification showing. */
+    fun shownRooms(context: Context): Set<String> =
+        NotificationManagerCompat.from(context).activeNotifications
+            .filter { it.id == MESSAGE_ID }
+            .mapNotNullTo(HashSet()) { it.tag }
+
+    private fun build(context: Context, account: String, notice: RoomNotice): android.app.Notification {
         val first = notice.messages.first()
         val channel = first.roomKind == RoomEntity.CHANNEL
         val title = if (channel) {
@@ -77,6 +100,7 @@ object Notifications {
         val open = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
             .putExtra(EXTRA_ROOM, notice.roomId)
+            .putExtra(EXTRA_ACCOUNT, account)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(
             context,
@@ -114,4 +138,41 @@ object Notifications {
 
     private const val MESSAGE_ID = 2
     private const val MAX_TEXT = 300
+}
+
+/** A room to open, from a tapped notification of [account]. */
+data class PendingRoom(val account: String, val roomId: String)
+
+/** The room of a tapped notification, until the chat takes it. */
+class PendingRooms(private val session: StateFlow<SessionState>) {
+    private val tapped = MutableStateFlow<PendingRoom?>(null)
+    val pending: StateFlow<PendingRoom?> = tapped.asStateFlow()
+
+    /**
+     * A tapped notification; the activity is exported, so the values may come
+     * from any app. Signed out, nobody's room can open. While the session is
+     * being restored it is not known yet whose it will be, and [take] decides.
+     */
+    fun tap(account: String?, roomId: String?) {
+        if (account == null || roomId == null || !isUuid(roomId)) return
+        if (session.value is SessionState.SignedOut) return
+        tapped.value = PendingRoom(account, roomId)
+    }
+
+    /** The pending room if it belongs to [account]; a room of another one is dropped. */
+    fun take(account: String): String? =
+        tapped.getAndUpdate { null }?.takeIf { it.account == account }?.roomId
+
+    fun clear() {
+        tapped.value = null
+    }
+}
+
+/** The system's notifications as the board that [Notifier] writes on. */
+class SystemNoticeBoard(private val context: Context) : NoticeBoard {
+    override fun post(account: String, notices: List<RoomNotice>) = Notifications.post(context, account, notices)
+
+    override fun shownRooms(): Set<String> = Notifications.shownRooms(context)
+
+    override fun cancel(roomId: String) = Notifications.cancel(context, roomId)
 }

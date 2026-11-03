@@ -53,10 +53,9 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
         }
     }
     // A room from a tapped notification.
-    val pendingRoom by container.openRoom.collectAsStateWithLifecycle()
+    val pendingRoom by container.openRoom.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingRoom) {
-        val roomId = pendingRoom ?: return@LaunchedEffect
-        container.openRoom.value = null
+        val roomId = container.openRoom.take(chat.databaseName) ?: return@LaunchedEffect
         navController.navigate(ConversationRoute(roomId)) {
             popUpTo<RoomsRoute>()
             launchSingleTop = true

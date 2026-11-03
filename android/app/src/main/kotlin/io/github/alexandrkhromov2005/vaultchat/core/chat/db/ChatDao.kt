@@ -72,7 +72,7 @@ abstract class ChatDao {
     protected abstract suspend fun maxActivity(): Long
 
     @Query("SELECT room_id FROM rooms")
-    protected abstract suspend fun roomIds(): List<String>
+    abstract suspend fun roomIds(): List<String>
 
     @Upsert
     protected abstract suspend fun upsertRooms(rooms: List<RoomEntity>)

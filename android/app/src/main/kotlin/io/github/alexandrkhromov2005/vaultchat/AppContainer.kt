@@ -5,7 +5,7 @@ import android.os.SystemClock
 import androidx.core.content.edit
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessionDeps
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessions
-import io.github.alexandrkhromov2005.vaultchat.core.chat.RoomNotice
+import io.github.alexandrkhromov2005.vaultchat.core.chat.NoticeBoard
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabases
 import io.github.alexandrkhromov2005.vaultchat.core.net.Gateway
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
@@ -14,12 +14,12 @@ import io.github.alexandrkhromov2005.vaultchat.core.session.EncryptedFileSession
 import io.github.alexandrkhromov2005.vaultchat.core.session.KeystoreSessionCipher
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionManager
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import io.github.alexandrkhromov2005.vaultchat.core.session.SessionStore
 import io.github.alexandrkhromov2005.vaultchat.core.system.AppForeground
 import io.github.alexandrkhromov2005.vaultchat.core.system.NetworkMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import okhttp3.WebSocket
@@ -29,7 +29,11 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** The app's long-lived objects, built once per process on the main thread. */
-class AppContainer(private val context: Context) {
+class AppContainer(
+    private val context: Context,
+    // noBackupFilesDir is never included in backups.
+    sessionStore: SessionStore = EncryptedFileSessionStore(File(context.noBackupFilesDir, "session.bin"), KeystoreSessionCipher()),
+) {
 
     /** Work that must outlive a screen, such as ending a session on the server. */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -47,9 +51,8 @@ class AppContainer(private val context: Context) {
 
     val gateway = Gateway(http)
 
-    // noBackupFilesDir is never included in backups.
     val session = SessionManager(
-        store = EncryptedFileSessionStore(File(context.noBackupFilesDir, "session.bin"), KeystoreSessionCipher()),
+        store = sessionStore,
         gateway = gateway,
         allowLocalCleartext = allowLocalCleartext,
         now = System::currentTimeMillis,
@@ -63,6 +66,9 @@ class AppContainer(private val context: Context) {
 
     private val foreground = AppForeground()
     private val networkMonitor = NetworkMonitor(context)
+
+    /** A room to open, from a tapped notification; ChatHome consumes it. */
+    val openRoom = PendingRooms(session.state)
 
     val chats = ChatSessions(ChatDatabases(context), object : ChatSessionDeps {
         override val foreground: StateFlow<Boolean> = this@AppContainer.foreground.visible
@@ -88,15 +94,15 @@ class AppContainer(private val context: Context) {
             OutboxWorker.schedule(context)
         }
 
-        override fun postNotices(notices: List<RoomNotice>) {
-            Notifications.post(context, notices)
+        override val notices: NoticeBoard = SystemNoticeBoard(context)
+
+        override fun accountEnded() {
+            Notifications.cancelAll(context)
+            openRoom.clear()
         }
     }, appScope).also { it.follow(session.state) }
 
     val push = Push(context, session, appScope)
-
-    /** A room to open, from a tapped notification; ChatHome consumes it. */
-    val openRoom = MutableStateFlow<String?>(null)
 }
 
 /** Preferences that are not secret. */

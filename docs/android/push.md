@@ -13,7 +13,12 @@ stores one device token per login.
   screen. The table `notified` keeps the newest shown sequence of each room;
   messages up to the room's last read one are never shown, and the history
   of a room's first load counts as read. Opening a room removes its
-  notification; tapping a notification opens the room.
+  notification; tapping a notification opens the room, only for the account
+  it was posted for.
+- **End of a session.** Nothing of an account stays visible or actionable
+  after it signs out or its session is revoked: the session stops posting, all
+  of its notifications and a room waiting to open are removed. The notification
+  of a room the user has left goes at the next check.
 - **Privacy.** A notification is `VISIBILITY_PRIVATE` with a public version
   that says only "new message", so the lock screen follows the user's system
   choice: with "hide sensitive content" it shows that public version, and with

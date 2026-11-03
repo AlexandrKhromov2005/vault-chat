@@ -13,6 +13,28 @@ import kotlinx.coroutines.sync.withLock
 /** What the notification of one room shows: its newest unread messages, oldest first. */
 data class RoomNotice(val roomId: String, val messages: List<NoticeItem>)
 
+/** Where notices show: the system's notifications, in the app. */
+interface NoticeBoard {
+    /**
+     * Shows [notices], each replacing its room's notification. [account] names
+     * the session they belong to, so that a tap opens them only for that one.
+     */
+    fun post(account: String, notices: List<RoomNotice>)
+
+    /** The rooms with a notification showing. */
+    fun shownRooms(): Set<String>
+
+    fun cancel(roomId: String)
+
+    object None : NoticeBoard {
+        override fun post(account: String, notices: List<RoomNotice>) = Unit
+
+        override fun shownRooms(): Set<String> = emptySet()
+
+        override fun cancel(roomId: String) = Unit
+    }
+}
+
 /**
  * Shows new messages of others as notifications (docs/android/push.md)
  * while the app is not on screen, however they arrived: a push that woke the
@@ -24,10 +46,15 @@ class Notifier(
     private val dao: ChatDao,
     private val me: String,
     private val foreground: StateFlow<Boolean>,
-    private val post: (List<RoomNotice>) -> Unit,
+    private val board: NoticeBoard,
+    private val account: String,
     scope: CoroutineScope,
 ) {
     private val lock = Mutex()
+
+    // Held around what touches the board, and never across a suspension.
+    private val ending = Any()
+    private var stopped = false
 
     init {
         scope.launch {
@@ -43,13 +70,31 @@ class Notifier(
         }
     }
 
-    /** Shows what is new now; the background sync calls it before it ends. */
+    /**
+     * Shows what is new now, and removes the notifications of rooms that are
+     * gone; the background sync calls it before it ends. Does nothing once the
+     * session has ended.
+     */
     suspend fun check() = lock.withLock {
+        if (synchronized(ending) { stopped }) return@withLock
         // Marked before they are posted: a mark that fails must not alert again
         // at every later check. What can go wrong after it loses one alert, and
         // the message stays unread in the app.
         val notices = dao.takeNotices(me, MAX_SHOWN)
-        if (notices.isNotEmpty() && !foreground.value) post(notices)
+        val rooms = dao.roomIds().toSet()
+        synchronized(ending) {
+            if (stopped) return@withLock
+            (board.shownRooms() - rooms).forEach(board::cancel)
+            if (notices.isNotEmpty() && !foreground.value) board.post(account, notices)
+        }
+    }
+
+    /**
+     * Ends all showing. It waits for a post under way, so that what removes the
+     * session's notifications after this removes them for good.
+     */
+    fun stop() {
+        synchronized(ending) { stopped = true }
     }
 
     companion object {

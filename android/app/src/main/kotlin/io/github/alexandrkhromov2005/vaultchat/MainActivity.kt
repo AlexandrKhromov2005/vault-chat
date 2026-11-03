@@ -13,7 +13,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.alexandrkhromov2005.vaultchat.core.chat.isUuid
 import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
 import io.github.alexandrkhromov2005.vaultchat.ui.SessionScope
 import io.github.alexandrkhromov2005.vaultchat.ui.auth.AuthFlow
@@ -42,8 +41,11 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun ComponentActivity.openRoomOf(intent: Intent?) {
-    val roomId = intent?.getStringExtra(Notifications.EXTRA_ROOM)?.takeIf(::isUuid) ?: return
-    (application as VaultChatApplication).container.openRoom.value = roomId
+    intent ?: return
+    (application as VaultChatApplication).container.openRoom.tap(
+        account = intent.getStringExtra(Notifications.EXTRA_ACCOUNT),
+        roomId = intent.getStringExtra(Notifications.EXTRA_ROOM),
+    )
 }
 
 @Composable

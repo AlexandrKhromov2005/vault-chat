@@ -43,7 +43,7 @@ class ChatSessions(
                     // The stored session is not known yet: its file must stay.
                     SessionState.Restoring -> return@collect
                     is SessionState.SignedIn -> get(session)
-                    is SessionState.SignedOut -> endCurrent(wipe = true)
+                    is SessionState.SignedOut -> signedOut()
                 }
                 cleanUp()
             }
@@ -76,9 +76,24 @@ class ChatSessions(
             return session
         }
         // A new session of the same user and server keeps its data.
+        val replaced = current?.let { it.databaseName != name } == true
         endCurrent(wipe = current?.databaseName != name)
+        if (replaced) deps.accountEnded()
         current = session
         return session
+    }
+
+    /**
+     * Ends the session, then what remains of its account outside it: the session
+     * stops showing notifications first, so that none appears after this. A
+     * session that has opened since this state was emitted is left alone.
+     */
+    @Synchronized
+    private fun signedOut() {
+        val session = current
+        if (session != null && session.signedIn === state?.value) return
+        endCurrent(wipe = true)
+        deps.accountEnded()
     }
 
     @Synchronized
