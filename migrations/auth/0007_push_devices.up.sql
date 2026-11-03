@@ -3,7 +3,7 @@ CREATE TABLE push_devices (
     family_id UUID PRIMARY KEY REFERENCES sessions (id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     provider TEXT NOT NULL CHECK (provider IN ('fcm')),
-    token TEXT NOT NULL UNIQUE CHECK (length(token) <= 4096 AND token ~ '^[A-Za-z0-9_:.-]+$'),
+    token TEXT NOT NULL UNIQUE CHECK (length(token) <= 2048 AND token ~ '^[A-Za-z0-9_:.-]+$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

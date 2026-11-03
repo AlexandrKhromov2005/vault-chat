@@ -2,16 +2,21 @@ package integration
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/migration"
 )
 
@@ -52,7 +57,7 @@ func TestPushTokens_RegisterReplaceAndMove(t *testing.T) {
 
 	// The access token of a rotated session still names its login.
 	next := newTestSession(user.ID, time.Hour)
-	require.NoError(t, repo.Rotate(ctx, phone.ID, next))
+	require.NoError(t, rotate(ctx, repo, phone.ID, next))
 	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, next.ID, "fcm", "token-c"))
 	require.Equal(t, map[string]string{phone.ID: "token-c"}, pushTokens(t, pool, user.ID), "rotation keeps the login")
 
@@ -135,7 +140,7 @@ func TestPushTokens_RevocationDeletesTheLoginToken(t *testing.T) {
 			require.NoError(t, repo.RegisterPushToken(ctx, user.ID, login.ID, "fcm", "token-a"))
 			// The token outlives rotation into the login's next session.
 			next := newTestSession(user.ID, time.Hour)
-			require.NoError(t, repo.Rotate(ctx, login.ID, next))
+			require.NoError(t, rotate(ctx, repo, login.ID, next))
 			require.Len(t, pushTokens(t, pool, user.ID), 1)
 
 			require.NoError(t, revoke(repo, pool, user, next))
@@ -308,4 +313,47 @@ func TestPushTargets_OnlyActiveLogins(t *testing.T) {
 	tokens, err = repo.PushTargets(ctx, user.ID)
 	require.NoError(t, err)
 	require.Empty(t, tokens)
+}
+
+// incompressiblePushToken returns a synthetic token of random characters.
+// PostgreSQL compresses repetitive values before indexing them, so only a
+// value like this reaches the size limit of an index row.
+func incompressiblePushToken(t *testing.T, length int) string {
+	t.Helper()
+	raw := make([]byte, length)
+	_, err := rand.Read(raw)
+	require.NoError(t, err)
+	return base64.RawURLEncoding.EncodeToString(raw)[:length]
+}
+
+// Everything the validator accepts must be storable: an accepted token that
+// the database refuses would be an internal error for valid input.
+func TestPushTokens_LongestAcceptedTokenIsStoredAndMoves(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	ctx := context.Background()
+	phone, laptop := newLogin(t, repo, user.ID), newLogin(t, repo, user.ID)
+	token := incompressiblePushToken(t, validator.MaxPushTokenLength)
+	require.NoError(t, validator.ValidatePushToken("fcm", token))
+
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, phone.ID, "fcm", token))
+	require.Equal(t, map[string]string{phone.ID: token}, pushTokens(t, pool, user.ID))
+
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, phone.ID, "fcm", token), "registering again is idempotent")
+	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, laptop.ID, "fcm", token))
+	require.Equal(t, map[string]string{laptop.ID: token}, pushTokens(t, pool, user.ID), "a long token stays unique and moves")
+}
+
+// The database enforces the validator's bound itself, with its own check
+// rather than by running out of room in the index.
+func TestPushTokens_DatabaseRefusesTheFirstTooLongToken(t *testing.T) {
+	pool, repo, user := newSessionFixture(t)
+	login := newLogin(t, repo, user.ID)
+	token := incompressiblePushToken(t, validator.MaxPushTokenLength+1)
+	require.Error(t, validator.ValidatePushToken("fcm", token))
+
+	err := repo.RegisterPushToken(context.Background(), user.ID, login.ID, "fcm", token)
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr), "%v", err)
+	require.Equal(t, "23514", pgErr.Code, "check_violation, got %s", pgErr.Message)
+	require.Empty(t, pushTokens(t, pool, user.ID))
 }

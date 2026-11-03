@@ -1677,7 +1677,7 @@ type RegisterPushTokenRequest struct {
 	AccessToken string                 `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
 	// Push provider; only "fcm" is supported.
 	Provider string `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
-	// Provider registration token: 1 to 4096 characters of ASCII letters,
+	// Provider registration token: 1 to 2048 characters of ASCII letters,
 	// digits and "_:.-".
 	Token         string `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
 	unknownFields protoimpl.UnknownFields
