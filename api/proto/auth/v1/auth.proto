@@ -224,7 +224,7 @@ message RegisterPushTokenRequest {
   string access_token = 1;
   // Push provider; only "fcm" is supported.
   string provider = 2;
-  // Provider registration token: 1 to 4096 characters of ASCII letters,
+  // Provider registration token: 1 to 2048 characters of ASCII letters,
   // digits and "_:.-".
   string token = 3;
 }

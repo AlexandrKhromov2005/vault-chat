@@ -22,7 +22,7 @@ continues through refresh rotation (`sessions.family_id`). Table
 | `family_id` | Login the token belongs to; primary key, references the first session of the family |
 | `user_id` | Owner, for sending and per-user bounds |
 | `provider` | `fcm` |
-| `token` | Provider registration token, 1–4096 characters of `[A-Za-z0-9_:.-]`, unique |
+| `token` | Provider registration token, 1–2048 characters of `[A-Za-z0-9_:.-]`, unique |
 | `created_at`, `updated_at` | Bookkeeping |
 
 One token per login: registering again replaces the login's token (FCM
@@ -70,7 +70,8 @@ its family in the same transaction.
 ### Resource budgets
 
 - Body: Gateway's `GATEWAY_MAX_BODY_BYTES`; the token itself is at most
-  4096 bytes.
+  2048 bytes, which fits a row of the unique index even when it does not
+  compress.
 - Rows: at most one per login and 10 per user; registration is a single
   transaction under the per-user lock already used by session changes.
 - Rate: the per-user API quota; the call costs one short transaction.

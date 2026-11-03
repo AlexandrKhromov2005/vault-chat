@@ -1135,7 +1135,7 @@ components:
       required: [provider, token]
       properties:
         provider: {type: string, enum: [fcm]}
-        token: {type: string, minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_:.-]+$"}
+        token: {type: string, minLength: 1, maxLength: 2048, pattern: "^[A-Za-z0-9_:.-]+$"}
     Readiness:
       type: object
       properties:
