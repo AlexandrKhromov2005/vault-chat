@@ -421,6 +421,10 @@ class FakeChatServer(val me: String) : GatewayApi {
     @Volatile
     var uploadSink: () -> okio.Sink = { okio.blackholeSink() }
 
+    /** Answers an upload with this status once its whole body has arrived, when it returns one. */
+    @Volatile
+    var uploadStatus: () -> Int? = { null }
+
     private var uploaded = 0
 
     /** Reads the multipart body as the Gateway does and stores the file unless the body broke off. */
@@ -446,6 +450,7 @@ class FakeChatServer(val me: String) : GatewayApi {
         val boundary = body.contentType()!!.parameter("boundary")!!
         val closing = "\r\n--$boundary--\r\n".encodeUtf8()
         if (!text.endsWith(closing)) return error(400)
+        uploadStatus()?.let { return error(it) }
         val headEnd = text.indexOf("\r\n\r\n".encodeUtf8())
         val head = text.substring(0, headEnd).utf8()
         val name = Regex("filename=\"((?:[^\"\\\\]|\\\\.)*)\"").find(head)!!.groupValues[1].replace(Regex("\\\\(.)"), "$1")

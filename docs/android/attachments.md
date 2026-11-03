@@ -244,7 +244,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    after the backoff; broken after it fails the message without a repeat;
    the flag is set exactly before the closing boundary leaves.
 3. A process killed during an upload: a new session repeats it, or fails it
-   if the flag is set.
+   if the flag is set. The flag is on disk as the closing boundary arrives,
+   a new queue started at that moment fails the message with one upload, and
+   a `201` and a `503` clear the flag.
 4. Answers: `401` repeats once, `429` pauses everything, `503` repeats, `400`
    and `413` fail with `file`, `404` with `no_access`, `504` with `upload`.
 5. Retry after `upload` uploads only the files without an ID; after `409`

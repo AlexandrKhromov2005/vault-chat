@@ -33,7 +33,10 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Messages with files (docs/android/attachments.md, "Sending"). */
 @RunWith(RobolectricTestRunner::class)
@@ -71,10 +74,10 @@ class OutboxFilesTest {
 
     private fun key(n: Int) = server.id(4, n)
 
-    private fun outbox() = Outbox(
-        dao, me, server.requests, sync, scope, network,
+    private fun outbox(on: CoroutineScope = scope, delays: () -> Backoff = { Backoff(20, 100) }) = Outbox(
+        dao, me, server.requests, sync, on, network,
         newId = { key(keys.incrementAndGet()) },
-        backoff = { Backoff(20, 100) },
+        backoff = delays,
         staging = staging,
         attachments = attachments,
         uploadBudget = RequestBudget(6_000, 100, System::currentTimeMillis),
@@ -222,6 +225,86 @@ class OutboxFilesTest {
         eventually { row(roomId).state == OutgoingEntity.FAILED && dao.storedOutgoing(other).isEmpty() }
         assertEquals(OutgoingEntity.ERROR_UPLOAD, row(roomId).error)
         assertEquals(listOf("never.txt"), server.uploads().map { it.filename })
+    }
+
+    /** The flag on disk as the closing boundary arrives; [also] runs then, before it is let through. */
+    private fun recordingTheFlag(flag: AtomicReference<Boolean>, also: () -> Unit = {}): () -> Sink = {
+        object : ForwardingSink(blackholeSink()) {
+            override fun write(source: Buffer, byteCount: Long) {
+                val stored = runBlocking { dao.filesOf(key(1)).single().maybeStored }
+                if (source.indexOf("--\r\n".encodeUtf8()) >= 0) {
+                    flag.set(stored)
+                    also()
+                } else {
+                    assertFalse("set before everything else had left", stored)
+                }
+                super.write(source, byteCount)
+            }
+        }
+    }
+
+    @Test
+    fun theFlagIsOnDiskWhenTheClosingBoundaryLeaves() = runBlocking {
+        val roomId = loadedChannel(1)
+        val flag = AtomicReference<Boolean>()
+        server.uploadSink = recordingTheFlag(flag)
+        outbox().send(roomId, "flagged", listOf(text("a.txt")))
+        eventually { dao.storedOutgoing(roomId).isEmpty() }
+        assertEquals("the flag as the closing boundary arrived", true, flag.get())
+    }
+
+    @Test
+    fun aProcessKilledAsTheClosingBoundaryLeavesFindsTheFlag() = runBlocking {
+        val roomId = loadedChannel(1)
+        val flag = AtomicReference<Boolean>()
+        val leaving = CountDownLatch(1)
+        val stuck = CountDownLatch(1)
+        server.uploadSink = recordingTheFlag(flag) {
+            leaving.countDown()
+            stuck.await(10, TimeUnit.SECONDS)
+        }
+        val process = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
+        try {
+            outbox(on = process).send(roomId, "killed", listOf(text("a.txt")))
+            assertTrue("the closing boundary did not leave", leaving.await(5, TimeUnit.SECONDS))
+            process.cancel()
+            server.uploadSink = { blackholeSink() }
+
+            outbox()
+            eventually { dao.storedOutgoing(roomId).singleOrNull()?.state != OutgoingEntity.QUEUED }
+            assertEquals("uploads", 1, uploads())
+            assertEquals(OutgoingEntity.FAILED, row(roomId).state)
+            assertEquals(OutgoingEntity.ERROR_UPLOAD, row(roomId).error)
+        } finally {
+            stuck.countDown()
+        }
+    }
+
+    @Test
+    fun aStoredFileClearsTheFlag() = runBlocking {
+        val roomId = loadedChannel(1)
+        val flag = AtomicReference<Boolean>()
+        server.uploadSink = recordingTheFlag(flag)
+        // Keeps the row, so that its file can be read after the upload.
+        server.intercept = { if (it == "send $roomId") 503 else null }
+        outbox().send(roomId, "stored", listOf(text("a.txt")))
+        eventually { dao.filesOf(key(1)).single().fileId != null }
+        assertEquals("the flag as the closing boundary arrived", true, flag.get())
+        assertFalse("the flag after a 201", dao.filesOf(key(1)).single().maybeStored)
+    }
+
+    @Test
+    fun anAnswerThatTellsTheOutcomeClearsTheFlag() = runBlocking {
+        val roomId = loadedChannel(1)
+        val flag = AtomicReference<Boolean>()
+        server.uploadSink = recordingTheFlag(flag)
+        server.uploadStatus = { 503 }
+        // No second attempt during this test: its start clears the flag too.
+        outbox(delays = { Backoff(60_000, 60_000) }).send(roomId, "busy", listOf(text("a.txt")))
+        eventually { flag.get() != null && !dao.filesOf(key(1)).single().maybeStored }
+        assertEquals("the flag as the closing boundary arrived", true, flag.get())
+        assertEquals("uploads", 1, uploads())
+        assertEquals(OutgoingEntity.QUEUED, row(roomId).state)
     }
 
     @Test
