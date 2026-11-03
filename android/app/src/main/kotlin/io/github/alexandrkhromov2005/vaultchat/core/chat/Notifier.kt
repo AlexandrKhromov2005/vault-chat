@@ -90,8 +90,8 @@ class Notifier(
         val rooms = dao.roomIds().toSet()
         synchronized(ending) {
             if (stopped) return@withLock
-            (board.shownRooms() - rooms).forEach(board::cancel)
             if (notices.isNotEmpty() && !foreground.value) board.post(account, notices)
+            (board.shownRooms() - rooms).forEach(board::cancel)
         }
     }
 
