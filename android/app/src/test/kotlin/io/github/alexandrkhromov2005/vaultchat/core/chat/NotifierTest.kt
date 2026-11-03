@@ -83,6 +83,59 @@ class NotifierTest {
     }
 
     @Test
+    fun aNoticeKeepsTheUnreadMessagesItReplaces() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        val notifier = notifier()
+        server.post(room, sender = bob, text = "first")
+        sync.syncNow()
+        notifier.check()
+
+        server.post(room, sender = bob, text = "second")
+        sync.syncNow()
+        notifier.check()
+
+        // The same tag replaces the notification: the new one is all the shade holds.
+        assertEquals(listOf("first 1", "second 2"), posted.last().single().messages.map { it.text })
+        // Nothing new, nothing posted.
+        notifier.check()
+        assertEquals(2, posted.size)
+    }
+
+    @Test
+    fun aNoticeHoldsTheLastFiveUnreadOfARoomAndNothingRead() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        val notifier = notifier()
+        server.post(room, sender = bob, text = "read")
+        sync.syncNow()
+        sync.markRead(room)
+        notifier.check()
+        assertEquals(emptyList<String>(), texts())
+
+        repeat(7) { server.post(room, sender = bob, text = "m") }
+        server.post(room, sender = me, text = "mine")
+        sync.syncNow()
+        notifier.check()
+
+        assertEquals(listOf("m 4", "m 5", "m 6", "m 7", "m 8"), posted.single().single().messages.map { it.text })
+    }
+
+    @Test
+    fun aRoomWithManyNewMessagesAlertsOnce() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        val notifier = notifier()
+        repeat(450) { server.post(room, sender = bob, text = "m") }
+        sync.syncNow()
+
+        repeat(3) { notifier.check() }
+
+        assertEquals(1, posted.size)
+        assertEquals("m 450", posted.single().single().messages.last().text)
+    }
+
+    @Test
     fun aMarkThatFailsAlertsNoMoreThanOnce() = runBlocking {
         val room = server.addDialog(1, bob, "bob")
         sync.syncNow()

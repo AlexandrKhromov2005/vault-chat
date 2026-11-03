@@ -256,7 +256,13 @@ data class NotifiedEntity(
     val sequence: Long,
 )
 
-/** A message that a notification has not shown yet, with what the notification needs. */
+/** A room with messages that no notification has shown, up to [newest]. */
+data class NoticeRoom(
+    @ColumnInfo(name = "room_id") val roomId: String,
+    val newest: Long,
+)
+
+/** An unread message with what its room's notification needs. */
 data class NoticeItem(
     @ColumnInfo(name = "room_id") val roomId: String,
     val sequence: Long,

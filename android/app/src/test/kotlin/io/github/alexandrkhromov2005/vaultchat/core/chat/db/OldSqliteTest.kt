@@ -85,7 +85,9 @@ class OldSqliteTest {
         dao.applyLatest("room-1", listOf(message), readThrough = 0)
 
         assertEquals(1, dao.roomList(me).first().single().unread)
-        assertEquals("bobby", dao.notices(me).single().senderName)
+        assertEquals(1, dao.noticeRoomsFlow(me).first().size)
+        assertEquals("bobby", dao.takeNotices(me, shown = 5).single().messages.single().senderName)
+        assertEquals(1L, notified("room-1"))
     }
 
     /**

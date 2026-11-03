@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import io.github.alexandrkhromov2005.vaultchat.core.chat.RoomNotice
 import io.github.alexandrkhromov2005.vaultchat.core.chat.Timeline
 import kotlinx.coroutines.flow.Flow
 
@@ -340,11 +341,36 @@ abstract class ChatDao {
     )
     abstract fun members(roomId: String): Flow<List<MemberItem>>
 
-    @Query(NOTICES)
-    abstract fun noticesFlow(me: String): Flow<List<NoticeItem>>
+    @Query(NOTICE_ROOMS)
+    abstract fun noticeRoomsFlow(me: String): Flow<List<NoticeRoom>>
 
-    @Query(NOTICES)
-    abstract suspend fun notices(me: String): List<NoticeItem>
+    @Query(NOTICE_ROOMS)
+    protected abstract suspend fun noticeRooms(me: String): List<NoticeRoom>
+
+    @Query(
+        "SELECT m.room_id, m.sequence, m.sender_id, p.username AS sender_name, m.text, m.attachments, " +
+            "m.created_at, r.kind AS room_kind, r.name AS room_name, rp.username AS peer_name FROM messages m " +
+            "JOIN timelines t ON t.room_id = m.room_id JOIN rooms r ON r.room_id = m.room_id " +
+            "LEFT JOIN profiles p ON p.user_id = m.sender_id LEFT JOIN profiles rp ON rp.user_id = r.peer_id " +
+            "WHERE m.room_id = :roomId AND m.sender_id != :me AND m.sequence > t.last_read " +
+            "ORDER BY m.sequence DESC LIMIT :limit",
+    )
+    protected abstract suspend fun newestUnread(me: String, roomId: String, limit: Int): List<NoticeItem>
+
+    /**
+     * The notices of the rooms with messages that no notification has shown,
+     * each with up to [shown] of the room's newest unread messages, oldest first:
+     * a notice replaces the room's previous one, so it also repeats what that one
+     * showed and is still unread. They count as shown from here on, all of them
+     * or, when this fails, none.
+     */
+    @Transaction
+    open suspend fun takeNotices(me: String, shown: Int): List<RoomNotice> {
+        val rooms = noticeRooms(me)
+        val notices = rooms.map { RoomNotice(it.roomId, newestUnread(me, it.roomId, shown).asReversed()) }
+        markNotified(rooms.associate { it.roomId to it.newest })
+        return notices
+    }
 
     // Two statements, not an upsert: API 26 to 29 have SQLite older than 3.24.
     @Query(
@@ -432,14 +458,12 @@ abstract class ChatDao {
         const val PREVIEWED = "o.room_id = r.room_id AND (o.state != 'failed' OR o.after_sequence >= COALESCE(t.newest, 0)) " +
             "ORDER BY o.position DESC LIMIT 1"
 
-        // Unread messages of others that no notification has shown, oldest first.
-        const val NOTICES = "SELECT m.room_id, m.sequence, m.sender_id, p.username AS sender_name, m.text, m.attachments, " +
-            "m.created_at, r.kind AS room_kind, r.name AS room_name, rp.username AS peer_name FROM messages m " +
+        // Rooms with unread messages of others that no notification has shown.
+        const val NOTICE_ROOMS = "SELECT m.room_id, MAX(m.sequence) AS newest FROM messages m " +
             "JOIN timelines t ON t.room_id = m.room_id JOIN rooms r ON r.room_id = m.room_id " +
-            "LEFT JOIN notified n ON n.room_id = m.room_id LEFT JOIN profiles p ON p.user_id = m.sender_id " +
-            "LEFT JOIN profiles rp ON rp.user_id = r.peer_id " +
+            "LEFT JOIN notified n ON n.room_id = m.room_id " +
             "WHERE m.sender_id != :me AND m.sequence > t.last_read AND m.sequence > COALESCE(n.sequence, 0) " +
-            "ORDER BY m.room_id, m.sequence LIMIT 200"
+            "GROUP BY m.room_id ORDER BY m.room_id LIMIT 200"
 
         const val ROOM_LIST = "SELECT r.*, p.username AS peer_name, m.text AS last_text, m.sender_id AS last_sender_id, " +
             "m.attachments AS last_attachments, m.created_at AS last_created_at, " +
