@@ -53,7 +53,8 @@ membership checks are the alternative if that cost matters.
 upgrade counts against the per-IP rate limit like any API request, but the
 connection is not subject to the request timeout.
 
-Browsers send an `Origin` header; it must be the Gateway's own origin or one of
+Browsers send an `Origin` header; its host must match the request `Host` (the
+scheme is not compared), or the origin must be listed in
 `GATEWAY_CORS_ALLOWED_ORIGINS` (`*` allows any), otherwise the upgrade gets
 `403 origin_forbidden`. Clients without `Origin` are accepted, since the
 connection authenticates with a bearer token, not a cookie.
