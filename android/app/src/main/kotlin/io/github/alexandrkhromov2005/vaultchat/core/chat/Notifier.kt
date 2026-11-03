@@ -48,8 +48,11 @@ class Notifier(
         val items = dao.notices(me)
         if (items.isEmpty()) return@withLock
         val rooms = items.groupBy { it.roomId }
+        // Marked first: a mark that fails must not alert again at every later
+        // check. What can go wrong after it loses one alert, and the message
+        // stays unread in the app.
+        dao.markNotified(rooms.mapValues { (_, messages) -> messages.last().sequence })
         if (!foreground.value) post(rooms.map { (roomId, messages) -> RoomNotice(roomId, messages.takeLast(MAX_SHOWN)) })
-        rooms.forEach { (roomId, messages) -> dao.markNotified(roomId, messages.last().sequence) }
     }
 
     companion object {

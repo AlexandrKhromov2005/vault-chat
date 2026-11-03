@@ -346,11 +346,24 @@ abstract class ChatDao {
     @Query(NOTICES)
     abstract suspend fun notices(me: String): List<NoticeItem>
 
+    // Two statements, not an upsert: API 26 to 29 have SQLite older than 3.24.
     @Query(
-        "INSERT INTO notified (room_id, sequence) SELECT :roomId, :sequence WHERE EXISTS (SELECT 1 FROM rooms WHERE room_id = :roomId) " +
-            "ON CONFLICT (room_id) DO UPDATE SET sequence = MAX(sequence, excluded.sequence)",
+        "INSERT OR IGNORE INTO notified (room_id, sequence) " +
+            "SELECT :roomId, :sequence WHERE EXISTS (SELECT 1 FROM rooms WHERE room_id = :roomId)",
     )
-    abstract suspend fun markNotified(roomId: String, sequence: Long)
+    protected abstract suspend fun insertNotified(roomId: String, sequence: Long)
+
+    @Query("UPDATE notified SET sequence = MAX(sequence, :sequence) WHERE room_id = :roomId")
+    protected abstract suspend fun raiseNotified(roomId: String, sequence: Long)
+
+    /** Records what notifications have shown, for all of [newest]'s rooms or for none. */
+    @Transaction
+    open suspend fun markNotified(newest: Map<String, Long>) {
+        newest.forEach { (roomId, sequence) ->
+            insertNotified(roomId, sequence)
+            raiseNotified(roomId, sequence)
+        }
+    }
 
     @Query("SELECT * FROM files WHERE file_id = :fileId")
     abstract fun file(fileId: String): Flow<FileEntity?>

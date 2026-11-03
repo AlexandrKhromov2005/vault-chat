@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,6 +80,25 @@ class NotifierTest {
         foreground.value = false
         notifier.check()
         assertEquals(emptyList<String>(), texts())
+    }
+
+    @Test
+    fun aMarkThatFailsAlertsNoMoreThanOnce() = runBlocking {
+        val room = server.addDialog(1, bob, "bob")
+        sync.syncNow()
+        server.post(room, sender = bob, text = "new")
+        sync.syncNow()
+        val notifier = notifier()
+        val writable = database.openHelper.writableDatabase
+        writable.execSQL("CREATE TRIGGER no_mark BEFORE INSERT ON notified BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+
+        repeat(3) { runCatching { notifier.check() } }
+        assertTrue("alerted ${posted.size} times while the mark kept failing", posted.size <= 1)
+
+        // Once marks work again the message is shown, and only then for good.
+        writable.execSQL("DROP TRIGGER no_mark")
+        repeat(2) { notifier.check() }
+        assertEquals(listOf("new 1"), texts())
     }
 
     @Test
