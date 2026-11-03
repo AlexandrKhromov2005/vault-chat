@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
@@ -43,16 +42,7 @@ fun ChatHome(container: AppContainer, signedIn: SessionState.SignedIn) {
             launchSingleTop = true
         }
     }
-    NavHost(
-        navController,
-        startDestination = RoomsRoute,
-        enterTransition = ScreenTransitions.enter,
-        exitTransition = ScreenTransitions.exit,
-        popEnterTransition = ScreenTransitions.popEnter,
-        popExitTransition = ScreenTransitions.popExit,
-        predictivePopEnterTransition = ScreenTransitions.gestureEnter,
-        predictivePopExitTransition = ScreenTransitions.gestureExit,
-    ) {
+    ScreenTransitions.Host(navController, startDestination = RoomsRoute) {
         composable<RoomsRoute> {
             RoomsScreen(
                 chat = chat,
