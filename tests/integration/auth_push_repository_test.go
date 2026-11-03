@@ -52,7 +52,7 @@ func TestPushTokens_RegisterReplaceAndMove(t *testing.T) {
 
 	// The access token of a rotated session still names its login.
 	next := newTestSession(user.ID, time.Hour)
-	require.NoError(t, repo.Rotate(ctx, phone.ID, next))
+	require.NoError(t, rotate(ctx, repo, phone.ID, next))
 	require.NoError(t, repo.RegisterPushToken(ctx, user.ID, next.ID, "fcm", "token-c"))
 	require.Equal(t, map[string]string{phone.ID: "token-c"}, pushTokens(t, pool, user.ID), "rotation keeps the login")
 
@@ -135,7 +135,7 @@ func TestPushTokens_RevocationDeletesTheLoginToken(t *testing.T) {
 			require.NoError(t, repo.RegisterPushToken(ctx, user.ID, login.ID, "fcm", "token-a"))
 			// The token outlives rotation into the login's next session.
 			next := newTestSession(user.ID, time.Hour)
-			require.NoError(t, repo.Rotate(ctx, login.ID, next))
+			require.NoError(t, rotate(ctx, repo, login.ID, next))
 			require.Len(t, pushTokens(t, pool, user.ID), 1)
 
 			require.NoError(t, revoke(repo, pool, user, next))
