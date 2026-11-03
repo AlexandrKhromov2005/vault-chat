@@ -115,6 +115,7 @@
     <string name="file_save_failed">Не удалось сохранить файл</string>
     <string name="file_no_app">Нет приложения, чтобы открыть этот файл</string>
     <string name="file_download_failed">Не удалось скачать файл</string>
+    <string name="file_type_mismatch">Содержимое файла не совпадает с его типом. Его можно только сохранить.</string>
     <string name="file_size_bytes">%1$d Б</string>
     <string name="file_size_kib">%1$s КиБ</string>
     <string name="file_size_mib">%1$s МиБ</string>

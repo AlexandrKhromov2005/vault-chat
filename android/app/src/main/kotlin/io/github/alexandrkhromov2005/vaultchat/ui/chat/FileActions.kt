@@ -32,6 +32,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.FileNames
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileSource
 import io.github.alexandrkhromov2005.vaultchat.core.chat.FileState
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.viewableType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -103,7 +104,11 @@ class FileActions internal constructor(
         if (busy.containsKey(file.fileId)) return
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val local = whileBusy(file) { fetched(file) } ?: return@launch
-            if (!startViewer(local, FileKind.of(file.contentType))) notify(context.getString(R.string.file_no_app))
+            val type = withContext(Dispatchers.IO) { viewableType(FileKind.of(file.contentType), local) }
+            when {
+                type == null -> notify(context.getString(R.string.file_type_mismatch))
+                !startViewer(local, type) -> notify(context.getString(R.string.file_no_app))
+            }
         }
     }
 
@@ -198,14 +203,14 @@ class FileActions internal constructor(
             is ContentState.Loading -> null
         }
 
-    private fun startViewer(local: File, kind: FileKind): Boolean {
+    private fun startViewer(local: File, type: String): Boolean {
         val uri = try {
             FileProvider.getUriForFile(context, "${context.packageName}.files", local)
         } catch (e: IllegalArgumentException) {
             return false
         }
         val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, kind.mime)
+            .setDataAndType(uri, type)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return try {
             context.startActivity(intent)

@@ -233,6 +233,25 @@ class FileActionsTest {
     }
 
     @Test
+    fun contentThatIsNotItsTypeIsNotHandedToAnotherApp() {
+        val picture = FILE.copy(name = "cat.png", contentType = "image/png", size = 8)
+        source.content.value = ContentState.Ready(temporary.newFile("cat.png").apply { writeText("%PDF-1.7") })
+        actions.open(picture)
+        settle { notices.isNotEmpty() }
+        assertEquals(listOf(context.getString(R.string.file_type_mismatch)), notices)
+    }
+
+    @Test
+    fun contentOfItsTypeIsNotRefused() {
+        val document = FILE.copy(name = "a.pdf", contentType = "application/pdf", size = 8)
+        source.content.value = ContentState.Ready(temporary.newFile("a.pdf").apply { writeText("%PDF-1.7") })
+        actions.open(document)
+        settle { actions.busy.isEmpty() }
+        settle { notices.isNotEmpty() }
+        assertFalse(context.getString(R.string.file_type_mismatch) in notices)
+    }
+
+    @Test
     fun aCancelledPickerIsNotAFailure() {
         actions.save(FILE)
         actions.saveTo(null)

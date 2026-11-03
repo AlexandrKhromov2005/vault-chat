@@ -80,7 +80,13 @@ only in the documentation:
 - **Other apps.** They get a `content://` URI of a cached copy from a
   `FileProvider` that is not exported and serves only the attachment
   cache, with a temporary read grant. The access token never leaves the
-  app, not even in a URL.
+  app, not even in a URL. An app picks its parser by the type it is given,
+  so that a file goes to another app only if its first bytes match the
+  metadata's type: a PNG, JPEG or PDF signature, or for text none of these
+  and no NUL. Otherwise Open is refused with a message, the simpler of the
+  safe choices: offering it as a generic binary would still show the
+  metadata's name and extension. Save still works, since it runs nothing:
+  it stores the bytes under the metadata's name where the user chose.
 - **Session binding.** Requests go through the session like all others.
   Staged copies and cached content live in directories named after the
   session's database (`ChatDatabases.fileName`), are deleted on sign-out
@@ -248,6 +254,7 @@ that is closed keeps running, as it runs in the session's scope.
 | Download broken or larger than announced | Discarded; the file shows a retry |
 | Nobody waits for a download any more (scrolled away, sign-out) | The call is cancelled, which ends a read blocked on the network at once; what arrived is discarded. A new download of the file waits for the old one to end and looks in the cache first |
 | No app opens the file | A message says so; Save still works |
+| Content is not of the type in its metadata | Open is refused with a message; Save still works |
 | Saving fails (download, copy, no file to save) | The document is deleted, or emptied if the provider cannot delete it, and a message says so |
 | The screen goes away during a save | Saving stops, the document is deleted and a toast says so, since the screen's messages went with it |
 | Access lost to a room | Its files fail like its messages; metadata goes with the room |
@@ -293,8 +300,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
     stored while a download was stopping or waiting for its turn is not
     requested again. At most 2 bodies are read at once, whatever metadata
     needs meanwhile.
-11. Only PNG and JPEG with a matching signature are decoded; names are shown
-    without format characters; the `FileProvider` serves only the cache and
+11. Only PNG and JPEG with a matching signature are decoded; Open refuses
+    content that does not match its type; names are shown without format
+    characters; the `FileProvider` serves only the cache and
     is not exported (checked by its configuration: FileProvider compares
     paths with `/` and cannot run on a Windows build machine).
 12. Compose: a bubble with pictures and files keeps its size while they
