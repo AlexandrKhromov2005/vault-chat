@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 7,
-    "identityHash": "cc0c5d3d3bb59076c806a97b96f165ac",
+    "identityHash": "a823c0b0e494bb9f8c6ca3f1171df5d0",
     "entities": [
       {
         "tableName": "rooms",
@@ -487,7 +487,7 @@
       },
       {
         "tableName": "outgoing_files",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_message_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `size` INTEGER NOT NULL, `staged` TEXT NOT NULL, `file_id` TEXT, `maybe_stored` INTEGER NOT NULL, PRIMARY KEY(`client_message_id`, `position`), FOREIGN KEY(`client_message_id`) REFERENCES `outbox`(`client_message_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_message_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `size` INTEGER NOT NULL, `staged` TEXT NOT NULL, `file_id` TEXT, `maybe_stored` INTEGER NOT NULL, `timeouts` INTEGER NOT NULL, PRIMARY KEY(`client_message_id`, `position`), FOREIGN KEY(`client_message_id`) REFERENCES `outbox`(`client_message_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "clientMessageId",
@@ -533,6 +533,12 @@
           {
             "fieldPath": "maybeStored",
             "columnName": "maybe_stored",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeouts",
+            "columnName": "timeouts",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -598,7 +604,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cc0c5d3d3bb59076c806a97b96f165ac')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a823c0b0e494bb9f8c6ca3f1171df5d0')"
     ]
   }
 }
