@@ -35,10 +35,11 @@ while ordinary text messages remain available.
 
 ## Bounds and storage lifecycle
 
-The maximum file size is 10 MiB. Metadata names are valid UTF-8, at most 255 bytes,
-without path separators, colons, control/format characters (including bidi),
-or a trailing dot; object keys are server-generated
-UUIDs. The allowlist uses content bytes: PNG, JPEG, PDF and UTF-8 plain text.
+The maximum file size is 10 MiB. Metadata names are nonempty valid UTF-8 other
+than `.`, at most 255 bytes, without leading/trailing whitespace, path
+separators, colons, control/format characters (including bidi), or a trailing
+dot; object keys are server-generated UUIDs. The allowlist uses content bytes:
+PNG, JPEG, PDF and UTF-8 plain text.
 Images require a valid header and at most 40 million pixels. Active HTML/SVG roots
 are rejected. Signature/header validation is not antivirus scanning or full file
 sanitization; clients must not render untrusted files inline.
@@ -70,9 +71,11 @@ invalid/unsupported files and extra multipart parts return `400`.
 
 Before writing a blob, Media inserts a pending row. It publishes the row only
 after S3 succeeds and Chat confirms membership again. Pending rows are invisible.
-Known failures clean up both stores; uncertain publication outcomes keep the blob
-so a committed row cannot point at deleted content. A worker runs every five
-minutes, reclaiming at most 100 pending uploads older than an hour. Completed
+On known failures Media attempts to clean up both stores, but cleanup is not
+guaranteed: a failed discard may leave a pending row and blob for the periodic
+sweep to retry. Uncertain publication outcomes keep the blob so a committed row
+cannot point at deleted content. A worker runs every five minutes, reclaiming at
+most 100 pending uploads older than an hour. Completed
 files are retained, including files not yet attached to a message. Quotas,
 retention, deletion and malware scanning remain future work.
 
