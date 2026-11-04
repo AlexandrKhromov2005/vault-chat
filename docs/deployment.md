@@ -22,7 +22,8 @@ Runtime приложения работает от UID 65532. Образы Postg
 Текущий MinIO — изолированное стендовое хранилище проекта. Для постоянной
 эксплуатации заменить поддерживаемым S3. Внутренний gRPC требует [mTLS](mtls.md) по умолчанию,
 который включается после обновления образов.
-Регистрация открытая, подтверждения email нет. Firewall не заменяет защиту
+Регистрация доступна только по приглашению; при включённой [доставке почты](mail.md)
+требуется подтверждение email. Firewall не заменяет защиту
 провайдера от DDoS; публикация Docker-портов ограничивается самим Compose.
 
 ## Первый запуск
@@ -38,13 +39,16 @@ apt-get install -y git docker.io docker-compose-v2 python3 openssl
 systemctl enable --now docker
 git clone https://github.com/AlexandrKhromov2005/vault-chat.git /opt/vault-chat
 cd /opt/vault-chat
-git checkout v0.2.0
+git checkout main
 # Подставить IPv4 из панели провайдера:
-scripts/vps.sh init YOUR_PUBLIC_IPV4 v0.2.0
-scripts/vps.sh build v0.2.0
+scripts/vps.sh init YOUR_PUBLIC_IPV4 main
+scripts/vps.sh build main
 scripts/vps.sh install
 scripts/vps.sh status
 ```
+
+Эти команды используют текущий защищённый `main`; пользователи релиза должны
+следовать инструкциям из своего тега.
 
 `init` создаёт `.env.vps` с mode 600 и отдельными случайными паролями, а также
 JWT-ключи. Повторный вызов сохраняет значения; другой тег меняется через

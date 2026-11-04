@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Изменено
+
+- Лимиты Gateway не мешают пользователям за одним NAT: успешный вход,
+  регистрация, refresh и запросы с действительным access-токеном возвращают
+  IP-токен. Неудачные попытки входа ограничены 5 в минуту на IP и email и
+  10 в минуту на IP; refresh получил отдельный лимит. Новые переменные —
+  `GATEWAY_AUTH_IP_RATE_LIMIT_*` и `GATEWAY_REFRESH_RATE_LIMIT_*`.
+
 ### Добавлено
 
 - Регистрация push-токена устройства (`PUT`/`DELETE /api/v1/push/token`).
@@ -137,5 +145,8 @@ Compose с тремя отдельными PostgreSQL, Redis и закрытым
   нужен поддерживаемый S3-провайдер. Антивирус, квоты и retention файлов не реализованы.
 - Уже выданный access token действует до истечения срока после отзыва сессии.
 
-[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.1.0...main
+[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.4.0...main
+[0.4.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.4.0
+[0.3.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.3.0
+[0.2.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.1.0

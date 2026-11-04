@@ -12,23 +12,30 @@ import (
 // GatewayConfig holds the API gateway configuration. See .env.example for the
 // full list of GATEWAY_* variables.
 type GatewayConfig struct {
-	HTTPAddr               string
-	AuthGRPCAddr           string
-	ChatGRPCAddr           string
-	MediaGRPCAddr          string
-	RedisAddr              string
-	RedisPassword          string
-	TLSCertPath            string
-	TLSKeyPath             string
-	CORSAllowedOrigins     []string
-	MaxBodyBytes           int64
-	RequestTimeout         time.Duration
-	RateLimitPerMinute     uint32
-	RateLimitBurst         uint32
-	AuthRateLimitPerMinute uint32
-	AuthRateLimitBurst     uint32
-	LogLevel               string
-	WebSocket              WebSocketConfig
+	HTTPAddr           string
+	AuthGRPCAddr       string
+	ChatGRPCAddr       string
+	MediaGRPCAddr      string
+	RedisAddr          string
+	RedisPassword      string
+	TLSCertPath        string
+	TLSKeyPath         string
+	CORSAllowedOrigins []string
+	MaxBodyBytes       int64
+	RequestTimeout     time.Duration
+	RateLimitPerMinute uint32
+	RateLimitBurst     uint32
+	// AuthRateLimit* bound credential requests per client IP and subject,
+	// AuthIPRateLimit* per client IP, RefreshRateLimit* refreshes per
+	// client IP; see docs/gateway/rate-limits.md.
+	AuthRateLimitPerMinute    uint32
+	AuthRateLimitBurst        uint32
+	AuthIPRateLimitPerMinute  uint32
+	AuthIPRateLimitBurst      uint32
+	RefreshRateLimitPerMinute uint32
+	RefreshRateLimitBurst     uint32
+	LogLevel                  string
+	WebSocket                 WebSocketConfig
 }
 
 // WebSocketConfig holds the limits of real-time connections (GATEWAY_WS_*).
@@ -92,6 +99,18 @@ func LoadGateway() (*GatewayConfig, error) {
 		return nil, err
 	}
 	if cfg.AuthRateLimitBurst, err = uintEnv("GATEWAY_AUTH_RATE_LIMIT_BURST", 5, 16); err != nil {
+		return nil, err
+	}
+	if cfg.AuthIPRateLimitPerMinute, err = uintEnv("GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE", 10, 16); err != nil {
+		return nil, err
+	}
+	if cfg.AuthIPRateLimitBurst, err = uintEnv("GATEWAY_AUTH_IP_RATE_LIMIT_BURST", 10, 16); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshRateLimitPerMinute, err = uintEnv("GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", 30, 16); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshRateLimitBurst, err = uintEnv("GATEWAY_REFRESH_RATE_LIMIT_BURST", 30, 16); err != nil {
 		return nil, err
 	}
 	if cfg.WebSocket, err = loadWebSocket(); err != nil {
