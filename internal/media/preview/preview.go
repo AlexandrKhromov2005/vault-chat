@@ -51,6 +51,9 @@ func Make(data []byte) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	small := shrink(img)
+	if format == "jpeg" {
+		small = orient(small, orientation(data))
+	}
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, small, &jpeg.Options{Quality: Quality}); err != nil {
 		return nil, fmt.Errorf("%w: encode: %v", ErrInvalid, err)
@@ -187,4 +190,40 @@ func onWhite(c color.Color) [3]uint8 {
 	r, g, b, a := c.RGBA() // premultiplied, 16 bits
 	white := 0xffff - a
 	return [3]uint8{uint8((r + white) >> 8), uint8((g + white) >> 8), uint8((b + white) >> 8)}
+}
+
+// orient applies an EXIF orientation (1–8) to the preview.
+func orient(src *image.RGBA, o int) *image.RGBA {
+	if o <= 1 || o > 8 {
+		return src
+	}
+	w, h := src.Bounds().Dx(), src.Bounds().Dy()
+	dw, dh := w, h
+	if o >= 5 {
+		dw, dh = h, w
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	for y := 0; y < dh; y++ {
+		for x := 0; x < dw; x++ {
+			var sx, sy int
+			switch o {
+			case 2:
+				sx, sy = w-1-x, y
+			case 3:
+				sx, sy = w-1-x, h-1-y
+			case 4:
+				sx, sy = x, h-1-y
+			case 5:
+				sx, sy = y, x
+			case 6:
+				sx, sy = y, h-1-x
+			case 7:
+				sx, sy = w-1-y, h-1-x
+			case 8:
+				sx, sy = w-1-y, x
+			}
+			copy(dst.Pix[y*dst.Stride+x*4:y*dst.Stride+x*4+4], src.Pix[sy*src.Stride+sx*4:])
+		}
+	}
+	return dst
 }
