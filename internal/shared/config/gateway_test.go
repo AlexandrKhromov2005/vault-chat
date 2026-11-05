@@ -13,6 +13,7 @@ func clearGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"GATEWAY_HTTP_ADDR", "GATEWAY_AUTH_GRPC_ADDR", "GATEWAY_CHAT_GRPC_ADDR", "GATEWAY_REDIS_ADDR", "GATEWAY_REDIS_PASSWORD",
+		"GATEWAY_PROFILE_CACHE_ADDR", "GATEWAY_PROFILE_CACHE_PASSWORD",
 		"GATEWAY_TLS_CERT_PATH", "GATEWAY_TLS_KEY_PATH", "GATEWAY_CORS_ALLOWED_ORIGINS",
 		"GATEWAY_MAX_BODY_BYTES", "GATEWAY_REQUEST_TIMEOUT", "GATEWAY_RATE_LIMIT_PER_MINUTE",
 		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL", "GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "GATEWAY_WS_SEND_BUFFER",
@@ -143,6 +144,26 @@ func TestLoadGateway(t *testing.T) {
 			})
 		}
 	})
+}
+
+// The profile cache is off by default and must be its own Redis instance,
+// so that its evictions cannot reset rate limits.
+func TestLoadGateway_ProfileCache(t *testing.T) {
+	clearGatewayEnv(t)
+	cfg, err := config.LoadGateway()
+	require.NoError(t, err)
+	require.Empty(t, cfg.ProfileCacheAddr)
+
+	t.Setenv("GATEWAY_PROFILE_CACHE_ADDR", "profile-cache:6379")
+	t.Setenv("GATEWAY_PROFILE_CACHE_PASSWORD", "cache-secret")
+	cfg, err = config.LoadGateway()
+	require.NoError(t, err)
+	require.Equal(t, "profile-cache:6379", cfg.ProfileCacheAddr)
+	require.Equal(t, "cache-secret", cfg.ProfileCachePassword)
+
+	t.Setenv("GATEWAY_REDIS_ADDR", "profile-cache:6379")
+	_, err = config.LoadGateway()
+	require.ErrorContains(t, err, "GATEWAY_PROFILE_CACHE_ADDR")
 }
 
 func TestLoadGateway_InvalidValues(t *testing.T) {
