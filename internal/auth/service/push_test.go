@@ -37,7 +37,7 @@ func (f *fakePushDevices) UnregisterPushToken(_ context.Context, userID, session
 func newPushService(t *testing.T, devices service.PushDeviceRepository) (*service.Service, *mocks.MockTokenManager) {
 	t.Helper()
 	sessions := mocks.NewMockSessionRepository(t)
-	sessions.EXPECT().IsActive(mock.Anything, mock.Anything, pushSession).Return(true, nil).Maybe()
+	sessions.EXPECT().ActiveFamily(mock.Anything, mock.Anything, pushSession).Return(pushSession, nil).Maybe()
 	tokens := mocks.NewMockTokenManager(t)
 	var options []service.Option
 	if devices != nil {

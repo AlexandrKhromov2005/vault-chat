@@ -7,8 +7,6 @@ import (
 
 	domain "github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 
-	jwt "github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
-
 	mock "github.com/stretchr/testify/mock"
 
 	service "github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
@@ -905,23 +903,23 @@ func (_c *MockAuthService_UnregisterPushToken_Call) RunAndReturn(run func(contex
 }
 
 // ValidateToken provides a mock function with given fields: ctx, token
-func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*jwt.Claims, error) {
+func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*service.Access, error) {
 	ret := _m.Called(ctx, token)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateToken")
 	}
 
-	var r0 *jwt.Claims
+	var r0 *service.Access
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*jwt.Claims, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*service.Access, error)); ok {
 		return rf(ctx, token)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *jwt.Claims); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *service.Access); ok {
 		r0 = rf(ctx, token)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*jwt.Claims)
+			r0 = ret.Get(0).(*service.Access)
 		}
 	}
 
@@ -953,12 +951,12 @@ func (_c *MockAuthService_ValidateToken_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockAuthService_ValidateToken_Call) Return(_a0 *jwt.Claims, _a1 error) *MockAuthService_ValidateToken_Call {
+func (_c *MockAuthService_ValidateToken_Call) Return(_a0 *service.Access, _a1 error) *MockAuthService_ValidateToken_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAuthService_ValidateToken_Call) RunAndReturn(run func(context.Context, string) (*jwt.Claims, error)) *MockAuthService_ValidateToken_Call {
+func (_c *MockAuthService_ValidateToken_Call) RunAndReturn(run func(context.Context, string) (*service.Access, error)) *MockAuthService_ValidateToken_Call {
 	_c.Call.Return(run)
 	return _c
 }

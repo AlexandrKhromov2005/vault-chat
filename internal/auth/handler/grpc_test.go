@@ -162,13 +162,13 @@ func TestAuthGRPCHandler_ValidateToken(t *testing.T) {
 
 		expiresAt := time.Now().Add(15 * time.Minute)
 		svc.EXPECT().ValidateToken(mock.Anything, "good-token").
-			Return(&jwt.Claims{
+			Return(&service.Access{Claims: &jwt.Claims{
 				UserID:    "user-1",
 				Email:     "user@example.com",
 				Username:  "username1",
 				TokenType: jwt.AccessToken,
 				ExpiresAt: expiresAt,
-			}, nil)
+			}, LoginID: "login-1"}, nil)
 
 		resp, err := h.ValidateToken(context.Background(), &authv1.ValidateTokenRequest{Token: "good-token"})
 		require.NoError(t, err)
