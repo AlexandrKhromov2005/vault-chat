@@ -19,6 +19,9 @@
   10 минут, отсутствующий аккаунт — минуту; при недоступном кэше ответ берётся
   из Auth. Включается переменной `GATEWAY_PROFILE_CACHE_ADDR`, которая не может
   совпадать с `GATEWAY_REDIS_ADDR`; метрика `vault_profile_cache_requests_total`.
+  В Compose и на VPS — контейнер `profile-cache` (16 МБ, `allkeys-lru`, без
+  записи на диск) в сети только с Gateway; на существующем VPS повторите `init`
+  перед `update`, чтобы добавить `PROFILE_CACHE_PASSWORD`.
 
 - Регистрация push-токена устройства (`PUT`/`DELETE /api/v1/push/token`).
   Токен привязан к сеансу входа и удаляется в той же транзакции, что

@@ -8,12 +8,21 @@ python3 -m unittest discover -s tests/ops -v
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
 AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
-REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin); services=c["services"]
-assert len(services)==13
+assert len(services)==14
+# The profile cache is its own Redis on an internal network only the gateway
+# joins, bounded and never persisted, so its evictions cannot reach rate limits.
+cache=services["profile-cache"]
+assert set(cache["networks"])=={"profile-cache"} and c["networks"]["profile-cache"]["internal"]
+assert sorted(n for n,s in services.items() if "profile-cache" in s.get("networks",{}))==["gateway","profile-cache"]
+assert all(a in cache["command"][-1] for a in ["--maxmemory 16mb","allkeys-lru","--save \"\"","--appendonly no"])
+gw=services["gateway"]["environment"]
+assert gw["GATEWAY_PROFILE_CACHE_ADDR"]=="profile-cache:6379"!=gw["GATEWAY_REDIS_ADDR"]
+assert gw["GATEWAY_PROFILE_CACHE_PASSWORD"]!=gw["GATEWAY_REDIS_PASSWORD"]
 for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-postgres")]:
     assert name+"_app:" in services[name]["environment"][name.upper()+"_DATABASE_URL"]
     assert services[name]["depends_on"][name+"-migrate"]["condition"]=="service_completed_successfully"
@@ -39,7 +48,7 @@ print("VPS Compose: TLS, private data services, limits and image-only deployment
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
 AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
-REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.mtls.yml config --format json | python3 -c '
 import json,sys
