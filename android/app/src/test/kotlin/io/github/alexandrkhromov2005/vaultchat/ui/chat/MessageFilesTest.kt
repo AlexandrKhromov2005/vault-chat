@@ -175,6 +175,24 @@ class MessageFilesTest {
         assertEquals(1, shownName("report.pdf"))
     }
 
+    /** The same key and text with other files is the server's 409: both messages stay on screen. */
+    @Test
+    fun aFailedMessageBesideTheStoredOneWithItsKeyAndOtherFilesIsShown() {
+        val mine = file(7, "mine.pdf", "application/pdf")
+        val theirs = file(8, "stored.pdf", "application/pdf")
+        source.metadata.value = mapOf(mine.fileId to FileState.Known(mine), theirs.fileId to FileState.Known(theirs))
+        val failed = outgoingRow().copy(state = OutgoingEntity.FAILED, error = OutgoingEntity.ERROR_CONFLICT)
+        val queue = MutableStateFlow(listOf(failed))
+        val files = MutableStateFlow(listOf(OutgoingFileEntity(cid, 0, "mine.pdf", "application/pdf", 2048, "s1", mine.fileId)))
+        val message = MessageEntity(roomId, 1, "m-1", me, cid, "", attachments = theirs.fileId, createdAt = now)
+        val stored = MutableStateFlow(PagingData.from(listOf<ChatRow>(ChatRow.Message(MessageItem(message, null, true)))))
+
+        showOutgoing(queue, files, emptyMap(), stored)
+
+        assertEquals(1, shownName("stored.pdf"))
+        assertEquals(1, shownName("mine.pdf"))
+    }
+
     private fun bubble() = compose.onNode(hasContentDescription("pictures", substring = true)).fetchSemanticsNode()
 
     @Test

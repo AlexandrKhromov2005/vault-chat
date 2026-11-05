@@ -206,22 +206,33 @@ abstract class ChatDao {
     @Query("UPDATE outgoing_files SET maybe_stored = 0, timeouts = 0 WHERE client_message_id = :clientMessageId")
     protected abstract suspend fun resetUploads(clientMessageId: String)
 
+    @Query(
+        "SELECT m.* FROM messages m JOIN outbox o ON m.room_id = o.room_id " +
+            "AND m.client_message_id = o.client_message_id AND m.sender_id = o.sender_id AND m.text = o.text " +
+            "WHERE o.room_id = :roomId",
+    )
+    protected abstract suspend fun storedWithKeyAndText(roomId: String): List<MessageEntity>
+
+    @Query(
+        "DELETE FROM outbox WHERE room_id = :roomId AND state = 'sent' " +
+            "AND sequence <= (SELECT newest FROM timelines t WHERE t.room_id = outbox.room_id)",
+    )
+    protected abstract suspend fun deleteSentInBlock(roomId: String)
+
     /**
      * Deletes the rows of a room that its stored block now shows: those that a
-     * stored message of their sender matches by key and text, and sent rows
-     * within or below the block. The key alone is not enough: keys are per
-     * sender, and another member may use the same one; and a stored message
-     * with the same key but another text (the server's 409) shows only that
-     * this text was not stored.
+     * stored message of their sender matches as a whole, and sent rows within
+     * or below the block. The key alone is not enough: keys are per sender,
+     * and another member may use the same one; and a stored message with the
+     * same key but another text or other files (the server's 409) shows only
+     * that this message was not stored.
      */
-    @Query(
-        "DELETE FROM outbox WHERE room_id = :roomId AND (" +
-            "EXISTS (SELECT 1 FROM messages m WHERE m.room_id = outbox.room_id " +
-            "AND m.client_message_id = outbox.client_message_id AND m.sender_id = outbox.sender_id " +
-            "AND m.text = outbox.text) " +
-            "OR (state = 'sent' AND sequence <= (SELECT newest FROM timelines t WHERE t.room_id = outbox.room_id)))",
-    )
-    protected abstract suspend fun resolveOutgoing(roomId: String)
+    private suspend fun resolveOutgoing(roomId: String) {
+        for (message in storedWithKeyAndText(roomId)) {
+            if (message.hasFiles(filesOf(message.clientMessageId))) deleteOutgoing(message.clientMessageId)
+        }
+        deleteSentInBlock(roomId)
+    }
 
     @Query("SELECT EXISTS (SELECT 1 FROM rooms_listed)")
     protected abstract suspend fun roomsListed(): Boolean

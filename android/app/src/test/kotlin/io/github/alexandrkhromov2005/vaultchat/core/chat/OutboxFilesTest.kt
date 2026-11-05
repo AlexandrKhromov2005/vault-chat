@@ -25,6 +25,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -489,6 +490,63 @@ class OutboxFilesTest {
         val sent = server.sent(roomId).last()
         assertEquals(key(2), sent.clientMessageId)
         assertEquals(listOf(fileId), sent.attachmentIds)
+    }
+
+    /**
+     * Chat compares the text and the ordered file IDs under a key, so that a
+     * stored message with the key and text of a row is its copy only with the
+     * same files. Otherwise it proves that this message was not stored.
+     */
+    @Test
+    fun aRowIsResolvedOnlyByAStoredMessageWithItsFilesInOrder() = runBlocking {
+        val roomId = loadedChannel(1)
+        val a = server.id(5, 1)
+        val b = server.id(5, 2)
+
+        suspend fun failedRow(n: Int, vararg fileIds: String?) = dao.enqueue(
+            OutgoingEntity(key(n), roomId, me, position = n.toLong(), text = "same", createdAt = 0, state = OutgoingEntity.FAILED),
+            fileIds.mapIndexed { i, id -> OutgoingFileEntity(key(n), i, "f$i.txt", "text/plain; charset=utf-8", 1, "s$n-$i", id) },
+        )
+        failedRow(1, a)
+        server.store(roomId, me, key(1), "same", listOf(b))
+        failedRow(2, a, b)
+        server.store(roomId, me, key(2), "same", listOf(b, a))
+        failedRow(3, a, b)
+        server.store(roomId, me, key(3), "same", listOf(a))
+        failedRow(4, a, null)
+        server.store(roomId, me, key(4), "same", listOf(a))
+        failedRow(5, a)
+        server.store(roomId, me, key(5), "same")
+        failedRow(6)
+        server.store(roomId, me, key(6), "same", listOf(a))
+        // The same message, which the server stored after all.
+        failedRow(7, a, b)
+        server.store(roomId, me, key(7), "same", listOf(a, b))
+        failedRow(8)
+        server.store(roomId, me, key(8), "same")
+
+        assertNull(sync.syncNow())
+
+        assertEquals(8, dao.storedMessages(roomId).size)
+        assertEquals((1..6).map(::key), dao.storedOutgoing(roomId).map { it.clientMessageId })
+    }
+
+    /** A sync after the server's 409 leaves the user the choice between Retry and Delete. */
+    @Test
+    fun aMessageRejectedForOtherFilesStaysAfterASync() = runBlocking {
+        val roomId = loadedChannel(1)
+        val other = server.addFile(roomId, 1, "other".toByteArray())
+        server.store(roomId, me, key(1), "mine", listOf(other.fileId))
+        assertNull(sync.syncNow())
+        outbox().send(roomId, "mine", listOf(text("a.txt")))
+        eventually { dao.storedOutgoing(roomId).singleOrNull()?.error == OutgoingEntity.ERROR_CONFLICT }
+
+        server.post(roomId, sender = server.id(1, 77))
+        assertNull(sync.syncNow())
+
+        assertEquals(2, dao.storedMessages(roomId).size)
+        assertEquals(listOf(key(1)), dao.storedOutgoing(roomId).map { it.clientMessageId })
+        assertNotNull(dao.filesOf(key(1)).single().fileId)
     }
 
     @Test

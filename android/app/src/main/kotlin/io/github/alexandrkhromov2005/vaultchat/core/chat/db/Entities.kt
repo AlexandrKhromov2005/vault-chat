@@ -71,6 +71,9 @@ data class MessageEntity(
     val attachmentCount: Int get() = if (attachments.isEmpty()) 0 else attachments.count { it == ',' } + 1
 
     val attachmentIds: List<String> get() = if (attachments.isEmpty()) emptyList() else attachments.split(',')
+
+    /** Whether these are [files] of a queued message, in order; a file not uploaded yet is not among them. */
+    fun hasFiles(files: List<OutgoingFileEntity>): Boolean = attachmentIds == files.map { it.fileId }
 }
 
 /**
@@ -78,7 +81,8 @@ data class MessageEntity(
  * (docs/android/send.md). [position] orders the queue; [clientMessageId] is
  * the retry key and never changes while the row is retried, except after a
  * conflict. A row is deleted once a stored message of [senderId] with the same
- * key is in the room, or once the block reaches a [SENT] row's [sequence].
+ * key, text and files is in the room, or once the block reaches a [SENT] row's
+ * [sequence].
  */
 @Entity(
     tableName = "outbox",
