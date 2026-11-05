@@ -36,18 +36,34 @@ func NewSessionRepository(pool *pgxpool.Pool, deadline ...*time.Time) *SessionRe
 	return r
 }
 
+// activeSession is the rule for a session row "current", joined with its
+// user "u", that keeps its login active; deadline is the parameter holding
+// the legacy email verification deadline.
+func activeSession(deadline string) string {
+	return `current.revoked_at IS NULL AND current.expires_at>clock_timestamp()
+AND current.credential_version=u.credential_version
+AND (u.email_verified_at IS NOT NULL OR (NOT u.email_verification_required
+AND (` + deadline + `::timestamptz IS NULL OR clock_timestamp()<` + deadline + `)))`
+}
+
+// rowQuerier is a pool or a transaction.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // IsActive checks the login family, so refresh rotation does not invalidate
 // requests already using the previous access token. Logout/reuse revoke it.
 func (r *SessionRepository) IsActive(ctx context.Context, userID, sessionID string) (bool, error) {
+	return r.isActive(ctx, r.pool, userID, sessionID)
+}
+
+func (r *SessionRepository) isActive(ctx context.Context, q rowQuerier, userID, sessionID string) (bool, error) {
 	var active bool
-	err := r.pool.QueryRow(ctx, `SELECT EXISTS (
+	err := q.QueryRow(ctx, `SELECT EXISTS (
 SELECT 1 FROM sessions original JOIN sessions current ON current.family_id=original.family_id
 JOIN users u ON u.id=current.user_id
 WHERE original.id=$1::uuid AND original.user_id=$2::uuid AND current.user_id=$2::uuid
-AND current.revoked_at IS NULL AND current.expires_at>clock_timestamp()
-AND current.credential_version=u.credential_version
-AND (u.email_verified_at IS NOT NULL OR (NOT u.email_verification_required
-AND ($3::timestamptz IS NULL OR clock_timestamp()<$3))))`, sessionID, userID, r.legacyDeadline).Scan(&active)
+AND `+activeSession("$3")+`)`, sessionID, userID, r.legacyDeadline).Scan(&active)
 	return active, err
 }
 

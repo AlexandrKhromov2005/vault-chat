@@ -35,6 +35,8 @@ type AuthService interface {
 	ConfirmPasswordReset(ctx context.Context, token, password string) (string, error)
 	RequestEmailChange(ctx context.Context, accessToken, password, newEmail string) error
 	ConfirmEmailChange(ctx context.Context, token string) (string, error)
+	RegisterPushToken(ctx context.Context, accessToken, provider, token string) error
+	UnregisterPushToken(ctx context.Context, accessToken string) error
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -147,6 +149,8 @@ var publicErrors = []struct {
 	{service.ErrPasswordCapacity, codes.Unavailable, "password capacity reached"},
 	{service.ErrEmailUnavailable, codes.Unavailable, "email service unavailable"},
 	{service.ErrLoginRateLimited, codes.ResourceExhausted, "too many login attempts"},
+	{service.ErrPushUnavailable, codes.Unavailable, "push tokens unavailable"},
+	{validator.ErrInvalidPushToken, codes.InvalidArgument, "invalid push token"},
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
 	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},
@@ -177,6 +181,22 @@ func toStatus(err error) error {
 		}
 	}
 	return status.Error(codes.Internal, "internal error")
+}
+
+// RegisterPushToken binds a provider token to the caller's login.
+func (h *AuthGRPCHandler) RegisterPushToken(ctx context.Context, req *authv1.RegisterPushTokenRequest) (*authv1.RegisterPushTokenResponse, error) {
+	if err := h.svc.RegisterPushToken(ctx, req.GetAccessToken(), req.GetProvider(), req.GetToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.RegisterPushTokenResponse{}, nil
+}
+
+// UnregisterPushToken removes the token of the caller's login.
+func (h *AuthGRPCHandler) UnregisterPushToken(ctx context.Context, req *authv1.UnregisterPushTokenRequest) (*authv1.UnregisterPushTokenResponse, error) {
+	if err := h.svc.UnregisterPushToken(ctx, req.GetAccessToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.UnregisterPushTokenResponse{}, nil
 }
 
 // GetUser resolves a user and projects only the public directory fields.

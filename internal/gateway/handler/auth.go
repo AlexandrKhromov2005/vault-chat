@@ -34,6 +34,8 @@ type AuthClient interface {
 	ConfirmPasswordReset(ctx context.Context, in *authv1.ConfirmPasswordResetRequest, opts ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error)
 	RequestEmailChange(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error)
 	ConfirmEmailChange(ctx context.Context, in *authv1.ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error)
+	RegisterPushToken(ctx context.Context, in *authv1.RegisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.RegisterPushTokenResponse, error)
+	UnregisterPushToken(ctx context.Context, in *authv1.UnregisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.UnregisterPushTokenResponse, error)
 }
 
 type registerRequest struct {

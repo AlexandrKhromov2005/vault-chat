@@ -269,7 +269,7 @@ for managing mTLS, retries and circuit breakers.
 
 | Pattern | Implementation | Purpose |
 |---------|---------------|---------|
-| Circuit Breaker | `github.com/sony/gobyence` | Fail fast when downstream is unhealthy |
+| Circuit Breaker | `github.com/sony/gobreaker` | Fail fast when downstream is unhealthy |
 | Retry + Backoff | gRPC interceptor with exponential backoff | Transient network failures |
 | Timeout | Context deadlines per request | Prevent cascading hangs |
 | Health Checks | `/health` and `/ready` probes | Kubernetes / orchestrator decisions |
@@ -314,26 +314,29 @@ for managing mTLS, retries and circuit breakers.
 
 ## 8. CI/CD Pipeline (Local)
 
-Target workflow: local verification via `xmake`; no cloud runners are configured.
-`xmake.lua` and automated hooks are not implemented. Current manual commands are
-listed in README. A working single verification command is an acceptance criterion
-in [the delivery plan](docs/requirements.md).
+Local verification via `xmake` is implemented; no cloud runners are configured.
+`xmake setup` installs pre-commit and pre-push hooks. Commit first, then run the
+full `xmake ci` pipeline on a clean checkout: it tests that exact commit in a
+separate checkout and writes commit-bound evidence only after success. Do not
+edit the checkout during CI. The pre-push hook validates fresh evidence for each
+pushed tip; it does not start CI. Publish the verified status, then obtain
+independent approval of the latest push before merging.
 
 ```
 Developer Machine:
-┌──────────────────────────────────────────────────────┐
-│  git push → pre-push hook → xmake ci                 │
-│  ├─ gofmt / goimports                                 │
-│  ├─ go vet                                            │
-│  ├─ golangci-lint                                     │
-│  ├─ go test -race -cover (unit tests)                 │
-│  ├─ go test -fuzz (fuzz tests, 30s)                   │
-│  ├─ coverage >= 70% check                             │
-│  └─ go build (all services)                           │
-└──────────────────────────────────────────────────────┘
-         │
-         ▼
-   PR created → code review (1 approve) → merge to main
+pre-commit hook → staged secret scan + fast formatting, vet and lint checks
+        │
+        ▼
+git commit → clean-checkout xmake ci → commit-bound evidence
+        │
+        ▼
+git push → pre-push hook validates the pushed commit's evidence
+        │
+        ▼
+python3 scripts/dev/verification.py publish → vault/local-ci status
+        │
+        ▼
+PR → independent approval of latest push → guarded merge to main
 ```
 
 ---
@@ -407,19 +410,20 @@ vault-chat/
 │   ├── docker-compose.yml
 │   └── k8s/              # Kubernetes manifests (future)
 ├── docs/
-│   ├── ARCHITECTURE.md
 │   └── api/              # OpenAPI specs
 ├── tests/
-│   ├── integration/      # Docker-based integration tests
-│   └── fuzz/             # Fuzz test corpus
+│   └── integration/      # Docker-based integration tests
 ├── xmake.lua
 ├── go.mod
 ├── go.sum
 ├── README.md
+├── ARCHITECTURE.md
 ├── CONTRIBUTING.md
-├── LICENSE
 └── .golangci.yml
 ```
+
+Unit and fuzz tests are colocated with the packages they exercise in `*_test.go`
+files; fuzz crash corpora live in package `testdata/fuzz/` directories.
 
 ---
 

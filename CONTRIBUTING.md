@@ -48,6 +48,7 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 - `golangci-lint` v2.14.0 built with Go 1.27.3
 - `govulncheck` v1.9.0 built with Go 1.27.3 (pin the toolchain explicitly)
 - `git` with `user.name` and `user.email` configured
+- Authenticated GitHub CLI (`gh`), required to publish verification evidence and perform guarded merges
 
 Install the pinned Go analyzers into the ignored project tool directory:
 
@@ -209,30 +210,11 @@ fix bug
 
 ### PR Template
 
-Fill out the template (located at `.github/pull_request_template.md`) when creating a PR:
-
-```markdown
-## Description
-Brief description of changes and motivation.
-
-## Related Issues
-Closes #123, Relates to #456
-
-## What Changed
-- [ ] Added...
-- [ ] Fixed...
-- [ ] Updated...
-
-## How to Verify
-1. `xmake test` (all unit tests pass)
-2. `xmake test-race` (no race conditions)
-3. `xmake fuzz` (fuzz tests pass)
-4. `xmake lint` (linters are clean)
-5. Expected result: ...
-
-## Screenshots / Logs
-(if applicable)
-```
+Complete the actual [pull request template](.github/pull_request_template.md).
+It requires the security invariant, trust boundary, resource budgets and
+behavioral regression evidence; the exact tested commit SHA and `vault/local-ci`
+evidence; and any additional acceptance evidence, excluded checks, remaining
+limitations and verified deployment state.
 
 ### PR Requirements
 
@@ -565,13 +547,13 @@ func FuzzValidateEmail(f *testing.F) {
 
 ```bash
 # Run with default duration (1 minute)
-go test ./internal/validator -fuzz=FuzzValidateEmail
+go test ./internal/auth/validator -fuzz=FuzzValidateEmail
 
 # Run for 5 minutes
-go test ./internal/validator -fuzz=FuzzValidateEmail -fuzztime=5m
+go test ./internal/auth/validator -fuzz=FuzzValidateEmail -fuzztime=5m
 
 # Run for a specific iteration count
-go test ./internal/validator -fuzz=FuzzValidateEmail -fuzztime=100000x
+go test ./internal/auth/validator -fuzz=FuzzValidateEmail -fuzztime=100000x
 
 # Every fuzz target in the project, one after another
 xmake fuzz              # 30s per target
@@ -778,12 +760,6 @@ fallback. Local evidence and the author-published status do not replace review.
 - General questions — GitHub Discussions
 - Bugs and features — GitHub Issues
 - Private security reports — [SECURITY.md](SECURITY.md)
-
----
-
-## License
-
-By contributing, you agree that your code will be distributed under the project's license (see [LICENSE](LICENSE)).
 
 ---
 
