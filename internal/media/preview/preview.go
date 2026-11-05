@@ -5,6 +5,7 @@ package preview
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -16,7 +17,8 @@ import (
 const (
 	// MaxSide bounds the longer side of a preview in pixels.
 	MaxSide = 320
-	// MaxPixels bounds the decoded size of an image that gets a preview.
+	// MaxPixels bounds the pixel count of an image that gets a preview;
+	// MaxDecoded bounds the memory its encoding takes to decode.
 	MaxPixels = 24_000_000
 	// MaxOutput bounds the encoded preview.
 	MaxOutput = 256 << 10
@@ -31,14 +33,18 @@ var (
 	ErrInvalid = errors.New("preview: invalid image")
 )
 
-// Make returns the JPEG preview of a PNG or JPEG image. The pixel budget is
-// checked on the header, before anything is decoded.
+// Make returns the JPEG preview of a PNG or JPEG image. The pixel and memory
+// budgets are checked on the header, before anything is decoded.
 func Make(data []byte) ([]byte, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || (format != "png" && format != "jpeg") || cfg.Width <= 0 || cfg.Height <= 0 {
 		return nil, ErrInvalid
 	}
-	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+	need, ok := decodedBytes(data, format, cfg.Width, cfg.Height)
+	if !ok {
+		return nil, ErrInvalid
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels || need > MaxDecoded {
 		return nil, ErrSkipped
 	}
 	var img image.Image
@@ -138,10 +144,30 @@ func split(i, n, m int) (int, uint64) {
 }
 
 // rowReader returns a function that writes one source row as RGB on white.
-// The decoders' own image types have fast paths; others go through At.
+// Every image type the decoders return has a path that does not allocate:
+// At allocates per pixel, and that garbage would double the heap.
 func rowReader(img image.Image) func(y int, row []uint8) {
 	b := img.Bounds()
 	switch m := img.(type) {
+	case *image.Gray16:
+		return func(y int, row []uint8) {
+			pix := m.Pix[m.PixOffset(b.Min.X, y):]
+			for x := 0; x < b.Dx(); x++ {
+				row[x*3], row[x*3+1], row[x*3+2] = pix[x*2], pix[x*2], pix[x*2]
+			}
+		}
+	case *image.RGBA64:
+		return rows64(func(y int) []uint8 { return m.Pix[m.PixOffset(b.Min.X, y):] }, b.Dx(), false)
+	case *image.NRGBA64:
+		return rows64(func(y int) []uint8 { return m.Pix[m.PixOffset(b.Min.X, y):] }, b.Dx(), true)
+	case *image.CMYK:
+		return func(y int, row []uint8) {
+			pix := m.Pix[m.PixOffset(b.Min.X, y):]
+			for x := 0; x < b.Dx(); x++ {
+				p := pix[x*4 : x*4+4]
+				row[x*3], row[x*3+1], row[x*3+2] = color.CMYKToRGB(p[0], p[1], p[2], p[3])
+			}
+		}
 	case *image.YCbCr:
 		return func(y int, row []uint8) {
 			for x := b.Min.X; x < b.Max.X; x++ {
@@ -199,6 +225,24 @@ func rowReader(img image.Image) func(y int, row []uint8) {
 			for x := b.Min.X; x < b.Max.X; x++ {
 				c := onWhite(img.At(x, y))
 				copy(row[(x-b.Min.X)*3:], c[:])
+			}
+		}
+	}
+}
+
+// rows64 reads 16-bit RGBA rows, premultiplied unless straight, on white.
+func rows64(start func(y int) []uint8, w int, straight bool) func(y int, row []uint8) {
+	return func(y int, row []uint8) {
+		pix := start(y)
+		for x := 0; x < w; x++ {
+			a := uint32(binary.BigEndian.Uint16(pix[x*8+6:]))
+			for c := 0; c < 3; c++ {
+				v := uint32(binary.BigEndian.Uint16(pix[x*8+c*2:]))
+				if straight {
+					v = v * a / 0xffff
+				}
+				// Saturate: malformed premultiplied data may exceed alpha.
+				row[x*3+c] = uint8(min(0xffff, v+0xffff-a) >> 8)
 			}
 		}
 	}
