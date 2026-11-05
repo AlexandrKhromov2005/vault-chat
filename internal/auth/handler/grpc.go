@@ -98,6 +98,7 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 		Email:     claims.Email,
 		Username:  claims.Username,
 		ExpiresAt: timestamppb.New(claims.ExpiresAt),
+		SessionId: claims.LoginID,
 	}, nil
 }
 
