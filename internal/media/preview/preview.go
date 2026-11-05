@@ -76,8 +76,10 @@ func fit(w, h int) (int, int) {
 	return max(1, (w*MaxSide+h/2)/h), MaxSide
 }
 
-// shrink averages the pixels that fall into each preview pixel, reading the
-// source once row by row. Transparency is flattened on white.
+// shrink resamples by area averaging: every source pixel contributes to the
+// preview pixels it overlaps in proportion to the overlap, in exact integer
+// weights. The source is read once row by row. Transparency is flattened on
+// white.
 func shrink(img image.Image) *image.RGBA {
 	b := img.Bounds()
 	sw, sh := b.Dx(), b.Dy()
@@ -85,37 +87,54 @@ func shrink(img image.Image) *image.RGBA {
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
 	read := rowReader(img)
 	row := make([]uint8, sw*3)
-	sums := make([]uint64, dw*3)
-	counts := make([]uint64, dw)
-	flush := func(dy int) {
-		out := dst.Pix[dy*dst.Stride:]
-		for dx := range counts {
-			n := counts[dx]
+	line := make([]uint64, dw*3)  // one source row, resampled horizontally
+	acc := make([]uint64, 2*dw*3) // preview rows cur and cur+1
+	area := uint64(sw) * uint64(sh)
+	cur := 0
+	flush := func() {
+		out := dst.Pix[cur*dst.Stride:]
+		for dx := 0; dx < dw; dx++ {
 			for c := 0; c < 3; c++ {
-				out[dx*4+c] = uint8((sums[dx*3+c] + n/2) / n)
-				sums[dx*3+c] = 0
+				out[dx*4+c] = uint8((acc[dx*3+c] + area/2) / area)
 			}
 			out[dx*4+3] = 255
-			counts[dx] = 0
 		}
+		copy(acc, acc[dw*3:])
+		clear(acc[dw*3:])
 	}
-	current := 0
 	for y := 0; y < sh; y++ {
-		if dy := y * dh / sh; dy != current {
-			flush(current)
-			current = dy
+		dy, v := split(y, sh, dh)
+		if dy != cur {
+			flush()
+			cur = dy
 		}
 		read(b.Min.Y+y, row)
+		clear(line)
 		for x := 0; x < sw; x++ {
-			dx := x * dw / sw
-			sums[dx*3] += uint64(row[x*3])
-			sums[dx*3+1] += uint64(row[x*3+1])
-			sums[dx*3+2] += uint64(row[x*3+2])
-			counts[dx]++
+			dx, w := split(x, sw, dw)
+			for c := 0; c < 3; c++ {
+				s := uint64(row[x*3+c])
+				line[dx*3+c] += s * w
+				if w < uint64(dw) {
+					line[dx*3+3+c] += s * (uint64(dw) - w)
+				}
+			}
+		}
+		for i, s := range line {
+			acc[i] += s * v
+			acc[dw*3+i] += s * (uint64(dh) - v)
 		}
 	}
-	flush(current)
+	flush()
 	return dst
+}
+
+// split maps source pixel i of n onto m ≤ n preview pixels. Measured in
+// units of 1/(n·m), the pixel puts weight w into preview pixel j and the
+// rest, m-w, into j+1. The weights of each preview pixel add up to n.
+func split(i, n, m int) (int, uint64) {
+	j := i * m / n
+	return j, uint64(min((i+1)*m, (j+1)*n) - i*m)
 }
 
 // rowReader returns a function that writes one source row as RGB on white.

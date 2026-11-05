@@ -165,6 +165,52 @@ func TestMakeIsDeterministic(t *testing.T) {
 	}
 }
 
+// A preview pixel covers 1.5 source pixels of the pattern 0, 255, 0: one
+// whole and half of the next, so every pixel is (0 + 127.5) / 1.5 = 85.
+func TestShrinkSplitsSourcePixels(t *testing.T) {
+	src := image.NewGray(image.Rect(0, 0, 480, 1))
+	for x := range src.Pix {
+		if x%3 == 1 {
+			src.Pix[x] = 255
+		}
+	}
+	dst := shrink(src)
+	for x := 0; x < dst.Bounds().Dx(); x++ {
+		if v := dst.Pix[x*4]; diff(v, 85) > 1 {
+			t.Fatalf("preview pixel %d = %d, want the area average 85", x, v)
+		}
+	}
+}
+
+// shrink matches a direct area average for ratios that are not integers.
+func TestShrinkAveragesByArea(t *testing.T) {
+	src := image.NewGray(image.Rect(0, 0, 777, 451))
+	for i := range src.Pix {
+		src.Pix[i] = uint8(i * 7919 >> 3)
+	}
+	dst := shrink(src)
+	dw, dh := dst.Bounds().Dx(), dst.Bounds().Dy()
+	// overlap is the length of [a/n, (a+1)/n) ∩ [b/m, (b+1)/m), scaled by n·m.
+	overlap := func(a, n, b, m int) float64 {
+		return float64(max(0, min((a+1)*m, (b+1)*n)-max(a*m, b*n)))
+	}
+	for dy := 0; dy < dh; dy++ {
+		for dx := 0; dx < dw; dx++ {
+			var sum, area float64
+			for y := dy * 451 / dh; y <= min(450, (dy+1)*451/dh); y++ {
+				for x := dx * 777 / dw; x <= min(776, (dx+1)*777/dw); x++ {
+					w := overlap(x, 777, dx, dw) * overlap(y, 451, dy, dh)
+					sum += w * float64(src.Pix[y*777+x])
+					area += w
+				}
+			}
+			if got := dst.Pix[dy*dst.Stride+dx*4]; diff(got, int(sum/area+0.5)) > 1 {
+				t.Fatalf("pixel (%d,%d) = %d, want %.1f", dx, dy, got, sum/area)
+			}
+		}
+	}
+}
+
 func TestMakeSkipsImagesAboveThePixelBudget(t *testing.T) {
 	if _, err := Make(pngHeader(6000, 5000)); !errors.Is(err, ErrSkipped) {
 		t.Fatalf("30-megapixel header: %v, want ErrSkipped", err)
