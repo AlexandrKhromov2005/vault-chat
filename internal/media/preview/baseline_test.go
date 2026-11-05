@@ -2,15 +2,22 @@
 
 package preview
 
-// The Go baseline of ADR 0006 on a deterministic synthetic corpus. Benchmarks
-// run with `go test -bench`; the report with percentiles, peak RSS and an
-// optional libvips reference runs only when PREVIEW_BASELINE=1:
+// The in-process Make baseline of ADR 0006 on a deterministic synthetic
+// corpus. It times Make alone: no process or container start, file I/O, RPC
+// or TLS. Benchmarks run with `go test -bench`; the report with percentiles
+// over independent batches, peak RSS and an optional libvips reference runs
+// only when PREVIEW_BASELINE=1:
 //
 //	PREVIEW_BASELINE=1 go test -run TestBaselineReport -v -timeout 60m ./internal/media/preview/
 //
 // Peak RSS comes from /proc and GNU time (`/usr/bin/time`): the rusage of a
 // child started by Go reports the parent's peak, because the child shares the
 // parent's memory until exec.
+//
+// Every batch is a fresh child process: 3 warmup calls, then
+// PREVIEW_BASELINE_RUNS timed calls (default 100). Before each call the heap
+// is collected, as in a fresh worker per task; PREVIEW_BASELINE_GC=default
+// leaves collection to the runtime instead.
 
 import (
 	"bytes"
@@ -24,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -124,6 +132,54 @@ func TestBaselineItem(t *testing.T) {
 	}
 }
 
+// TestBaselineBatch is a child process of the report: one independent batch
+// of timed Make calls on one file, printing each duration.
+func TestBaselineBatch(t *testing.T) {
+	path := os.Getenv("PREVIEW_BATCH")
+	if path == "" {
+		t.Skip("child of TestBaselineReport")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := strconv.Atoi(os.Getenv("PREVIEW_BASELINE_RUNS"))
+	for i := range 3 + runs {
+		if os.Getenv("PREVIEW_BASELINE_GC") != "default" {
+			runtime.GC()
+		}
+		start := time.Now()
+		if _, err := Make(data); err != nil {
+			t.Fatal(err)
+		}
+		if i >= 3 {
+			fmt.Println("NS", time.Since(start).Nanoseconds())
+		}
+	}
+}
+
+// batch runs TestBaselineBatch on path and returns its sorted durations.
+func batch(t *testing.T, path string, runs int) []time.Duration {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestBaselineBatch$", "-test.v")
+	cmd.Env = append(os.Environ(), "PREVIEW_BATCH="+path, "PREVIEW_BASELINE_RUNS="+strconv.Itoa(runs))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("batch %s: %v\n%s", path, err, out)
+	}
+	var durations []time.Duration
+	for _, line := range strings.Split(string(out), "\n") {
+		if rest, ok := strings.CutPrefix(line, "NS "); ok {
+			ns, _ := strconv.ParseInt(rest, 10, 64)
+			durations = append(durations, time.Duration(ns))
+		}
+	}
+	if len(durations) != runs {
+		t.Fatalf("batch %s: %d durations, want %d\n%s", path, len(durations), runs, out)
+	}
+	slices.Sort(durations)
+	return durations
+}
+
 // peakMiB runs a command and returns the peak RSS it reports, in MiB: a line
 // "PEAK_KIB <n>" from TestBaselineItem, or else the last line of GNU time -f %M.
 func peakMiB(t *testing.T, cmd *exec.Cmd) float64 {
@@ -153,37 +209,44 @@ func TestBaselineReport(t *testing.T) {
 	if os.Getenv("PREVIEW_BASELINE") != "1" {
 		t.Skip("set PREVIEW_BASELINE=1 to measure the Go baseline")
 	}
-	runs := 100 // enough runs for p99 to differ from the maximum
+	runs, batches := 100, 5 // per batch: enough runs for p99 to differ from the maximum
 	if v, err := strconv.Atoi(os.Getenv("PREVIEW_BASELINE_RUNS")); err == nil && v > 0 {
 		runs = v
+	}
+	if v, err := strconv.Atoi(os.Getenv("PREVIEW_BASELINE_BATCHES")); err == nil && v > 0 {
+		batches = v
 	}
 	vips, _ := exec.LookPath("vipsthumbnail")
 	dir := t.TempDir()
 	idle := peakMiB(t, exec.Command("/usr/bin/time", "-f", "%M", os.Args[0], "-test.run=^TestBaselineItem$"))
-	t.Logf("runs=%d, idle child RSS %.0f MiB, vipsthumbnail=%q", runs, idle, vips)
-	t.Logf("%-10s %4s %8s %8s %8s %8s %8s %7s %9s %9s", "kind", "MP", "input", "p50", "p95", "p99", "RSS MiB", "output", "vips p50", "vips MiB")
+	t.Logf("%d batches × %d runs, GC %q, idle child RSS %.0f MiB, vipsthumbnail=%q",
+		batches, runs, os.Getenv("PREVIEW_BASELINE_GC"), idle, vips)
+	t.Logf("%-10s %4s %8s %8s %8s %8s %15s %8s %7s %9s %9s", "kind", "MP", "input", "p50", "p95", "p99",
+		"batch p99", "RSS MiB", "output", "vips min", "vips MiB")
 	for _, kind := range kinds {
 		for _, mp := range megapixels {
 			data := corpus(t, kind, mp)
-			var durations []time.Duration
-			var out []byte
-			for range runs {
-				start := time.Now()
-				var err error
-				if out, err = Make(data); err != nil {
-					t.Fatal(err)
-				}
-				durations = append(durations, time.Since(start))
+			out, err := Make(data)
+			if err != nil {
+				t.Fatal(err)
 			}
-			slices.Sort(durations)
 			ext := map[bool]string{true: "jpg", false: "png"}[kind == "photo"]
 			path := filepath.Join(dir, fmt.Sprintf("%s-%d.%s", kind, mp, ext))
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			var durations []time.Duration
+			lo, hi := time.Duration(math.MaxInt64), time.Duration(0)
+			for range batches {
+				b := batch(t, path, runs)
+				lo, hi = min(lo, percentile(b, 0.99)), max(hi, percentile(b, 0.99))
+				durations = append(durations, b...)
+			}
+			slices.Sort(durations)
 			child := exec.Command(os.Args[0], "-test.run=^TestBaselineItem$")
 			child.Env = append(os.Environ(), "PREVIEW_ITEM="+path)
 			rss := peakMiB(t, child)
+			// vips: the fastest of 5 runs, process start included; a reference only.
 			vipsTime, vipsRSS := "-", "-"
 			if vips != "" {
 				var best time.Duration
@@ -198,12 +261,14 @@ func TestBaselineReport(t *testing.T) {
 				}
 				vipsTime, vipsRSS = best.Round(time.Millisecond).String(), fmt.Sprintf("%.0f", peak)
 			}
-			t.Logf("%-10s %4d %7dK %8v %8v %8v %8.0f %6dK %9s %9s", kind, mp, len(data)>>10,
-				percentile(durations, 0.5).Round(time.Millisecond), percentile(durations, 0.95).Round(time.Millisecond),
-				percentile(durations, 0.99).Round(time.Millisecond), rss, len(out)>>10, vipsTime, vipsRSS)
+			ms := func(d time.Duration) time.Duration { return d.Round(time.Millisecond) }
+			t.Logf("%-10s %4d %7dK %8v %8v %8v %15s %8.0f %6dK %9s %9s", kind, mp, len(data)>>10,
+				ms(percentile(durations, 0.5)), ms(percentile(durations, 0.95)), ms(percentile(durations, 0.99)),
+				fmt.Sprintf("%v–%v", ms(lo), ms(hi)), rss, len(out)>>10, vipsTime, vipsRSS)
 		}
 	}
-	// Throughput of two parallel jobs on the 12-megapixel photo.
+	// Throughput of two goroutines in one process on the 12-megapixel photo:
+	// a shared runtime and heap, not two workers.
 	data := corpus(t, "photo", 12)
 	start := time.Now()
 	var wg sync.WaitGroup
@@ -217,5 +282,5 @@ func TestBaselineReport(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	t.Logf("2 parallel jobs, 12 MP photo: %.2f previews/s", float64(2*runs)/time.Since(start).Seconds())
+	t.Logf("2 goroutines, 12 MP photo, in process: %.2f previews/s", float64(2*runs)/time.Since(start).Seconds())
 }
