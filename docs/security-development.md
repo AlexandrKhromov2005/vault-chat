@@ -79,8 +79,10 @@ Docker daemon. A separate checkout and filtered environment do not sandbox code
 or prevent it reading host credentials. Review untrusted changes before executing
 them, or use a separately provisioned machine without personal credentials.
 
-On failure no new receipt is produced, and a previous receipt for that SHA is
-removed. Disposable containers/volumes are stopped in cleanup. Modified snapshots
+Early refusals for a dirty checkout or concurrent run leave the previous receipt
+intact. If a rerun passes the initial clean-checkout check and then fails, no new
+receipt is produced and the previous receipt for that SHA is removed. Disposable
+containers/volumes are stopped in cleanup. Modified snapshots
 are retained rather than force-deleted; inspect the printed path. SIGTERM initiates
 cleanup; repeated SIGTERM is ignored until cleanup finishes, then the previous
 handler is restored. A power loss or
