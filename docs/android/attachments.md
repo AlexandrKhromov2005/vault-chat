@@ -121,9 +121,11 @@ without downloading it. Staged copies that no queued message references
 (a draft left behind by a killed process) are deleted when the session
 starts.
 
-The rule "shown exactly once" of [send.md](send.md) is unchanged: a stored
-message of this user with the row's key and text resolves the row. The
-answer to a send must also carry the row's file IDs in order.
+The rule "shown exactly once" of [send.md](send.md) covers the files: a stored
+message of this user resolves a row only with its key, its text and its file
+IDs in order, which is what the server compares under a key. With other files
+it is the server's `409`: both stay on screen, and the row keeps Retry and
+Delete. The answer to a send must carry the row's file IDs in order too.
 
 ## Receiving
 
@@ -285,7 +287,9 @@ like the real one, and an `okhttp` `MockWebServer` for the transfer rules:
    and `413` fail with `file`, `404` with `no_access`, `504` with `upload`.
 5. Retry after `upload` uploads only the files without an ID; after `409`
    it keeps the IDs under a new key; a send answer with other IDs fails the
-   row.
+   row. A stored message with the row's key and text resolves and hides it only
+   with the same IDs in order, not with others, another order, fewer, or a file
+   not uploaded.
 6. Cancel deletes a message whose files are not all uploaded and stops its
    upload; a message with every file uploaded cannot be cancelled.
 7. Order: a message with files holds the next text of its room; another

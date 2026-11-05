@@ -3,6 +3,7 @@ package io.github.alexandrkhromov2005.vaultchat.ui.chat
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingFileEntity
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
@@ -91,7 +92,29 @@ class HandoffTest {
         val sent = OutgoingRow(row("a", 1))
         val rejected = OutgoingRow(row("b", 2, OutgoingEntity.FAILED, text = "mine"))
         val claims = Handoff.claims(listOf(stored(message(9, "a")), stored(message(8, "b", text = "theirs"))), me)
-        assertEquals(listOf(rejected), Handoff.visible(listOf(sent, rejected), claims))
+        assertEquals(listOf(rejected), Handoff.visible(listOf(sent, rejected), claims, emptyMap()))
+    }
+
+    private fun files(cid: String, vararg ids: String?) = mapOf(
+        cid to ids.mapIndexed { i, id -> OutgoingFileEntity(cid, i, "f$i", "text/plain", 1, "s$i", id) },
+    )
+
+    @Test
+    fun aStoredCopyHidesItsRowOnlyWithTheSameFilesInOrder() {
+        val rows = listOf(OutgoingRow(row("a", 1)))
+        fun visibleWith(attachments: String, files: Map<String, List<OutgoingFileEntity>>): Int {
+            val claims = Handoff.claims(listOf(stored(message(9, "a").copy(attachments = attachments))), me)
+            return Handoff.visible(rows, claims, files).size
+        }
+
+        assertEquals("same files", 0, visibleWith("x,y", files("a", "x", "y")))
+        assertEquals("other order", 1, visibleWith("y,x", files("a", "x", "y")))
+        assertEquals("other file", 1, visibleWith("x,z", files("a", "x", "y")))
+        assertEquals("fewer stored", 1, visibleWith("x", files("a", "x", "y")))
+        assertEquals("one not uploaded", 1, visibleWith("x", files("a", "x", null)))
+        assertEquals("files only on the row", 1, visibleWith("", files("a", "x")))
+        assertEquals("files only on the stored one", 1, visibleWith("x", emptyMap()))
+        assertEquals("no files at all", 0, visibleWith("", emptyMap()))
     }
 
     @Test

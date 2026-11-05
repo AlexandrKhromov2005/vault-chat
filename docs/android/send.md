@@ -79,12 +79,13 @@ key.
 **Shown exactly once.** A message is shown either from `outbox` or from
 `messages`, never from both. Every transaction that writes a room's
 messages (`ChatDao.write`) deletes, in the same transaction, the rows of that
-room that a stored message of this user matches by key and text, and `SENT`
-rows whose sequence is at most the block's newest (the message is then in the
-block or in older history). This one rule covers every way a sent message
-comes back: the HTTP response, the WebSocket echo, catch-up and history. The
-text is compared too: a stored message with the same key and another text
-(the server's `409`) shows only that this text was not stored.
+room that a stored message of this user matches by key, text and files in
+order, and `SENT` rows whose sequence is at most the block's newest (the
+message is then in the block or in older history). This one rule covers every
+way a sent message comes back: the HTTP response, the WebSocket echo, catch-up
+and history. The whole message is compared, as the server does: a stored
+message with the same key and another text or other files (the server's `409`)
+shows only that this message was not stored.
 
 **On screen.** The conversation reads the queue and the stored history
 through separate observers, which see one transaction one after the other.
@@ -95,11 +96,13 @@ through separate observers, which see one transaction one after the other.
   failed row too when sync finds that the server stored it after all. A
   failed row that the user deleted or queued again under a new key goes at
   once;
-- a row whose stored copy (same key and text) is loaded is hidden;
+- a row whose stored copy (same key, text and files in order) is loaded is
+  hidden;
 - an own stored message takes its row's list key, `c<client_message_id>`, so
   the list keeps the item in place instead of removing one and inserting
   another. Only the newest loaded copy of a key takes it, and a row whose key
-  a stored message holds with another text gets `o<client_message_id>`, so
+  a stored message holds with another text or other files gets
+  `o<client_message_id>`, so
   keys stay unique whatever the server sends.
 
 Queue rows and stored own messages share one frame and keep the status
@@ -156,8 +159,8 @@ event for this user deletes the room at once, queue included.
 | `409` | rejected | `FAILED` (`conflict`) |
 
 **Retry** of a failed row keeps its key, except after `409`: there the key is
-taken, by definition with another text, so this text was never stored and a
-new key is safe. **Delete** is offered for failed rows only; a queued row may
+taken, by definition by another text or other files, so this message was never
+stored and a new key is safe. **Delete** is offered for failed rows only; a queued row may
 already be stored by the server.
 
 OkHttp may repeat a request on a stale pooled connection. For a send this is
@@ -244,8 +247,9 @@ JVM tests with Robolectric (Room) and a fake Gateway that stores messages by
     stop sending.
 17. Repeats in many rooms keep to the send budget; the `429` pause has a
     floor and a cap.
-18. A stored message with the same key and another text does not resolve a
-    failed row; a newer stored message replaces a failed row as the preview.
+18. A stored message with the same key and another text or other files does
+    not resolve a failed row; a newer stored message replaces a failed row as
+    the preview.
 19. Rooms waiting for a permit do not send inside a `429` pause; quick
     messages are not held by the send budget.
 20. Stress: three rooms of 25 messages queued at once, with 503s, lost
@@ -282,6 +286,7 @@ Every finding below that has a test failed on 2440b66 before its fix.
 | Repeats in many rooms could exceed the Gateway's limit | `repeatedFailuresInManyRoomsKeepToTheSendBudget` | Send budget 30/min, burst 10 |
 | `Retry-After: 0` makes a busy loop, a huge one freezes the app | `RateGateTest` | Floor 1 s, cap 5 minutes |
 | A stored message with the same key and another text resolved a failed row | `aConflictingStoredMessageDoesNotResolveTheFailedRow` | Text compared |
+| The same with other files: the row was deleted and hidden, so the user lost the choice between Retry and Delete | `aRowIsResolvedOnlyByAStoredMessageWithItsFilesInOrder`, `aMessageRejectedForOtherFilesStaysAfterASync`, `aFailedMessageBesideTheStoredOneWithItsKeyAndOtherFilesIsShown` | Files compared in order, by the database and on screen |
 | The composer cleared text that was not queued | `aMessageForARoomThatIsGoneIsNotReportedAsQueued` | Cleared only after queuing |
 | The background job's budget did not cover the restore | `theBackgroundJobKeepsToItsBudgetWhileTheSessionIsRestored` | Budget covers it; a failing database asks for another run |
 | Pasted `\r` rejected without a hint; scrolling on any change of the last row; accessibility (no click label, counter not announced, failure text read twice, queued rows not copyable) | none (Compose) | Fixed as described above |

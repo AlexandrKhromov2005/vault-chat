@@ -68,14 +68,20 @@ object Handoff {
         return claims
     }
 
-    /** [rows] without those whose stored copy (same key and text) is loaded. */
-    fun visible(rows: List<OutgoingRow>, claims: Map<String, MessageEntity>): List<OutgoingRow> =
-        rows.filter { claims[it.clientMessageId]?.text != it.entity.text }
+    /** [rows] without those whose stored copy (same key, text and [files] in order) is loaded. */
+    fun visible(
+        rows: List<OutgoingRow>,
+        claims: Map<String, MessageEntity>,
+        files: Map<String, List<OutgoingFileEntity>>,
+    ): List<OutgoingRow> = rows.filter { row ->
+        val claim = claims[row.clientMessageId]
+        claim == null || claim.text != row.entity.text || !claim.hasFiles(files[row.clientMessageId].orEmpty())
+    }
 
     /**
      * The list key of an outgoing row. It is the one its stored copy will
      * have, unless a stored message already holds that key with another text
-     * (the server's `409`).
+     * or other files (the server's `409`).
      */
     fun key(row: OutgoingRow, claims: Map<String, MessageEntity>): String =
         if (row.clientMessageId in claims) "o${row.clientMessageId}" else "c${row.clientMessageId}"

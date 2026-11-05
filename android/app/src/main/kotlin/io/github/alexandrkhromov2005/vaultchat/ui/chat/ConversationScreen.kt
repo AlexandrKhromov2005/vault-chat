@@ -585,7 +585,7 @@ internal fun Messages(
     // Own messages whose stored copy is loaded are shown from the history only.
     val snapshot = rows.itemSnapshotList
     val claims = remember(snapshot, me) { Handoff.claims(snapshot, me) }
-    val shown = remember(outgoing, claims) { Handoff.visible(outgoing, claims) }
+    val shown = remember(outgoing, claims, outgoingFiles) { Handoff.visible(outgoing, claims, outgoingFiles) }
     // Outgoing messages are the first items; the newest stored one follows
     // them. Long outgoing messages may fill the screen, so what is in view is
     // read from the layout, not from the first index.
