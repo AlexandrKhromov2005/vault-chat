@@ -13,16 +13,26 @@ info:
     and forwarded to backends.
 
     **Rate limiting.** `/api/` routes are limited per client IP; authenticated
-    routes are additionally limited per user. Responses carry
-    `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429` responses carry
-    `Retry-After` (seconds).
+    routes are additionally limited per user, and a valid access token gives
+    back the client IP token, so users behind one NAT are limited per user.
+    Responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`; `429`
+    responses carry `Retry-After` (seconds). Details: `docs/gateway/rate-limits.md`.
 
     IPv6 addresses share their /64 quota; IPv4-mapped addresses use the IPv4
     key. Login, registration, public email/recovery requests, all email proof
-    confirmations and authenticated email-change requests share an additional quota (default 5/minute,
-    burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`GATEWAY_AUTH_RATE_LIMIT_BURST`)
-    per IP/network, enforced both locally and in Redis. These routes return
-    `503` when Redis is unavailable. Ordinary API limiting still fails open.
+    confirmations and authenticated email-change requests have two additional
+    quotas, enforced both locally and in Redis: per IP/network and subject
+    (the case-insensitive `email`, the `token`, or for the authenticated
+    email change the caller's account; default
+    5/minute, burst 5; `GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE`/`_BURST`) and per
+    IP/network (default 10/minute, burst 10;
+    `GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE`/`_BURST`). A successful login or
+    registration gives back its per-IP tokens, so only failures accumulate.
+    These routes return `503` when Redis is unavailable. Refresh has its own
+    quota per IP/network (default 30/minute, burst 30;
+    `GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE`/`_BURST`); successful refreshes
+    give their tokens back, and without Redis only the local quota applies.
+    Ordinary API limiting still fails open.
     Auth also limits login attempts per case-insensitive email: burst 5,
     refill 1/minute, regardless of whether the account exists (`429`,
     `Retry-After: 60`). This account quota is per Auth process, with bounded
@@ -58,7 +68,7 @@ paths:
   /ready:
     get:
       summary: Readiness probe
-      description: Ready when both Auth and Chat answer their gRPC health checks.
+      description: Ready when Auth and Chat, and Media when configured, answer their gRPC health checks.
       tags: [probes]
       responses:
         "200":
@@ -102,7 +112,7 @@ paths:
                   type: string
                   minLength: 8
                   maxLength: 128
-                  description: At least one ASCII letter and one digit.
+                  description: 8-128 bytes with at least one ASCII letter and one digit.
                   example: password1
       responses:
         "201":
@@ -277,7 +287,7 @@ paths:
     post:
       summary: Request an email address change
       description: |
-        Requires an access token and a fresh current password. Identity comes only from the access token. The existing email remains active until an explicit confirmation of the new-address proof. The credential quota also applies to this authenticated route.
+        Requires an access token, a fresh current password and an already verified current email. Identity comes only from the access token. The existing email remains active until an explicit confirmation of the new-address proof. The credential quota also applies to this authenticated route.
       tags: [auth]
       security: [{bearerAuth: []}]
       requestBody:
@@ -293,6 +303,7 @@ paths:
               schema: {$ref: "#/components/schemas/EmailAcknowledgement"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/EmailVerificationRequired"}
         "413": {$ref: "#/components/responses/TooLarge"}
         "408": {$ref: "#/components/responses/RequestTimeout"}
         "415": {$ref: "#/components/responses/UnsupportedMediaType"}
@@ -427,6 +438,43 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/push/token:
+    put:
+      summary: Register the push token of this login
+      description: |
+        Binds a provider registration token to the caller's login (the session
+        family of the access token), replacing its previous token; a token
+        registered by another login moves to this one. A user keeps at most 10
+        tokens. Logout and every other revocation of the login delete the
+        token. Pushes only signal that the client should synchronize; they
+        carry no message text. See `docs/push.md`.
+      tags: [push]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PushTokenRegistration"}
+      responses:
+        "204": {description: Token registered.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+    delete:
+      summary: Remove the push token of this login
+      description: Idempotent; succeeds when the login has no token.
+      tags: [push]
+      security: [{bearerAuth: []}]
+      responses:
+        "204": {description: Token removed or absent.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
   /api/v1/users:
     get:
       summary: Search users by username prefix
@@ -490,7 +538,8 @@ paths:
         Each Gateway instance also caps its connections
         (`GATEWAY_WS_MAX_CONNECTIONS`) and those not yet authenticated
         (`GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS`) independently of
-        Redis. Browser origins must be the Gateway's own or listed in
+        Redis. A browser Origin is accepted when its host matches the request
+        Host (the scheme is not compared), or when the origin is listed in
         `GATEWAY_CORS_ALLOWED_ORIGINS`.
       responses:
         "101": {description: Switching to the WebSocket protocol.}
@@ -618,7 +667,7 @@ paths:
               additionalProperties: false
               required: [name]
               properties:
-                name: {type: string, minLength: 1, maxLength: 80, description: "Valid UTF-8, no control characters or surrounding whitespace."}
+                name: {type: string, minLength: 1, maxLength: 80, description: "1-80 Unicode code points and at most 320 bytes; valid UTF-8, no control characters or surrounding whitespace."}
                 private: {type: boolean, default: false}
       responses:
         "201":
@@ -776,7 +825,7 @@ paths:
                 text:
                   type: string
                   maxLength: 4096
-                  description: Empty only with attachments; otherwise valid UTF-8 with visible content, newline and tab.
+                  description: At most 4096 Unicode code points and 16384 bytes. Empty only with attachments; otherwise valid UTF-8 with visible content, newline and tab.
                 attachment_ids:
                   type: array
                   maxItems: 5
@@ -793,7 +842,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409":
-          description: The retry key was already used with different text.
+          description: The retry key was already used with different text or ordered attachment IDs.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -875,7 +924,11 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "413": {$ref: "#/components/responses/TooLarge"}
+        "413":
+          description: File content or its multipart upload exceeds the 10 MiB file limit (`too_large`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
@@ -909,9 +962,15 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         "200":
-          description: Streamed with attachment disposition, nosniff and no-store.
+          description: Streamed with the stored detected content type, attachment disposition, nosniff and no-store.
           content:
-            application/octet-stream:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            application/pdf:
+              schema: {type: string, format: binary}
+            text/plain; charset=utf-8:
               schema: {type: string, format: binary}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
@@ -960,7 +1019,7 @@ components:
         room_id: {type: string, format: uuid}
         sender_id: {type: string, format: uuid}
         client_message_id: {type: string, format: uuid}
-        text: {type: string, maxLength: 4096}
+        text: {type: string, maxLength: 4096, description: At most 4096 Unicode code points and 16384 bytes.}
         attachment_ids:
           type: array
           maxItems: 5
@@ -1092,6 +1151,13 @@ components:
       required: [refresh_token]
       properties:
         refresh_token: {type: string}
+    PushTokenRegistration:
+      type: object
+      additionalProperties: false
+      required: [provider, token]
+      properties:
+        provider: {type: string, enum: [fcm]}
+        token: {type: string, minLength: 1, maxLength: 2048, pattern: "^[A-Za-z0-9_:.-]+$"}
     Readiness:
       type: object
       properties:
@@ -1109,18 +1175,18 @@ components:
             code:
               type: string
               enum: [invalid_argument, invalid_email_action, email_verification_required, invalid_json, unauthenticated, permission_denied, not_found,
-                     already_exists, failed_precondition, body_too_large, unsupported_media_type, rate_limited,
-                     cors_forbidden, origin_forbidden, request_timeout, timeout, unavailable, internal]
+                     already_exists, failed_precondition, body_too_large, too_large, unsupported_media_type, rate_limited,
+                     cors_forbidden, origin_forbidden, too_many_connections, shutting_down, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
   responses:
     EmailVerificationRequired:
-      description: Correct credentials require email ownership before a session may be issued (email_verification_required).
+      description: Login requires verified email ownership before a session may be issued; email change requires the current email to be verified (`email_verification_required`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     NotFound:
-      description: User or room absent, or the caller is not a room member.
+      description: User, room or file absent, or the caller is not a room member.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -1140,14 +1206,14 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
-      description: Missing, malformed, invalid, or expired credentials.
+      description: Missing, malformed, invalid, or expired credentials. `WWW-Authenticate` is present for Gateway bearer-auth middleware failures, but is not guaranteed for Auth-originated 401 responses such as login, refresh or logout.
       headers:
-        WWW-Authenticate: {schema: {type: string}, description: Bearer challenge (RFC 6750).}
+        WWW-Authenticate: {schema: {type: string}, description: Bearer challenge (RFC 6750), present for Gateway bearer-auth middleware failures.}
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     TooLarge:
-      description: Body exceeds GATEWAY_MAX_BODY_BYTES.
+      description: Request body exceeds `GATEWAY_MAX_BODY_BYTES` (`body_too_large`), or an upload exceeds 10 MiB (`too_large`).
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}

@@ -1,0 +1,13 @@
+# Gradle and Android Studio state
+.gradle/
+.kotlin/
+build/
+.idea/
+*.iml
+captures/
+
+# Machine-specific SDK path and signing material: never commit
+local.properties
+*.jks
+*.keystore
+signing.properties

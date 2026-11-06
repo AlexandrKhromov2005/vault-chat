@@ -14,7 +14,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
 // AuthService is the business-logic contract required by the handler.
@@ -24,7 +23,7 @@ type AuthService interface {
 	SearchUsers(ctx context.Context, accessToken, query string, limit int32) ([]*domain.User, error)
 	RegisterInvited(ctx context.Context, email, username, password, invitationToken string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
-	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
+	ValidateToken(ctx context.Context, token string) (*service.Access, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
 	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
@@ -35,6 +34,8 @@ type AuthService interface {
 	ConfirmPasswordReset(ctx context.Context, token, password string) (string, error)
 	RequestEmailChange(ctx context.Context, accessToken, password, newEmail string) error
 	ConfirmEmailChange(ctx context.Context, token string) (string, error)
+	RegisterPushToken(ctx context.Context, accessToken, provider, token string) error
+	UnregisterPushToken(ctx context.Context, accessToken string) error
 }
 
 // AuthGRPCHandler implements authv1.AuthServiceServer.
@@ -97,6 +98,7 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 		Email:     claims.Email,
 		Username:  claims.Username,
 		ExpiresAt: timestamppb.New(claims.ExpiresAt),
+		SessionId: claims.LoginID,
 	}, nil
 }
 
@@ -147,6 +149,8 @@ var publicErrors = []struct {
 	{service.ErrPasswordCapacity, codes.Unavailable, "password capacity reached"},
 	{service.ErrEmailUnavailable, codes.Unavailable, "email service unavailable"},
 	{service.ErrLoginRateLimited, codes.ResourceExhausted, "too many login attempts"},
+	{service.ErrPushUnavailable, codes.Unavailable, "push tokens unavailable"},
+	{validator.ErrInvalidPushToken, codes.InvalidArgument, "invalid push token"},
 	{context.DeadlineExceeded, codes.DeadlineExceeded, "request timed out"},
 	{context.Canceled, codes.Canceled, "request canceled"},
 	{validator.ErrInvalidUserID, codes.InvalidArgument, "invalid user identifier"},
@@ -177,6 +181,22 @@ func toStatus(err error) error {
 		}
 	}
 	return status.Error(codes.Internal, "internal error")
+}
+
+// RegisterPushToken binds a provider token to the caller's login.
+func (h *AuthGRPCHandler) RegisterPushToken(ctx context.Context, req *authv1.RegisterPushTokenRequest) (*authv1.RegisterPushTokenResponse, error) {
+	if err := h.svc.RegisterPushToken(ctx, req.GetAccessToken(), req.GetProvider(), req.GetToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.RegisterPushTokenResponse{}, nil
+}
+
+// UnregisterPushToken removes the token of the caller's login.
+func (h *AuthGRPCHandler) UnregisterPushToken(ctx context.Context, req *authv1.UnregisterPushTokenRequest) (*authv1.UnregisterPushTokenResponse, error) {
+	if err := h.svc.UnregisterPushToken(ctx, req.GetAccessToken()); err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.UnregisterPushTokenResponse{}, nil
 }
 
 // GetUser resolves a user and projects only the public directory fields.

@@ -7,8 +7,6 @@ import (
 
 	domain "github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 
-	jwt "github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
-
 	mock "github.com/stretchr/testify/mock"
 
 	service "github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
@@ -546,6 +544,55 @@ func (_c *MockAuthService_RegisterInvited_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// RegisterPushToken provides a mock function with given fields: ctx, accessToken, provider, token
+func (_m *MockAuthService) RegisterPushToken(ctx context.Context, accessToken string, provider string, token string) error {
+	ret := _m.Called(ctx, accessToken, provider, token)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterPushToken")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, accessToken, provider, token)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_RegisterPushToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterPushToken'
+type MockAuthService_RegisterPushToken_Call struct {
+	*mock.Call
+}
+
+// RegisterPushToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+//   - provider string
+//   - token string
+func (_e *MockAuthService_Expecter) RegisterPushToken(ctx interface{}, accessToken interface{}, provider interface{}, token interface{}) *MockAuthService_RegisterPushToken_Call {
+	return &MockAuthService_RegisterPushToken_Call{Call: _e.mock.On("RegisterPushToken", ctx, accessToken, provider, token)}
+}
+
+func (_c *MockAuthService_RegisterPushToken_Call) Run(run func(ctx context.Context, accessToken string, provider string, token string)) *MockAuthService_RegisterPushToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_RegisterPushToken_Call) Return(_a0 error) *MockAuthService_RegisterPushToken_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_RegisterPushToken_Call) RunAndReturn(run func(context.Context, string, string, string) error) *MockAuthService_RegisterPushToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RequestEmailChange provides a mock function with given fields: ctx, accessToken, password, newEmail
 func (_m *MockAuthService) RequestEmailChange(ctx context.Context, accessToken string, password string, newEmail string) error {
 	ret := _m.Called(ctx, accessToken, password, newEmail)
@@ -808,24 +855,71 @@ func (_c *MockAuthService_SearchUsers_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// UnregisterPushToken provides a mock function with given fields: ctx, accessToken
+func (_m *MockAuthService) UnregisterPushToken(ctx context.Context, accessToken string) error {
+	ret := _m.Called(ctx, accessToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnregisterPushToken")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, accessToken)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAuthService_UnregisterPushToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnregisterPushToken'
+type MockAuthService_UnregisterPushToken_Call struct {
+	*mock.Call
+}
+
+// UnregisterPushToken is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accessToken string
+func (_e *MockAuthService_Expecter) UnregisterPushToken(ctx interface{}, accessToken interface{}) *MockAuthService_UnregisterPushToken_Call {
+	return &MockAuthService_UnregisterPushToken_Call{Call: _e.mock.On("UnregisterPushToken", ctx, accessToken)}
+}
+
+func (_c *MockAuthService_UnregisterPushToken_Call) Run(run func(ctx context.Context, accessToken string)) *MockAuthService_UnregisterPushToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_UnregisterPushToken_Call) Return(_a0 error) *MockAuthService_UnregisterPushToken_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAuthService_UnregisterPushToken_Call) RunAndReturn(run func(context.Context, string) error) *MockAuthService_UnregisterPushToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ValidateToken provides a mock function with given fields: ctx, token
-func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*jwt.Claims, error) {
+func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*service.Access, error) {
 	ret := _m.Called(ctx, token)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateToken")
 	}
 
-	var r0 *jwt.Claims
+	var r0 *service.Access
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*jwt.Claims, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*service.Access, error)); ok {
 		return rf(ctx, token)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *jwt.Claims); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *service.Access); ok {
 		r0 = rf(ctx, token)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*jwt.Claims)
+			r0 = ret.Get(0).(*service.Access)
 		}
 	}
 
@@ -857,12 +951,12 @@ func (_c *MockAuthService_ValidateToken_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockAuthService_ValidateToken_Call) Return(_a0 *jwt.Claims, _a1 error) *MockAuthService_ValidateToken_Call {
+func (_c *MockAuthService_ValidateToken_Call) Return(_a0 *service.Access, _a1 error) *MockAuthService_ValidateToken_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAuthService_ValidateToken_Call) RunAndReturn(run func(context.Context, string) (*jwt.Claims, error)) *MockAuthService_ValidateToken_Call {
+func (_c *MockAuthService_ValidateToken_Call) RunAndReturn(run func(context.Context, string) (*service.Access, error)) *MockAuthService_ValidateToken_Call {
 	_c.Call.Return(run)
 	return _c
 }
