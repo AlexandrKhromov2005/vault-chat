@@ -1,0 +1,273 @@
+package io.github.alexandrkhromov2005.vaultchat.core.chat
+
+import androidx.paging.ExperimentalPagingApi
+import androidx.paging.LoadType
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.PagingState
+import androidx.paging.RemoteMediator
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.TimelineEntity
+import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
+import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
+import io.github.alexandrkhromov2005.vaultchat.core.session.AccessGrant
+import io.github.alexandrkhromov2005.vaultchat.core.session.SessionState
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import retrofit2.Response
+import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+
+/** What the connection indicator shows. */
+enum class ConnectionStatus { ONLINE, UPDATING, CONNECTING, OFFLINE, UNREACHABLE }
+
+/** What a session needs from the rest of the app. */
+interface ChatSessionDeps {
+    val foreground: StateFlow<Boolean>
+    val network: StateFlow<Any?>
+    val elapsed: () -> Long
+
+    suspend fun <T : Any> send(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T
+
+    suspend fun <T : Any> transfer(session: SessionState.SignedIn, request: suspend GatewayApi.(String) -> Response<T>): T =
+        send(session, request)
+
+    suspend fun grant(session: SessionState.SignedIn, minValidityMs: Long): AccessGrant
+
+    suspend fun renew(session: SessionState.SignedIn, rejected: String): AccessGrant
+
+    fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket
+
+    /** Makes sure queued messages are sent even if the app leaves the screen (OutboxWorker). */
+    fun scheduleBackgroundSend() {}
+
+    /** Where new messages show (Notifier). */
+    val notices: NoticeBoard get() = NoticeBoard.None
+
+    /**
+     * The account that was signed in is gone: signed out, revoked, or replaced
+     * by another. Called once its session has stopped showing anything.
+     */
+    fun accountEnded() {}
+}
+
+/**
+ * The chat of one signed-in session: its database, sync and WebSocket. The
+ * WebSocket runs while the app is visible and a network is available; a new
+ * network reopens it. [end] stops everything; the database is closed once no
+ * screen retains the session any more (see [retain]).
+ */
+class ChatSession(
+    val signedIn: SessionState.SignedIn,
+    val databaseName: String,
+    private val database: ChatDatabase,
+    private val files: SessionFiles,
+    private val deps: ChatSessionDeps,
+    private val onReleased: (ChatSession) -> Unit,
+) {
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ ->
+            // A failed background task of this session; the next sync recovers.
+        },
+    )
+    private val dao: ChatDao = database.dao()
+    val me: String = signedIn.userId
+
+    private val requests = object : ChatRequests {
+        override suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
+            deps.send(signedIn, request)
+
+        override suspend fun <T : Any> transfer(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
+            deps.transfer(signedIn, request)
+    }
+
+    val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
+
+    /** Copies of picked files waiting to be sent. */
+    val staging = Staging(files.staging)
+
+    // Downloads and uploads share one budget.
+    private val fileBudget = RequestBudget(Attachments.REQUESTS_PER_MINUTE, Attachments.REQUEST_BURST, deps.elapsed)
+
+    val attachments = Attachments(dao, requests, sync.gate, AttachmentCache(files.cache), staging, scope, fileBudget)
+
+    val outbox = Outbox(
+        dao, me, requests, sync, scope, deps.network,
+        onQueued = deps::scheduleBackgroundSend,
+        budget = RequestBudget(Outbox.SENDS_PER_MINUTE, Outbox.SEND_BURST, deps.elapsed),
+        staging = staging,
+        attachments = attachments,
+        uploadBudget = fileBudget,
+    )
+
+    val membership = Membership(dao, me, sync)
+
+    val notifier = Notifier(dao, me, deps.foreground, deps.notices, databaseName, scope)
+
+    val realtime = Realtime(
+        userId = me,
+        tokens = object : AccessTokens {
+            override suspend fun grant(minValidityMs: Long) = deps.grant(signedIn, minValidityMs)
+
+            override suspend fun renew(rejected: String) = deps.renew(signedIn, rejected)
+        },
+        open = { listener -> deps.openSocket(signedIn, listener) },
+        elapsed = deps.elapsed,
+        onReady = {
+            sync.requestSync()
+            outbox.kick()
+        },
+        onFrame = sync::onEvent,
+    )
+
+    val connection: StateFlow<ConnectionStatus> =
+        combine(deps.foreground, deps.network, realtime.state, sync.status) { _, network, socket, status ->
+            when {
+                network == null -> ConnectionStatus.OFFLINE
+                socket == RealtimeState.FAILED -> ConnectionStatus.UNREACHABLE
+                socket != RealtimeState.LIVE && status.failure != null && !status.running -> ConnectionStatus.UNREACHABLE
+                socket != RealtimeState.LIVE -> ConnectionStatus.CONNECTING
+                status.running -> ConnectionStatus.UPDATING
+                else -> ConnectionStatus.ONLINE
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, ConnectionStatus.CONNECTING)
+
+    private val retained = AtomicInteger()
+    private val ended = AtomicBoolean()
+
+    init {
+        // Copies a killed process left behind: a draft, or files of a message
+        // whose room went. Newer ones may be a draft being picked right now.
+        val started = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) { staging.sweep(dao.stagedNames().toSet(), before = started) }
+        scope.launch {
+            combine(deps.foreground, deps.network) { visible, network -> if (visible) network else null }
+                .distinctUntilChanged()
+                .collectLatest { network ->
+                    if (network == null) return@collectLatest
+                    outbox.kick()
+                    attachments.retry()
+                    // A sync also runs without the WebSocket, if it does not
+                    // become live soon; its ready triggers one otherwise.
+                    launch {
+                        delay(SYNC_WITHOUT_SOCKET_MS)
+                        if (realtime.state.value != RealtimeState.LIVE) sync.requestSync()
+                    }
+                    realtime.run()
+                }
+        }
+    }
+
+    val rooms: Flow<List<RoomListItem>> get() = dao.roomList(me)
+
+    fun room(roomId: String): Flow<RoomListItem?> = dao.roomItem(me, roomId)
+
+    fun timeline(roomId: String): Flow<TimelineEntity?> = dao.timelineFlow(roomId)
+
+    /** Messages of a room, newest first, read from the database and loaded on demand. */
+    @OptIn(ExperimentalPagingApi::class)
+    fun messages(roomId: String): Flow<PagingData<MessageItem>> = Pager(
+        config = PagingConfig(pageSize = sync.limits.history, prefetchDistance = 20, enablePlaceholders = false),
+        remoteMediator = MessagesMediator(sync, roomId),
+        pagingSourceFactory = { dao.messages(roomId) },
+    ).flow
+
+    /** The stored metadata of those of [fileIds], listed by a message of [roomId], that have it as files of that room. */
+    suspend fun storedFiles(roomId: String, fileIds: List<String>): Map<String, FileEntity> =
+        fileIds.mapNotNull { dao.fileRow(it)?.takeIf { row -> row.roomId == roomId } }.associateBy { it.fileId }
+
+    /**
+     * Keeps the database open until the returned handle is closed. Screens
+     * retain the session for as long as they may read from it.
+     */
+    fun retain(): Closeable {
+        retained.incrementAndGet()
+        val closed = AtomicBoolean()
+        return Closeable {
+            if (closed.compareAndSet(false, true) && retained.decrementAndGet() == 0 && ended.get()) release()
+        }
+    }
+
+    /**
+     * Stops the session and then runs [wipe] in the background, which may delete
+     * its data with [clearData]; the database file itself goes when the database
+     * is closed.
+     */
+    fun end(background: CoroutineScope, io: CoroutineDispatcher = Dispatchers.IO, wipe: (ChatSession) -> Unit = {}) {
+        if (!ended.compareAndSet(false, true)) return
+        scope.cancel()
+        notifier.stop()
+        background.launch(io) {
+            runCatching { wipe(this@ChatSession) }
+            if (retained.get() == 0) release()
+        }
+    }
+
+    private val released = AtomicBoolean()
+
+    private fun release() {
+        if (!released.compareAndSet(false, true)) return
+        onReleased(this)
+    }
+
+    /** Deletes the session's data from the database and its files. */
+    internal fun clearData() {
+        runCatching { database.clearAllTables() }
+        runCatching { files.wipe() }
+    }
+
+    /** Closes the database; only after [end] and once nothing retains it. */
+    internal fun close() {
+        database.close()
+    }
+
+    companion object {
+        private const val SYNC_WITHOUT_SOCKET_MS = 5_000L
+    }
+}
+
+/**
+ * Loads a room's messages into the database for the pager: the latest page
+ * or a catch-up when the room is opened, older pages as the reader scrolls.
+ * Newer messages arrive through sync, never by paging.
+ */
+@OptIn(ExperimentalPagingApi::class)
+private class MessagesMediator(private val sync: ChatSync, private val roomId: String) :
+    RemoteMediator<Int, MessageItem>() {
+
+    override suspend fun initialize(): InitializeAction = InitializeAction.LAUNCH_INITIAL_REFRESH
+
+    override suspend fun load(loadType: LoadType, state: PagingState<Int, MessageItem>): MediatorResult = try {
+        when (loadType) {
+            LoadType.REFRESH -> {
+                sync.openRoom(roomId)
+                MediatorResult.Success(endOfPaginationReached = false)
+            }
+            LoadType.PREPEND -> MediatorResult.Success(endOfPaginationReached = true)
+            LoadType.APPEND -> MediatorResult.Success(endOfPaginationReached = sync.loadOlder(roomId))
+        }
+    } catch (e: ApiException) {
+        MediatorResult.Error(e)
+    }
+}

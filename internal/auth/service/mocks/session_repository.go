@@ -24,6 +24,64 @@ func (_m *MockSessionRepository) EXPECT() *MockSessionRepository_Expecter {
 	return &MockSessionRepository_Expecter{mock: &_m.Mock}
 }
 
+// ActiveFamily provides a mock function with given fields: ctx, userID, sessionID
+func (_m *MockSessionRepository) ActiveFamily(ctx context.Context, userID string, sessionID string) (string, error) {
+	ret := _m.Called(ctx, userID, sessionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ActiveFamily")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return rf(ctx, userID, sessionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = rf(ctx, userID, sessionID)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, userID, sessionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSessionRepository_ActiveFamily_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ActiveFamily'
+type MockSessionRepository_ActiveFamily_Call struct {
+	*mock.Call
+}
+
+// ActiveFamily is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userID string
+//   - sessionID string
+func (_e *MockSessionRepository_Expecter) ActiveFamily(ctx interface{}, userID interface{}, sessionID interface{}) *MockSessionRepository_ActiveFamily_Call {
+	return &MockSessionRepository_ActiveFamily_Call{Call: _e.mock.On("ActiveFamily", ctx, userID, sessionID)}
+}
+
+func (_c *MockSessionRepository_ActiveFamily_Call) Run(run func(ctx context.Context, userID string, sessionID string)) *MockSessionRepository_ActiveFamily_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockSessionRepository_ActiveFamily_Call) Return(_a0 string, _a1 error) *MockSessionRepository_ActiveFamily_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSessionRepository_ActiveFamily_Call) RunAndReturn(run func(context.Context, string, string) (string, error)) *MockSessionRepository_ActiveFamily_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Create provides a mock function with given fields: ctx, session
 func (_m *MockSessionRepository) Create(ctx context.Context, session *domain.Session) error {
 	ret := _m.Called(ctx, session)
@@ -67,64 +125,6 @@ func (_c *MockSessionRepository_Create_Call) Return(_a0 error) *MockSessionRepos
 }
 
 func (_c *MockSessionRepository_Create_Call) RunAndReturn(run func(context.Context, *domain.Session) error) *MockSessionRepository_Create_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// IsActive provides a mock function with given fields: ctx, userID, sessionID
-func (_m *MockSessionRepository) IsActive(ctx context.Context, userID string, sessionID string) (bool, error) {
-	ret := _m.Called(ctx, userID, sessionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for IsActive")
-	}
-
-	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (bool, error)); ok {
-		return rf(ctx, userID, sessionID)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
-		r0 = rf(ctx, userID, sessionID)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
-		r1 = rf(ctx, userID, sessionID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockSessionRepository_IsActive_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsActive'
-type MockSessionRepository_IsActive_Call struct {
-	*mock.Call
-}
-
-// IsActive is a helper method to define mock.On call
-//   - ctx context.Context
-//   - userID string
-//   - sessionID string
-func (_e *MockSessionRepository_Expecter) IsActive(ctx interface{}, userID interface{}, sessionID interface{}) *MockSessionRepository_IsActive_Call {
-	return &MockSessionRepository_IsActive_Call{Call: _e.mock.On("IsActive", ctx, userID, sessionID)}
-}
-
-func (_c *MockSessionRepository_IsActive_Call) Run(run func(ctx context.Context, userID string, sessionID string)) *MockSessionRepository_IsActive_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string))
-	})
-	return _c
-}
-
-func (_c *MockSessionRepository_IsActive_Call) Return(_a0 bool, _a1 error) *MockSessionRepository_IsActive_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockSessionRepository_IsActive_Call) RunAndReturn(run func(context.Context, string, string) (bool, error)) *MockSessionRepository_IsActive_Call {
 	_c.Call.Return(run)
 	return _c
 }

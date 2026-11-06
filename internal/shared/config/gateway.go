@@ -12,23 +12,35 @@ import (
 // GatewayConfig holds the API gateway configuration. See .env.example for the
 // full list of GATEWAY_* variables.
 type GatewayConfig struct {
-	HTTPAddr               string
-	AuthGRPCAddr           string
-	ChatGRPCAddr           string
-	MediaGRPCAddr          string
-	RedisAddr              string
-	RedisPassword          string
-	TLSCertPath            string
-	TLSKeyPath             string
-	CORSAllowedOrigins     []string
-	MaxBodyBytes           int64
-	RequestTimeout         time.Duration
-	RateLimitPerMinute     uint32
-	RateLimitBurst         uint32
-	AuthRateLimitPerMinute uint32
-	AuthRateLimitBurst     uint32
-	LogLevel               string
-	WebSocket              WebSocketConfig
+	HTTPAddr           string
+	AuthGRPCAddr       string
+	ChatGRPCAddr       string
+	MediaGRPCAddr      string
+	RedisAddr          string
+	RedisPassword      string
+	TLSCertPath        string
+	TLSKeyPath         string
+	CORSAllowedOrigins []string
+	MaxBodyBytes       int64
+	RequestTimeout     time.Duration
+	RateLimitPerMinute uint32
+	RateLimitBurst     uint32
+	// AuthRateLimit* bound credential requests per client IP and subject,
+	// AuthIPRateLimit* per client IP, RefreshRateLimit* refreshes per
+	// client IP; see docs/gateway/rate-limits.md.
+	AuthRateLimitPerMinute    uint32
+	AuthRateLimitBurst        uint32
+	AuthIPRateLimitPerMinute  uint32
+	AuthIPRateLimitBurst      uint32
+	RefreshRateLimitPerMinute uint32
+	RefreshRateLimitBurst     uint32
+	LogLevel                  string
+	WebSocket                 WebSocketConfig
+	// ProfileCacheAddr is the Redis instance of the public profile cache
+	// (docs/adr/0004-public-profile-cache.md); empty disables the cache. It
+	// must differ from RedisAddr, whose rate limits must not be evicted.
+	ProfileCacheAddr     string
+	ProfileCachePassword string
 }
 
 // WebSocketConfig holds the limits of real-time connections (GATEWAY_WS_*).
@@ -66,6 +78,11 @@ func LoadGateway() (*GatewayConfig, error) {
 		LogLevel:      envOr("GATEWAY_LOG_LEVEL", "info"),
 	}
 
+	cfg.ProfileCacheAddr = os.Getenv("GATEWAY_PROFILE_CACHE_ADDR")
+	cfg.ProfileCachePassword = os.Getenv("GATEWAY_PROFILE_CACHE_PASSWORD")
+	if cfg.ProfileCacheAddr != "" && cfg.ProfileCacheAddr == cfg.RedisAddr {
+		return nil, errors.New("GATEWAY_PROFILE_CACHE_ADDR must name a Redis instance other than GATEWAY_REDIS_ADDR")
+	}
 	if (cfg.TLSCertPath == "") != (cfg.TLSKeyPath == "") {
 		return nil, errors.New("environment variables GATEWAY_TLS_CERT_PATH and GATEWAY_TLS_KEY_PATH must be set together")
 	}
@@ -92,6 +109,18 @@ func LoadGateway() (*GatewayConfig, error) {
 		return nil, err
 	}
 	if cfg.AuthRateLimitBurst, err = uintEnv("GATEWAY_AUTH_RATE_LIMIT_BURST", 5, 16); err != nil {
+		return nil, err
+	}
+	if cfg.AuthIPRateLimitPerMinute, err = uintEnv("GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE", 10, 16); err != nil {
+		return nil, err
+	}
+	if cfg.AuthIPRateLimitBurst, err = uintEnv("GATEWAY_AUTH_IP_RATE_LIMIT_BURST", 10, 16); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshRateLimitPerMinute, err = uintEnv("GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", 30, 16); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshRateLimitBurst, err = uintEnv("GATEWAY_REFRESH_RATE_LIMIT_BURST", 30, 16); err != nil {
 		return nil, err
 	}
 	if cfg.WebSocket, err = loadWebSocket(); err != nil {

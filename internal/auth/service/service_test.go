@@ -24,12 +24,16 @@ type serviceFixture struct {
 	svc      *service.Service
 }
 
+// fixtureLogin is the login (session family) of the fixture's access session,
+// deliberately different from the session id: a refreshed session keeps it.
+const fixtureLogin = "22222222-2222-4222-8222-222222222222"
+
 func newServiceFixture(t *testing.T) serviceFixture {
 	t.Helper()
 
 	repo := mocks.NewMockUserRepository(t)
 	sessions := mocks.NewMockSessionRepository(t)
-	sessions.EXPECT().IsActive(mock.Anything, mock.Anything, "11111111-1111-4111-8111-111111111111").Return(true, nil).Maybe()
+	sessions.EXPECT().ActiveFamily(mock.Anything, mock.Anything, "11111111-1111-4111-8111-111111111111").Return(fixtureLogin, nil).Maybe()
 	tokens := mocks.NewMockTokenManager(t)
 	hasher := service.NewArgon2idHasher(fastParams)
 
@@ -202,7 +206,7 @@ func TestService_Login(t *testing.T) {
 }
 
 func TestService_ValidateToken(t *testing.T) {
-	t.Run("valid token returns claims", func(t *testing.T) {
+	t.Run("valid token returns claims and the login", func(t *testing.T) {
 		fx := newServiceFixture(t)
 		want := &jwt.Claims{SessionID: "11111111-1111-4111-8111-111111111111",
 			UserID:    "user-1",
@@ -213,9 +217,9 @@ func TestService_ValidateToken(t *testing.T) {
 		}
 		fx.tokens.EXPECT().Validate("good-token").Return(want, nil)
 
-		claims, err := fx.svc.ValidateToken(context.Background(), "good-token")
+		access, err := fx.svc.ValidateToken(context.Background(), "good-token")
 		require.NoError(t, err)
-		require.Equal(t, want, claims)
+		require.Equal(t, &service.Access{Claims: want, LoginID: fixtureLogin}, access)
 	})
 
 	t.Run("invalid token", func(t *testing.T) {

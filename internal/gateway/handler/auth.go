@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/middleware"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/profilecache"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/response"
 )
 
@@ -34,6 +37,8 @@ type AuthClient interface {
 	ConfirmPasswordReset(ctx context.Context, in *authv1.ConfirmPasswordResetRequest, opts ...grpc.CallOption) (*authv1.ConfirmPasswordResetResponse, error)
 	RequestEmailChange(ctx context.Context, in *authv1.RequestEmailChangeRequest, opts ...grpc.CallOption) (*authv1.RequestEmailChangeResponse, error)
 	ConfirmEmailChange(ctx context.Context, in *authv1.ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*authv1.ConfirmEmailChangeResponse, error)
+	RegisterPushToken(ctx context.Context, in *authv1.RegisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.RegisterPushTokenResponse, error)
+	UnregisterPushToken(ctx context.Context, in *authv1.UnregisterPushTokenRequest, opts ...grpc.CallOption) (*authv1.UnregisterPushTokenResponse, error)
 }
 
 type registerRequest struct {
@@ -103,13 +108,28 @@ type revokeAllSessionsResponse struct {
 // AuthHandler serves /api/v1/auth/*. Input validation is left to the auth
 // service, which owns the rules; the gateway only checks the JSON shape.
 type AuthHandler struct {
-	client AuthClient
-	logger *slog.Logger
+	client   AuthClient
+	logger   *slog.Logger
+	profiles ProfileCache
+}
+
+// ProfileCache keeps public profiles between GetUser calls;
+// *profilecache.Cache satisfies it. Failures are misses, never errors.
+type ProfileCache interface {
+	Get(ctx context.Context, userID string) (profilecache.Profile, bool)
+	Put(ctx context.Context, p profilecache.Profile)
 }
 
 // NewAuthHandler creates a handler backed by the given auth client.
 func NewAuthHandler(client AuthClient, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{client: client, logger: logger}
+}
+
+// WithProfileCache makes User answer from profiles where it can; nil keeps
+// every lookup in Auth.
+func (h *AuthHandler) WithProfileCache(profiles ProfileCache) *AuthHandler {
+	h.profiles = profiles
+	return h
 }
 
 // Register handles POST /api/v1/auth/register.
@@ -248,17 +268,40 @@ func (h *AuthHandler) backendError(w http.ResponseWriter, r *http.Request, opera
 	response.Error(w, statusCode, code, message)
 }
 
-// User returns the public profile of an existing account to an authenticated caller.
+// User returns the public profile of an existing account to an authenticated
+// caller. The cache is consulted only after the caller's session was checked;
+// a cached missing account gets the same 404 as Auth's NotFound.
 func (h *AuthHandler) User(w http.ResponseWriter, r *http.Request) {
 	identity, ok := middleware.IdentityFromContext(r.Context())
 	if !ok {
 		response.Error(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 		return
 	}
-	profile, err := h.client.GetUser(r.Context(), &authv1.GetUserRequest{AccessToken: identity.Token, UserId: r.PathValue("user_id")})
+	userID := r.PathValue("user_id")
+	cached := h.profiles != nil && profilecache.Cacheable(userID)
+	if cached {
+		if p, ok := h.profiles.Get(r.Context(), userID); ok {
+			if p.Username == "" {
+				response.Error(w, http.StatusNotFound, "not_found", userNotFound)
+				return
+			}
+			response.JSON(w, http.StatusOK, publicProfile{p.UserID, p.Username})
+			return
+		}
+	}
+	profile, err := h.client.GetUser(r.Context(), &authv1.GetUserRequest{AccessToken: identity.Token, UserId: userID})
 	if err != nil {
+		if cached && status.Code(err) == codes.NotFound {
+			h.profiles.Put(r.Context(), profilecache.Profile{UserID: userID})
+		}
 		h.backendError(w, r, "get_user", err)
 		return
 	}
+	if cached && profile.GetUserId() == userID && profile.GetUsername() != "" {
+		h.profiles.Put(r.Context(), profilecache.Profile{UserID: userID, Username: profile.GetUsername()})
+	}
 	response.JSON(w, http.StatusOK, publicProfile{profile.GetUserId(), profile.GetUsername()})
 }
+
+// userNotFound is the message of Auth's NotFound for GetUser.
+const userNotFound = "user not found"
