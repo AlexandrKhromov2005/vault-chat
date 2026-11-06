@@ -551,9 +551,14 @@ Future work, in order, after implementation is authorized:
 
 **Candidate scope.** First evaluate PNG/JPEG previews. The current
 [Media service](docs/media/files.md) validates uploads and stores private objects;
-it does not resize images or decode audio/video. No measured CPU bottleneck
-currently requires Zig. Compare a Zig worker with Go and suitable existing
-image-processing tools, using equivalent output and codec settings.
+it does not resize images or decode audio/video. **Zig is the selected language
+for the isolated preview decoder** (architecture owner, review of #122,
+2026-11-04); it is an architecture decision, not a measured result. A Go
+implementation of the same contract is the reference baseline. A 2× gain over
+it is a hypothesis to measure, not a veto: missing it calls for analysis and
+optimization, and Zig must pass the gates recorded in
+[ADR 0006](docs/adr/0006-image-previews.md). Compare with suitable existing
+image-processing tools too, using equivalent output and codec settings.
 
 In the proposed design, Go Media owns authorization, metadata, task scheduling
 and publication of results. The worker is a separate process/container receiving
@@ -585,9 +590,11 @@ Future work, in order, after implementation is authorized:
   jobs, a full queue, timeout/OOM/crash and S3/database outages. Commit disposable
   fixtures, behavioral regressions and fuzz targets; verify bounded recovery and
   preservation of originals.
-- [ ] **Z4 — adoption decision:** keep Go if the evidence does not justify Zig.
-  If adopted, pin compiler and native dependencies, extend CI to build/test the
-  worker, verify supported deployment architectures and document rollback before
+- [ ] **Z4 — rollout decision:** record the gate results in ADR 0006. A failed
+  correctness, security, resource or operability gate blocks rollout and requires
+  rework; changing the language needs a separate explicit architecture decision.
+  Pin compiler and native dependencies, extend CI to build/test the worker,
+  verify supported deployment architectures and document rollback before
   production integration. Existing Go CI is not evidence that Zig was checked.
 - [ ] **Z5 — later candidates:** reconsider waveform/audio analysis only after
   voice-message formats, permissions and storage limits are designed. Consider
