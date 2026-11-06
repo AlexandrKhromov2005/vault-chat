@@ -71,3 +71,15 @@ func TestHTTPPreservesHijackingAndExcludesWebSocketLifetime(t *testing.T) {
 	require.Equal(t, 101, response.StatusCode)
 	require.NotContains(t, scrape(t, m), `vault_http_request_duration_seconds_count{kind="websocket"`)
 }
+
+func TestCounterSeriesShareOneName(t *testing.T) {
+	m := telemetry.New("gateway")
+	for value, n := range map[string]float64{"hit": 3, "miss": 1, "error": 0} {
+		m.CounterSeries("vault_test_requests_total", "Test lookups.", "result", value, func() float64 { return n })
+	}
+	body := scrape(t, m)
+	require.Contains(t, body, `vault_test_requests_total{result="hit"} 3`)
+	require.Contains(t, body, `vault_test_requests_total{result="miss"} 1`)
+	require.Contains(t, body, `vault_test_requests_total{result="error"} 0`)
+	require.Equal(t, 1, strings.Count(body, "# TYPE vault_test_requests_total counter"))
+}

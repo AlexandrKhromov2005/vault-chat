@@ -47,6 +47,7 @@ func TestAuthenticate(t *testing.T) {
 				Email:     "user@example.com",
 				Username:  "username1",
 				ExpiresAt: timestamppb.New(expiresAt),
+				SessionId: "login-1",
 			}, nil)
 
 		rec, identity := serve(validator, "Bearer tok")
@@ -58,6 +59,7 @@ func TestAuthenticate(t *testing.T) {
 			Username:  "username1",
 			ExpiresAt: expiresAt,
 			Token:     "tok",
+			SessionID: "login-1",
 		}, identity)
 	})
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the attachment cache (AttachmentCache); never the database, the
+     session or the staged copies of files waiting to be sent. -->
+<paths>
+    <cache-path name="attachments" path="attachments/" />
+</paths>

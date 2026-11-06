@@ -13,12 +13,15 @@ func clearGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"GATEWAY_HTTP_ADDR", "GATEWAY_AUTH_GRPC_ADDR", "GATEWAY_CHAT_GRPC_ADDR", "GATEWAY_REDIS_ADDR", "GATEWAY_REDIS_PASSWORD",
+		"GATEWAY_PROFILE_CACHE_ADDR", "GATEWAY_PROFILE_CACHE_PASSWORD",
 		"GATEWAY_TLS_CERT_PATH", "GATEWAY_TLS_KEY_PATH", "GATEWAY_CORS_ALLOWED_ORIGINS",
 		"GATEWAY_MAX_BODY_BYTES", "GATEWAY_REQUEST_TIMEOUT", "GATEWAY_RATE_LIMIT_PER_MINUTE",
 		"GATEWAY_RATE_LIMIT_BURST", "GATEWAY_LOG_LEVEL", "GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "GATEWAY_WS_SEND_BUFFER",
 		"GATEWAY_WS_AUTH_TIMEOUT", "GATEWAY_WS_PING_INTERVAL", "GATEWAY_WS_WRITE_TIMEOUT",
 		"GATEWAY_WS_MAX_CONNECTIONS", "GATEWAY_WS_MAX_UNAUTHENTICATED_CONNECTIONS",
 		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", "GATEWAY_AUTH_RATE_LIMIT_BURST",
+		"GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE", "GATEWAY_AUTH_IP_RATE_LIMIT_BURST",
+		"GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", "GATEWAY_REFRESH_RATE_LIMIT_BURST",
 	} {
 		t.Setenv(key, "")
 	}
@@ -44,6 +47,10 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(30), cfg.RateLimitBurst)
 		require.Equal(t, uint32(5), cfg.AuthRateLimitPerMinute)
 		require.Equal(t, uint32(5), cfg.AuthRateLimitBurst)
+		require.Equal(t, uint32(10), cfg.AuthIPRateLimitPerMinute)
+		require.Equal(t, uint32(10), cfg.AuthIPRateLimitBurst)
+		require.Equal(t, uint32(30), cfg.RefreshRateLimitPerMinute)
+		require.Equal(t, uint32(30), cfg.RefreshRateLimitBurst)
 		require.Equal(t, "info", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 5, SendBuffer: 64, AuthTimeout: 5 * time.Second, PingInterval: 30 * time.Second, WriteTimeout: 10 * time.Second,
@@ -67,6 +74,10 @@ func TestLoadGateway(t *testing.T) {
 		t.Setenv("GATEWAY_RATE_LIMIT_BURST", "50")
 		t.Setenv("GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", "20")
 		t.Setenv("GATEWAY_AUTH_RATE_LIMIT_BURST", "10")
+		t.Setenv("GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE", "40")
+		t.Setenv("GATEWAY_AUTH_IP_RATE_LIMIT_BURST", "20")
+		t.Setenv("GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", "90")
+		t.Setenv("GATEWAY_REFRESH_RATE_LIMIT_BURST", "45")
 		t.Setenv("GATEWAY_LOG_LEVEL", "debug")
 		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "2")
 		t.Setenv("GATEWAY_WS_SEND_BUFFER", "16")
@@ -92,6 +103,10 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(50), cfg.RateLimitBurst)
 		require.Equal(t, uint32(20), cfg.AuthRateLimitPerMinute)
 		require.Equal(t, uint32(10), cfg.AuthRateLimitBurst)
+		require.Equal(t, uint32(40), cfg.AuthIPRateLimitPerMinute)
+		require.Equal(t, uint32(20), cfg.AuthIPRateLimitBurst)
+		require.Equal(t, uint32(90), cfg.RefreshRateLimitPerMinute)
+		require.Equal(t, uint32(45), cfg.RefreshRateLimitBurst)
 		require.Equal(t, "debug", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 2, SendBuffer: 16, AuthTimeout: 2 * time.Second, PingInterval: 15 * time.Second, WriteTimeout: 4 * time.Second,
@@ -129,6 +144,26 @@ func TestLoadGateway(t *testing.T) {
 			})
 		}
 	})
+}
+
+// The profile cache is off by default and must be its own Redis instance,
+// so that its evictions cannot reset rate limits.
+func TestLoadGateway_ProfileCache(t *testing.T) {
+	clearGatewayEnv(t)
+	cfg, err := config.LoadGateway()
+	require.NoError(t, err)
+	require.Empty(t, cfg.ProfileCacheAddr)
+
+	t.Setenv("GATEWAY_PROFILE_CACHE_ADDR", "profile-cache:6379")
+	t.Setenv("GATEWAY_PROFILE_CACHE_PASSWORD", "cache-secret")
+	cfg, err = config.LoadGateway()
+	require.NoError(t, err)
+	require.Equal(t, "profile-cache:6379", cfg.ProfileCacheAddr)
+	require.Equal(t, "cache-secret", cfg.ProfileCachePassword)
+
+	t.Setenv("GATEWAY_REDIS_ADDR", "profile-cache:6379")
+	_, err = config.LoadGateway()
+	require.ErrorContains(t, err, "GATEWAY_PROFILE_CACHE_ADDR")
 }
 
 func TestLoadGateway_InvalidValues(t *testing.T) {
