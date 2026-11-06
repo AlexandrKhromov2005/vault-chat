@@ -78,6 +78,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Public profile cache (docs/adr/0004-public-profile-cache.md): a Redis of
+  # its own on a network only the gateway joins, so that evicting profiles
+  # never evicts rate limits. Nothing is persisted.
+  profile-cache:
+    networks: [profile-cache]
+    image: redis:7-alpine
+    command: [redis-server, --maxmemory, 16mb, --maxmemory-policy, allkeys-lru, --save, "", --appendonly, "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # NATS remains an optional development tool; Redis carries chat events.
   nats:
     networks: [events]
@@ -273,7 +286,7 @@ services:
     stop_grace_period: 10s
 
   gateway:
-    networks: [rpc, events, edge]
+    networks: [rpc, events, edge, profile-cache]
     <<: *go-service
     build:
       context: ..
@@ -286,6 +299,8 @@ services:
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
       GATEWAY_CHAT_GRPC_ADDR: passthrough:///chat:50052
       GATEWAY_REDIS_ADDR: redis:6379
+      # Not a startup or readiness dependency: without it profiles come from Auth.
+      GATEWAY_PROFILE_CACHE_ADDR: profile-cache:6379
       GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-5}
       GATEWAY_AUTH_RATE_LIMIT_BURST: ${GATEWAY_AUTH_RATE_LIMIT_BURST:-5}
       GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE:-10}
@@ -438,3 +453,4 @@ networks:
   chat-data: {}
   media-data: {}
   edge: {}
+  profile-cache: {internal: true}
