@@ -484,11 +484,15 @@ on Go; these tracks do not require rewriting them or introducing both languages.
 ### 12.1 Erlang/OTP: call control
 
 **Candidate scope.** Start with one-to-one audio calls: invite, ring, accept,
-reject, cancel, connect and end. An OTP process per call, using `gen_statem`, is
-a candidate for serializing commands and timeouts. Compare it with a Go service
-implementing the same contract. Lightweight processes alone do not establish a
-capacity or latency advantage; no current measurement identifies Go as the
-limiting factor.
+reject, cancel, connect and end. **Erlang/OTP is the selected direction for the
+new Calls control plane** (architecture owner, review of #121, 2026-11-03);
+Auth, Chat, Media and Gateway stay on Go and are not rewritten. The choice
+follows the domain: many independent long-lived state machines with timers, a
+mailbox per call, failure isolation and supervision (an OTP process per call,
+using `gen_statem`). It is not a claim about media throughput: media goes
+peer-to-peer or through an SFU. A Go implementation of the same contract may
+serve as a reference baseline; Erlang does not have to beat it, but it must pass
+the gates recorded in [ADR 0005](docs/adr/0005-call-control.md).
 
 Call control and media transport are separate decisions. Evaluate WebRTC
 peer-to-peer with TURN versus an SFU such as self-hosted LiveKit; account for
@@ -523,10 +527,12 @@ Future work, in order, after implementation is authorized:
 - [ ] **E1 — design:** agree on the first client scenario, an owner able to
   maintain OTP, contracts, threat model and budgets. Write an ADR comparing Go
   and Erlang/OTP, including deployment, observability and state recovery.
-- [ ] **E2 — prototype and compare:** implement the same small call-control
-  scenario in both candidates on a disposable test stack. Measure setup p95/p99,
-  throughput, errors, CPU, peak memory and recovery under the same workload;
-  report media-server and TURN costs separately. Commit fixtures and commands.
+- [ ] **E2 — prototype and measure:** implement the call-control contract in
+  Erlang/OTP, optionally with a Go reference baseline, on a disposable test stack.
+  Measure setup p95/p99, throughput, errors, CPU, peak memory and recovery under
+  the same workload, including a crash of one call process while other calls
+  continue; report media-server and TURN costs separately. Commit fixtures and
+  commands.
 - [ ] **E3 — acceptance:** cover malformed/oversized signaling, expired or revoked
   sessions, nonmembers, removal during a call, two devices accepting together,
   duplicate/reordered commands, lost `accepted`/`ended` events, reconnect,
@@ -535,9 +541,10 @@ Future work, in order, after implementation is authorized:
   background incoming calls, delayed/missed push, network loss, Wi-Fi/mobile
   handover and TURN fallback. Depend on reviewed session and push behavior;
   an open client or push PR does not satisfy this gate.
-- [ ] **E5 — adoption decision:** record results in the ADR. Retain Go unless OTP
-  offers an agreed benefit that justifies ownership and another runtime. If
-  adopted, add pinned tooling, CI, metrics, deployment and rollback acceptance
+- [ ] **E5 — rollout decision:** record the gate results in ADR 0005. A failed
+  correctness, security, SLO, resource or operability gate blocks rollout and
+  requires rework; changing the runtime needs a separate explicit architecture
+  decision. Add pinned tooling, CI, metrics, deployment and rollback acceptance
   in separate focused PRs before enabling calls.
 
 ### 12.2 Zig: isolated media processing
