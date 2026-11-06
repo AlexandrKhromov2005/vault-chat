@@ -21,7 +21,7 @@ services:
       - --web.user-assets=/etc/prometheus/user
     volumes:
       - ./monitoring/runtime/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./monitoring/runtime/alerts.yml:/etc/prometheus/alerts.yml:ro
       - ./monitoring/consoles:/etc/prometheus/consoles:ro
       - ./monitoring/user:/etc/prometheus/user:ro
       - prometheus_data:/prometheus
@@ -61,10 +61,11 @@ services:
   blackbox:
     <<: *monitor
     image: prom/blackbox-exporter@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    network_mode: host
     mem_limit: 64m
-    command: [--config.file=/etc/blackbox/blackbox.yml]
-    ports: ['127.0.0.1:${BLACKBOX_PORT:-9115}:9115']
-    networks: [application]
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+      - --web.listen-address=127.0.0.1:${BLACKBOX_PORT:-9115}
     volumes: ['./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro']
   grafana:
     <<: *monitor
@@ -88,10 +89,6 @@ services:
       - ./monitoring/runtime/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-networks:
-  application:
-    external: true
-    name: ${VAULT_PROJECT:-vault-chat}_rpc
 volumes:
   prometheus_data:
   grafana_data:

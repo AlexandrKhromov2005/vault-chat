@@ -1,14 +1,106 @@
-# Optional overlay for the application project. Every published metrics port is loopback-only.
+# Host-only metrics and probes; no published application metrics ports.
 services:
   auth:
-    environment: {AUTH_METRICS_ADDR: ':9100'}
-    ports: ['127.0.0.1:${AUTH_METRICS_HOST_PORT:-9101}:9100']
+    environment:
+      AUTH_METRICS_ADDR: '${AUTH_METRICS_IPV4_ADDRESS:-172.31.240.2}:9100'
+    networks:
+      rpc:
+      auth-data:
+      events:
+      metrics-auth:
+        ipv4_address: '${AUTH_METRICS_IPV4_ADDRESS:-172.31.240.2}'
   chat:
-    environment: {CHAT_METRICS_ADDR: ':9100'}
-    ports: ['127.0.0.1:${CHAT_METRICS_HOST_PORT:-9102}:9100']
+    environment:
+      CHAT_METRICS_ADDR: '${CHAT_METRICS_IPV4_ADDRESS:-172.31.240.10}:9100'
+    networks:
+      rpc:
+      chat-data:
+      events:
+      metrics-chat:
+        ipv4_address: '${CHAT_METRICS_IPV4_ADDRESS:-172.31.240.10}'
   media:
-    environment: {MEDIA_METRICS_ADDR: ':9100'}
-    ports: ['127.0.0.1:${MEDIA_METRICS_HOST_PORT:-9103}:9100']
+    environment:
+      MEDIA_METRICS_ADDR: '${MEDIA_METRICS_IPV4_ADDRESS:-172.31.240.18}:9100'
+    networks:
+      rpc:
+      media-data:
+      objects:
+      metrics-media:
+        ipv4_address: '${MEDIA_METRICS_IPV4_ADDRESS:-172.31.240.18}'
   gateway:
-    environment: {GATEWAY_METRICS_ADDR: ':9100'}
-    ports: ['127.0.0.1:${GATEWAY_METRICS_HOST_PORT:-9104}:9100']
+    environment:
+      GATEWAY_METRICS_ADDR: '${GATEWAY_METRICS_IPV4_ADDRESS:-172.31.240.26}:9100'
+    networks:
+      rpc:
+      events:
+      edge:
+      profile-cache:
+      metrics-gateway:
+        ipv4_address: '${GATEWAY_METRICS_IPV4_ADDRESS:-172.31.240.26}'
+  postgres:
+    networks:
+      auth-data:
+        ipv4_address: '${POSTGRES_IPV4_ADDRESS:-172.31.240.34}'
+  chat-postgres:
+    networks:
+      chat-data:
+        ipv4_address: '${CHAT_POSTGRES_IPV4_ADDRESS:-172.31.240.42}'
+  media-postgres:
+    networks:
+      media-data:
+        ipv4_address: '${MEDIA_POSTGRES_IPV4_ADDRESS:-172.31.240.50}'
+  redis:
+    networks:
+      events:
+        ipv4_address: '${REDIS_IPV4_ADDRESS:-172.31.240.58}'
+  minio:
+    networks:
+      objects:
+        ipv4_address: '${MINIO_IPV4_ADDRESS:-172.31.240.66}'
+
+networks:
+  metrics-auth:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${AUTH_METRICS_SUBNET:-172.31.240.0/29}'
+  metrics-chat:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${CHAT_METRICS_SUBNET:-172.31.240.8/29}'
+  metrics-media:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${MEDIA_METRICS_SUBNET:-172.31.240.16/29}'
+  metrics-gateway:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${GATEWAY_METRICS_SUBNET:-172.31.240.24/29}'
+  auth-data:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${AUTH_DATA_SUBNET:-172.31.240.32/29}'
+  chat-data:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${CHAT_DATA_SUBNET:-172.31.240.40/29}'
+  media-data:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${MEDIA_DATA_SUBNET:-172.31.240.48/29}'
+  events:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${EVENTS_SUBNET:-172.31.240.56/29}'
+  objects:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${OBJECTS_SUBNET:-172.31.240.64/29}'
