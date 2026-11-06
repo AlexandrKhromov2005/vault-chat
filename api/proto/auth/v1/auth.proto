@@ -161,6 +161,10 @@ message ValidateTokenResponse {
   string email = 3;
   string username = 4;
   google.protobuf.Timestamp expires_at = 5;
+  // session_id identifies the login (session family) the token belongs to,
+  // stable across refresh rotation: one login of one device. Services use it
+  // to tell a user's devices apart; it is internal and never sent to clients.
+  string session_id = 6;
 }
 
 message RefreshTokenRequest {

@@ -15,7 +15,7 @@ func TestRevokedSessionRejectsAnUnexpiredAccessToken(t *testing.T) {
 	fx := newServiceFixture(t)
 	const sid = "b7f0d975-5345-4b94-a4b8-7ecc70562e22"
 	fx.tokens.EXPECT().Validate("access").Return(&jwt.Claims{UserID: "owner", SessionID: sid, TokenType: jwt.AccessToken}, nil)
-	fx.sessions.EXPECT().IsActive(mock.Anything, "owner", sid).Return(false, nil)
+	fx.sessions.EXPECT().ActiveFamily(mock.Anything, "owner", sid).Return("", nil)
 	_, err := fx.svc.ValidateToken(context.Background(), "access")
 	require.ErrorIs(t, err, service.ErrInvalidToken)
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/validator"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/jwt"
 )
 
 // AuthService is the business-logic contract required by the handler.
@@ -24,7 +23,7 @@ type AuthService interface {
 	SearchUsers(ctx context.Context, accessToken, query string, limit int32) ([]*domain.User, error)
 	RegisterInvited(ctx context.Context, email, username, password, invitationToken string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
-	ValidateToken(ctx context.Context, token string) (*jwt.Claims, error)
+	ValidateToken(ctx context.Context, token string) (*service.Access, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
 	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
@@ -99,6 +98,7 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 		Email:     claims.Email,
 		Username:  claims.Username,
 		ExpiresAt: timestamppb.New(claims.ExpiresAt),
+		SessionId: claims.LoginID,
 	}, nil
 }
 
