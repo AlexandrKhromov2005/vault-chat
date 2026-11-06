@@ -177,6 +177,7 @@ func TestAuthGRPCHandler_ValidateToken(t *testing.T) {
 		require.Equal(t, "user@example.com", resp.GetEmail())
 		require.Equal(t, "username1", resp.GetUsername())
 		require.Equal(t, expiresAt.Unix(), resp.GetExpiresAt().GetSeconds())
+		require.Equal(t, "login-1", resp.GetSessionId())
 	})
 
 	t.Run("invalid token yields valid=false without an error", func(t *testing.T) {
