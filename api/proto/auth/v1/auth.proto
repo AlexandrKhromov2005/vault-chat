@@ -48,6 +48,12 @@ service AuthService {
   rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
   // ConfirmEmailChange consumes a token for the new address and revokes prior sessions.
   rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
+  // RegisterPushToken binds a provider token to the login of the access
+  // token, replacing the login's previous token. Revoking the login deletes it.
+  rpc RegisterPushToken(RegisterPushTokenRequest) returns (RegisterPushTokenResponse);
+  // UnregisterPushToken removes the token of the login of the access token.
+  // It is idempotent.
+  rpc UnregisterPushToken(UnregisterPushTokenRequest) returns (UnregisterPushTokenResponse);
 }
 
 message RegisterRequest {
@@ -155,6 +161,10 @@ message ValidateTokenResponse {
   string email = 3;
   string username = 4;
   google.protobuf.Timestamp expires_at = 5;
+  // session_id identifies the login (session family) the token belongs to,
+  // stable across refresh rotation: one login of one device. Services use it
+  // to tell a user's devices apart; it is internal and never sent to clients.
+  string session_id = 6;
 }
 
 message RefreshTokenRequest {
@@ -213,3 +223,20 @@ message UserProfile {
   string user_id = 1;
   string username = 2;
 }
+
+message RegisterPushTokenRequest {
+  string access_token = 1;
+  // Push provider; only "fcm" is supported.
+  string provider = 2;
+  // Provider registration token: 1 to 2048 characters of ASCII letters,
+  // digits and "_:.-".
+  string token = 3;
+}
+
+message RegisterPushTokenResponse {}
+
+message UnregisterPushTokenRequest {
+  string access_token = 1;
+}
+
+message UnregisterPushTokenResponse {}

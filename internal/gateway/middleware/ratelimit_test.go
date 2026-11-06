@@ -3,10 +3,13 @@ package middleware_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,6 +137,74 @@ func TestRequiredRateLimitRejectsUnavailableRedis(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
 	require.False(t, called)
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+// countingLimiter admits everything unless down and counts refunds by key.
+type countingLimiter struct {
+	mu       sync.Mutex
+	down     bool
+	refunds  map[string]int
+	refundOK bool
+}
+
+func (l *countingLimiter) Allow(context.Context, string) (ratelimit.Result, error) {
+	if l.down {
+		return ratelimit.Result{}, errors.New("redis down")
+	}
+	return ratelimit.Result{Allowed: true, Limit: 1}, nil
+}
+
+func (l *countingLimiter) Refund(_ context.Context, key string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.refunds == nil {
+		l.refunds = map[string]int{}
+	}
+	l.refunds[key]++
+	if !l.refundOK {
+		return errors.New("redis down")
+	}
+	return nil
+}
+
+func TestRefundReturnsOnlyTakenTokensOnce(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	serve := func(limiters []*countingLimiter, status int, refund func(http.Handler) http.Handler) {
+		t.Helper()
+		var limits []func(http.Handler) http.Handler
+		for _, l := range limiters {
+			limits = append(limits, middleware.RateLimit(l, middleware.ByClientIP, logger, middleware.Refundable("ip")))
+		}
+		limits = append(limits, refund, refund)
+		h := middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+		}), limits...)
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.RemoteAddr = "203.0.113.7:5555"
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	onCreated := middleware.RefundOnStatus(http.StatusCreated, logger, "ip")
+
+	local, shared := &countingLimiter{refundOK: true}, &countingLimiter{}
+	serve([]*countingLimiter{local, shared}, http.StatusCreated, onCreated)
+	require.Equal(t, map[string]int{"ip:203.0.113.7": 1}, local.refunds, "twice wrapped, refunded once")
+	require.Equal(t, map[string]int{"ip:203.0.113.7": 1}, shared.refunds, "a failed refund is attempted once and ignored")
+
+	local = &countingLimiter{}
+	serve([]*countingLimiter{local}, http.StatusBadRequest, onCreated)
+	require.Empty(t, local.refunds, "a failed request keeps its token")
+
+	down := &countingLimiter{down: true}
+	serve([]*countingLimiter{down}, http.StatusCreated, onCreated)
+	require.Empty(t, down.refunds, "a request let through by a failed limiter took no token")
+
+	local = &countingLimiter{}
+	serve([]*countingLimiter{local}, http.StatusUnauthorized, middleware.RefundAuthenticated(logger, "ip"))
+	require.Equal(t, map[string]int{"ip:203.0.113.7": 1}, local.refunds)
+
+	local = &countingLimiter{}
+	serve([]*countingLimiter{local}, http.StatusCreated, middleware.RefundOnStatus(http.StatusCreated, logger, "other"))
+	require.Empty(t, local.refunds, "only the named charges are refunded")
 }
 
 func FuzzClientIP(f *testing.F) {
