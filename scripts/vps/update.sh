@@ -11,6 +11,9 @@ for service in auth chat media gateway minio; do
     docker image inspect "vault-chat/$service:$tag" >/dev/null
 done
 check_rpc_images "$tag"
+if [ -f "$VAULT_ROOT/.env.monitoring" ]; then
+    python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT" check-networks
+fi
 "$VAULT_ROOT/scripts/vps.sh" backup
 # Change only the image selector; never regenerate passwords or JWT keys.
 python3 - "$VAULT_ROOT/.env.vps" "$tag" <<'PY'
