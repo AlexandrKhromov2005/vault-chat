@@ -63,16 +63,26 @@ func withExif(data []byte, orientation uint16, order binary.ByteOrder) []byte {
 	return append(out, data[2:]...)
 }
 
-// pngHeader is a PNG that declares w×h pixels and ends after its header.
-func pngHeader(w, h uint32) []byte {
+// pngHeader is an RGBA PNG that declares w×h pixels and ends after its header.
+func pngHeader(w, h uint32, depth, interlace byte) []byte {
 	ihdr := make([]byte, 17)
 	copy(ihdr, "IHDR")
 	binary.BigEndian.PutUint32(ihdr[4:], w)
 	binary.BigEndian.PutUint32(ihdr[8:], h)
-	ihdr[12], ihdr[13] = 8, 6 // 8-bit RGBA
+	ihdr[12], ihdr[13], ihdr[16] = depth, 6, interlace
 	out := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0d")
 	out = append(out, ihdr...)
 	return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(ihdr))
+}
+
+// jpegHeader is a JPEG that declares w×h pixels in a frame with the given
+// marker and sampling factors (0x11 or 0x22) and ends after its header.
+func jpegHeader(w, h uint16, marker byte, sampling ...byte) []byte {
+	sof := []byte{0xff, marker, 0, byte(8 + 3*len(sampling)), 8, byte(h >> 8), byte(h), byte(w >> 8), byte(w), byte(len(sampling))}
+	for i, s := range sampling {
+		sof = append(sof, byte(i+1), s, 0)
+	}
+	return append(append([]byte{0xff, 0xd8}, sof...), 0xff, 0xda, 0, 2)
 }
 
 func decode(t *testing.T, data []byte) image.Image {
@@ -212,8 +222,69 @@ func TestShrinkAveragesByArea(t *testing.T) {
 }
 
 func TestMakeSkipsImagesAboveThePixelBudget(t *testing.T) {
-	if _, err := Make(pngHeader(6000, 5000)); !errors.Is(err, ErrSkipped) {
+	if _, err := Make(pngHeader(6000, 5000, 8, 0)); !errors.Is(err, ErrSkipped) {
 		t.Fatalf("30-megapixel header: %v, want ErrSkipped", err)
+	}
+}
+
+// The memory budget depends on the encoding, not only on the pixel count.
+// Headers within it reach the decoder, which rejects the missing pixels.
+func TestMakeSkipsEncodingsAboveTheMemoryBudget(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		data []byte
+		skip bool
+	}{
+		{"PNG 8-bit 24 MP", pngHeader(6000, 4000, 8, 0), false},
+		{"PNG 16-bit 24 MP", pngHeader(6000, 4000, 16, 0), true},
+		{"PNG 16-bit 12 MP", pngHeader(4000, 3000, 16, 0), false},
+		{"PNG interlaced 24 MP", pngHeader(6000, 4000, 8, 1), true},
+		{"PNG interlaced 12 MP", pngHeader(4000, 3000, 8, 1), false},
+		{"PNG 24 000 000×1", pngHeader(24_000_000, 1, 8, 0), true},
+		{"JPEG baseline 4:4:4 24 MP", jpegHeader(6000, 4000, 0xc0, 0x11, 0x11, 0x11), false},
+		{"JPEG progressive 4:4:4 24 MP", jpegHeader(6000, 4000, 0xc2, 0x11, 0x11, 0x11), true},
+		{"JPEG progressive 4:2:0 24 MP", jpegHeader(6000, 4000, 0xc2, 0x22, 0x11, 0x11), true},
+		{"JPEG progressive 4:2:0 9 MP", jpegHeader(3000, 3000, 0xc2, 0x22, 0x11, 0x11), false},
+		{"JPEG CMYK 24 MP", jpegHeader(6000, 4000, 0xc0, 0x11, 0x11, 0x11, 0x11), true},
+		{"JPEG CMYK 9 MP", jpegHeader(3000, 3000, 0xc0, 0x11, 0x11, 0x11, 0x11), false},
+	} {
+		want := ErrInvalid
+		if c.skip {
+			want = ErrSkipped
+		}
+		if _, err := Make(c.data); !errors.Is(err, want) {
+			t.Errorf("%s: %v, want %v", c.name, err, want)
+		}
+	}
+}
+
+// The allocation-free row readers agree with compositing At on white.
+func TestRowReadersMatchAt(t *testing.T) {
+	r := image.Rect(0, 0, 61, 3)
+	gray, rgba, nrgba, cmyk := image.NewGray16(r), image.NewRGBA64(r), image.NewNRGBA64(r), image.NewCMYK(r)
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 61; x++ {
+			v := func(k int) uint16 { return uint16((x*7919 + y*104729 + k*15485863) % 65536) }
+			a := v(3)
+			gray.SetGray16(x, y, color.Gray16{Y: v(0)})
+			rgba.SetRGBA64(x, y, color.RGBA64{R: v(0) % (a + 1), G: v(1) % (a + 1), B: v(2) % (a + 1), A: a})
+			nrgba.SetNRGBA64(x, y, color.NRGBA64{R: v(0), G: v(1), B: v(2), A: a})
+			cmyk.SetCMYK(x, y, color.CMYK{C: uint8(v(0)), M: uint8(v(1)), Y: uint8(v(2)), K: uint8(a)})
+		}
+	}
+	for _, img := range []image.Image{gray, rgba, nrgba, cmyk} {
+		row := make([]uint8, 61*3)
+		for y := 0; y < 3; y++ {
+			rowReader(img)(y, row)
+			for x := 0; x < 61; x++ {
+				want := onWhite(img.At(x, y))
+				for c := 0; c < 3; c++ {
+					if diff(row[x*3+c], int(want[c])) > 1 {
+						t.Fatalf("%T (%d,%d): %v, want %v", img, x, y, row[x*3:x*3+3], want)
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -224,7 +295,7 @@ func TestMakeRejectsInvalidData(t *testing.T) {
 		"text":      []byte("not an image"),
 		"truncated": full[:len(full)/2],
 		"gif":       []byte("GIF89a\x01\x00\x01\x00\x00\x00\x00;"),
-		"no pixels": pngHeader(64, 64),
+		"no pixels": pngHeader(64, 64, 8, 0),
 	} {
 		if _, err := Make(data); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: %v, want ErrInvalid", name, err)
