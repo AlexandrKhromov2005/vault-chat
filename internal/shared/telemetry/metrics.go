@@ -51,6 +51,14 @@ func (m *Metrics) Counter(name, help string, read func() float64) {
 	m.registry.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{Name: name, Help: help}, read))
 }
 
+// CounterSeries reads one series, label=value, of a monotonic application
+// counter; register every value of the label under the same name and help.
+func (m *Metrics) CounterSeries(name, help, label, value string, read func() float64) {
+	m.registry.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: name, Help: help, ConstLabels: prometheus.Labels{label: value},
+	}, read))
+}
+
 // Handler serves Prometheus text format without adding public application routes.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})

@@ -46,7 +46,7 @@ type UserRepository interface {
 
 // SessionRepository is the session storage contract required by the service.
 type SessionRepository interface {
-	IsActive(ctx context.Context, userID, sessionID string) (bool, error)
+	ActiveFamily(ctx context.Context, userID, sessionID string) (string, error)
 	Create(ctx context.Context, session *domain.Session) error
 	Rotate(ctx context.Context, currentID string, next *domain.Session, retryWindow time.Duration) (*domain.Session, error)
 	RevokeFamily(ctx context.Context, userID, sessionID string) error
@@ -244,45 +244,65 @@ func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair
 	return pair, nil
 }
 
-// ValidateToken verifies an access token and returns its identity claims.
-func (s *Service) ValidateToken(ctx context.Context, token string) (*jwt.Claims, error) {
-	return s.parseToken(ctx, token, jwt.AccessToken)
+// Access is a valid access token: its claims and the login it belongs to.
+type Access struct {
+	*jwt.Claims
+	// LoginID is the session family, stable across refresh rotation: one
+	// login of one device. It is an internal identifier, not for clients.
+	LoginID string
+}
+
+// ValidateToken verifies an access token and returns its identity claims
+// with the login they belong to.
+func (s *Service) ValidateToken(ctx context.Context, token string) (*Access, error) {
+	claims, login, err := s.parse(ctx, token, jwt.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+	return &Access{Claims: claims, LoginID: login}, nil
 }
 
 // parseToken validates token and checks that it is of the wanted type. Every
 // failure is reported as ErrInvalidToken.
 func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenType) (*jwt.Claims, error) {
+	claims, _, err := s.parse(ctx, token, want)
+	return claims, err
+}
+
+// parse is parseToken that also returns the active login of an access token.
+func (s *Service) parse(ctx context.Context, token string, want jwt.TokenType) (*jwt.Claims, string, error) {
 	if token == "" {
-		return nil, ErrInvalidToken
+		return nil, "", ErrInvalidToken
 	}
 
 	claims, err := s.tokens.Validate(token)
 	if err != nil {
 		s.logger.DebugContext(ctx, "token validation failed", "error", err)
-		return nil, ErrInvalidToken
+		return nil, "", ErrInvalidToken
 	}
 	if claims.TokenType != want {
-		return nil, ErrInvalidToken
+		return nil, "", ErrInvalidToken
 	}
+	var login string
 	if want == jwt.AccessToken {
 		if id, err := uuid.Parse(claims.SessionID); err != nil || id == uuid.Nil {
-			return nil, ErrInvalidToken
+			return nil, "", ErrInvalidToken
 		}
-		active, err := s.sessions.IsActive(ctx, claims.UserID, claims.SessionID)
+		login, err = s.sessions.ActiveFamily(ctx, claims.UserID, claims.SessionID)
 		if err != nil {
-			return nil, fmt.Errorf("check access session: %w", err)
+			return nil, "", fmt.Errorf("check access session: %w", err)
 		}
-		if !active {
-			return nil, ErrInvalidToken
+		if login == "" {
+			return nil, "", ErrInvalidToken
 		}
 	}
 	// The id of a refresh token is the id of its session.
 	if want == jwt.RefreshToken {
 		if _, err := uuid.Parse(claims.ID); err != nil {
-			return nil, ErrInvalidToken
+			return nil, "", ErrInvalidToken
 		}
 	}
-	return claims, nil
+	return claims, login, nil
 }
 
 // issueTokenPair mints an access/refresh token pair for user together with

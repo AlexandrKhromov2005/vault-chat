@@ -28,6 +28,9 @@ type Identity struct {
 	// Token is the access token the caller authenticated with, for backend
 	// calls that authorize by token themselves (e.g. RevokeAllSessions).
 	Token string
+	// SessionID is the caller's login (session family) from Auth, stable
+	// across refresh: one device. Internal; never return it to clients.
+	SessionID string
 }
 
 type identityKey struct{}
@@ -71,10 +74,11 @@ func Authenticate(validator TokenValidator) func(http.Handler) http.Handler {
 			}
 
 			identity := Identity{
-				UserID:   resp.GetUserId(),
-				Email:    resp.GetEmail(),
-				Username: resp.GetUsername(),
-				Token:    token,
+				UserID:    resp.GetUserId(),
+				Email:     resp.GetEmail(),
+				Username:  resp.GetUsername(),
+				Token:     token,
+				SessionID: resp.GetSessionId(),
 			}
 			if expiresAt := resp.GetExpiresAt(); expiresAt != nil {
 				identity.ExpiresAt = expiresAt.AsTime()
