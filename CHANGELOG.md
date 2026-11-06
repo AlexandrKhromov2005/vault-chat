@@ -38,6 +38,10 @@
 
 ### Исправлено
 
+- Redis и profile-cache работают от UID 999 с read-only rootfs, `tmpfs`,
+  сброшенными capabilities и `no-new-privileges`. Одноразовая задача
+  `redis-permissions` без сети исправляет владельца существующего RDB перед
+  запуском; добавлена приёмка сохранения и чтения legacy-данных после restart.
 - Мониторинг VPS снова собирает метрики Auth, Chat, Media и Gateway и проверяет
   PostgreSQL, Redis и MinIO после разделения Docker-сетей. Каждый сервис получил
   отдельную `internal`-сеть метрик с фиксированным адресом без публикации портов;

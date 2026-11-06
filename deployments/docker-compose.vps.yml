@@ -59,9 +59,37 @@ services:
     - shared_buffers=64MB
     - -c
     - max_connections=40
+  redis-permissions:
+    network_mode: none
+    user: root
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+    - redisdata:/data
+    - profile_cache_data:/cache
+    entrypoint: ['sh', '-c', 'chown -R redis:redis /data /cache']
+    restart: 'no'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    mem_limit: 32m
   redis:
     networks: [events]
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    user: redis
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    depends_on:
+      redis-permissions:
+        condition: service_completed_successfully
     volumes:
     - redisdata:/data
     healthcheck:
@@ -88,6 +116,16 @@ services:
   profile-cache:
     networks: [profile-cache]
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    user: redis
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    depends_on:
+      redis-permissions:
+        condition: service_completed_successfully
+    volumes:
+    - profile_cache_data:/data
     healthcheck:
       test:
       - CMD-SHELL
@@ -532,6 +570,7 @@ volumes:
   chat_pgdata: null
   media_pgdata: null
   redisdata: null
+  profile_cache_data: null
   miniodata: null
 
 networks:
