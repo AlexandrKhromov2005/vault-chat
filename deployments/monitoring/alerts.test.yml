@@ -1,4 +1,4 @@
-rule_files: [alerts.yml]
+rule_files: [runtime/alerts.yml]
 evaluation_interval: 1m
 tests:
   - name: service failure requires two minutes and resolves on recovery
@@ -68,3 +68,42 @@ tests:
         exp_alerts:
           - exp_labels: {severity: warning, service: auth}
             exp_annotations: {summary: 'Internal RPC certificate expires in less than 14 days for auth'}
+  - name: probe scrape failure is a service metrics failure
+    interval: 1m
+    input_series:
+      - series: 'up{job="data-tcp",instance="127.0.0.1:9115"}'
+        values: '0+0x3 1+0x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts:
+          - exp_labels: {job: data-tcp, instance: '127.0.0.1:9115', severity: critical}
+            exp_annotations: {summary: 'Metrics unavailable for data-tcp'}
+      - eval_time: 5m
+        alertname: ServiceMetricsUnavailable
+        exp_alerts: []
+  - name: each missing dependency probe is visible
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="data-tcp",instance="172.31.240.34:5432"}'
+        values: '1+0x6'
+      - series: 'probe_success{job="data-tcp",instance="172.31.240.42:5432"}'
+        values: '1+0x6'
+      - series: 'probe_success{job="data-tcp",instance="172.31.240.50:5432"}'
+        values: '1+0x6'
+      - series: 'probe_success{job="storage-ready",instance="http://172.31.240.66:9000/minio/health/ready"}'
+        values: '1+0x6'
+      - series: 'probe_success{job="gateway-ready",instance="https://168.113.171.56/ready"}'
+        values: '1+0x6'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DependencyProbeMissing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: DependencyProbeMissing
+        exp_alerts:
+          - exp_labels: {job: data-tcp, instance: '172.31.240.58:6379', severity: critical}
+            exp_annotations: {summary: 'No probe series for 172.31.240.58:6379'}
