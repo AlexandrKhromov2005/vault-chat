@@ -13,7 +13,21 @@ S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin); services=c["services"]
-assert len(services)==14
+assert len(services)==15
+for name in ["redis","profile-cache"]:
+    service=services[name]
+    assert service["user"]=="redis"
+    assert service["read_only"] is True
+    assert service["cap_drop"]==["ALL"]
+    assert "no-new-privileges:true" in service["security_opt"]
+    assert service["depends_on"]["redis-permissions"]["condition"]=="service_completed_successfully"
+permissions=services["redis-permissions"]
+assert permissions["network_mode"]=="none"
+assert permissions["read_only"] is True
+assert permissions["cap_drop"]==["ALL"]
+assert sorted(permissions["cap_add"])==["CHOWN","DAC_OVERRIDE","FOWNER"]
+assert "no-new-privileges:true" in permissions["security_opt"]
+assert permissions["restart"]=="no" and int(permissions["mem_limit"])<=33554432
 # The profile cache is its own Redis on an internal network only the gateway
 # joins, bounded and never persisted, so its evictions cannot reach rate limits.
 cache=services["profile-cache"]
@@ -34,7 +48,7 @@ assert services["minio"]["environment"]["MINIO_ROOT_USER"] != services["media"][
 assert set(services["minio"]["networks"])=={"objects"}
 for name,s in services.items():
     assert "build" not in s
-    assert s["restart"]==("no" if name.endswith("-migrate") or name=="s3-init" else "unless-stopped")
+    assert s["restart"]==("no" if name.endswith("-migrate") or name in {"s3-init","redis-permissions"} else "unless-stopped")
     assert int(s["mem_limit"])>0
     assert s["logging"]["options"]["max-size"]=="10m"
     ports=s.get("ports",[])
