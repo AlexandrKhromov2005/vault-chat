@@ -38,7 +38,9 @@ class Monitoring(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / '.env.vps').write_text('PUBLIC_IP=168.113.171.56\n')
-            (root / '.env.monitoring').write_text('GRAFANA_PORT=13000\n')
+            (root / '.env.monitoring').write_text(
+                'GRAFANA_PORT=13000\nAUTH_METRICS_HOST_PORT=9101\nCHAT_METRICS_HOST_PORT=9102\n'
+                'MEDIA_METRICS_HOST_PORT=9103\nGATEWAY_METRICS_HOST_PORT=9104\n')
             config.render(root)
             settings = config.settings(root)
             self.assertEqual(settings['GRAFANA_PORT'], 13000)
