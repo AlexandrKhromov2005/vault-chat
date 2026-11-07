@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,14 +16,19 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
-// stubProvider records messages and answers per token.
+// stubProvider records messages and answers per token. onSend, if set, runs
+// inside the call, as a provider request in progress.
 type stubProvider struct {
 	mu      sync.Mutex
 	sent    []Message
 	answers map[string]error
+	onSend  func(Message)
 }
 
 func (p *stubProvider) Send(_ context.Context, m Message) error {
+	if p.onSend != nil {
+		p.onSend(m)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sent = append(p.sent, m)
@@ -36,16 +42,33 @@ func (p *stubProvider) messages() []Message {
 }
 
 type stubDevices struct {
-	mu      sync.Mutex
-	tokens  map[string][]string
-	deleted []string
-	err     error
+	mu        sync.Mutex
+	tokens    map[string][]string
+	deleted   []string
+	err       error
+	targetErr error
 }
 
 func (d *stubDevices) PushTargets(_ context.Context, userID string) ([]string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.tokens[userID], d.err
+	return append([]string(nil), d.tokens[userID]...), d.err
+}
+
+func (d *stubDevices) IsPushTarget(_ context.Context, userID, token string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.targetErr != nil {
+		return false, d.targetErr
+	}
+	return slices.Contains(d.tokens[userID], token), nil
+}
+
+// revoke removes token from userID's logins, as a committed revocation.
+func (d *stubDevices) revoke(userID, token string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.tokens[userID] = slices.DeleteFunc(d.tokens[userID], func(t string) bool { return t == token })
 }
 
 func (d *stubDevices) DeletePushToken(_ context.Context, token string) error {
@@ -132,6 +155,34 @@ func TestDispatcherDeletesOnlyInvalidTokens(t *testing.T) {
 	h.drain()
 	require.Equal(t, []string{"gone"}, h.devices.deleted)
 	require.Equal(t, Stats{Pending: 1, Sent: 1, Failed: 1, Invalid: 1}, h.d.Stats())
+}
+
+// A login revoked while an earlier device of the user is being sent to gets
+// no send started afterwards: the loaded tokens are not an authorization.
+func TestDispatcherStartsNoSendForDevicesRevokedMeanwhile(t *testing.T) {
+	h := newHarness(t, Config{})
+	user, room := uuid.NewString(), uuid.NewString()
+	h.devices.tokens[user] = []string{"first-device", "queued-device", "kept-device"}
+	h.provider.onSend = func(m Message) {
+		if m.Token == "first-device" {
+			h.devices.revoke(user, "queued-device")
+		}
+	}
+	h.d.Signal(eventbus.PushSignal{RoomID: room, UserIDs: []string{user}})
+	h.drain()
+	require.Equal(t, []Message{{"first-device", room}, {"kept-device", room}}, h.provider.messages())
+}
+
+// When the device cannot be checked, nothing is sent to it.
+func TestDispatcherSendsNothingWhenTheDeviceCannotBeChecked(t *testing.T) {
+	h := newHarness(t, Config{})
+	user, room := uuid.NewString(), uuid.NewString()
+	h.devices.tokens[user] = []string{"phone", "tablet"}
+	h.devices.targetErr = errors.New("database unavailable")
+	h.d.Signal(eventbus.PushSignal{RoomID: room, UserIDs: []string{user}})
+	h.drain()
+	require.Empty(t, h.provider.messages())
+	require.NotZero(t, h.d.Stats().Failed)
 }
 
 func TestDispatcherSurvivesTokenStoreOutage(t *testing.T) {
