@@ -6,8 +6,7 @@ loses or reveals a message. The Android client registers a device token per
 login; Auth stores it and later sends wake-up signals through a push
 provider (FCM first).
 
-This document covers device tokens (this change) and the planned dispatch
-(next change), so that both are reviewed against the same invariants.
+This document covers device tokens and their dispatch.
 
 ## Device tokens
 
@@ -107,28 +106,144 @@ Service, handler and router tests: authorization by access token, malformed
 and oversized tokens, unknown providers, missing tokens, Auth errors mapped
 to the documented statuses, and the routes being authenticated.
 
-## Dispatch (next change)
+## Dispatch
 
-Decisions recorded now; implemented separately.
+### Flow
 
-- **Source.** Chat already publishes committed events to Redis. For each new
-  message it also publishes a minimal signal (room id and recipients without
-  the sender, no text, names or sender) on one channel. Auth subscribes to that
-  channel only, so it never receives message content.
+1. Chat commits a message and, in the same Redis pipeline as its user
+   events, publishes a signal on `push:signal:v1`: the room id and the
+   recipients other than the sender, at most 500 per signal (larger rooms are
+   split). No text, names, sender or message id.
+2. Auth subscribes to that channel only, so it never receives message
+   content. Every signal is validated (canonical UUIDs, at most 500
+   recipients, at most 24 KiB); anything else is counted and dropped.
+3. The dispatcher collapses signals per user and room: the first one is sent
+   at once, signals within the next 10 seconds are merged into one push at
+   the end of that window, and quiet pairs are forgotten.
+4. For each user it loads the tokens of active logins (same rule as access
+   tokens) and sends `{"type":"sync","room_id":"…"}` as an FCM data-only
+   message with high priority, collapse key `room:<id>` and a one-hour TTL.
+   The loaded list is only a set of candidates: right before each provider
+   request the dispatcher checks again that the token belongs to an active
+   login of that user, and skips it otherwise.
+5. Only FCM's verdict `UNREGISTERED` deletes the token that was sent. A bare
+   `404` (a proxy or a wrong endpoint) and `SENDER_ID_MISMATCH` (credentials
+   of another Firebase project) are configuration errors and keep the token.
+   Failures are counted and dropped: push is best effort, and the next signal
+   or the client's own sync recovers.
+
+### Decisions
+
 - **Sender in Auth.** Auth owns the tokens and session state, so tokens never
-  leave Auth except towards the provider, and deleting tokens the provider
-  rejects is a local transaction. No new inter-service RPC is needed.
-- **Payload.** A data-only message `{"type":"sync","room_id":"…"}`, high
-  priority, collapse key per room. No notification text: the client fetches
-  and renders it.
-- **Collapsing.** Per user, at most one push per room in a window (default
-  10 seconds); signals arriving in the window are merged into one push after
-  it. Memory and queue are bounded; overflow drops signals, never blocks Chat.
+  leave Auth except towards the provider, and deleting rejected tokens is a
+  local statement. No new inter-service RPC is needed.
 - **Open WebSocket.** Push is sent anyway. Presence is per user and per
   Gateway instance, while devices are separate: a browser tab must not mute
   the phone. The client ignores the signal while its own socket is connected.
-- **Provider.** Interface `PushProvider`; FCM HTTP v1 behind it, configured
-  by a service account file outside the repository and disabled by default.
-  Tests use a stub; no real keys or Firebase files exist in the repository.
-- **Invalid tokens.** Provider answers meaning "unregistered" or "invalid
-  token" delete exactly that token; other errors are counted and dropped.
+- **Provider.** Interface `push.Provider`; FCM HTTP v1 is implemented with the
+  standard library (an RS256 service-account assertion exchanged for an access
+  token, cached for its lifetime). The service account file is read once at
+  start from `AUTH_PUSH_FCM_CREDENTIALS_FILE`, must be private (no access for
+  others) and at most 64 KiB, and its `token_uri` must be Google's, so the
+  signed assertion goes nowhere else. Without the variable push is disabled.
+  Tests use stubs and synthetic keys; no Firebase project or key exists in the
+  repository.
+
+### Trust boundaries
+
+- Redis → Auth: anyone who can publish to Redis can make Auth wake devices of
+  arbitrary users. Signals carry no content, are validated and collapsed, so
+  the effect is bounded to one wake-up per user and room per window. Redis
+  is password-protected and on the internal events network, as for the
+  session revocation hints Gateway already trusts.
+- Auth → FCM: needs egress to `oauth2.googleapis.com` and
+  `fcm.googleapis.com`; Google learns device tokens and room ids, never text.
+- Provider answers decide deletion of exactly the token that was sent.
+- Revocation → provider request: the authorization of each request is the
+  check made right before it starts (`IsPushTarget`, the access-token rule on
+  the current rows). A logout, revoke-all, refresh reuse, credential change
+  or a move of the token to another login that committed before that check
+  stops the request, even when the user's tokens were loaded earlier and
+  other devices of the user were being sent to meanwhile. A revocation that
+  commits after the check does not stop that request: it is already in
+  flight, like a push FCM has accepted, which cannot be recalled. The window
+  is the time between one indexed query and the start of the HTTP request;
+  the payload is a room id only, and the next signal for that device is
+  refused.
+
+### Resource budgets
+
+- At most 10 000 user/room pairs tracked; signals for new pairs beyond that
+  are dropped. The send queue has the same bound and never blocks the
+  subscriber, which never blocks Chat (Pub/Sub).
+- Four concurrent sends; each user's token load and sends share a 10-second
+  deadline; at most 10 tokens per user. HTTP answers are read up to 64 KiB.
+- Shutdown stops subscribing and taking work; sends in progress finish
+  within their own 10-second deadline, and Auth waits at most 15 seconds.
+
+### Failure behavior
+
+- Redis unavailable: Chat drops signals with its events (counted); Auth
+  resubscribes every second. Signals published meanwhile are lost.
+- Auth database unavailable: the send for that pair fails and is counted.
+  If the check before a request fails, that request and the rest of the
+  pair are not sent (fail closed).
+- FCM unavailable or rejecting the service account: sends fail and are
+  counted; tokens are not deleted.
+- Malformed signals and send failures: counted, each logged at most every
+  10 seconds.
+
+Metrics: `vault_push_pending`, `vault_push_sent_total`,
+`vault_push_failures_total`, `vault_push_dropped_total`,
+`vault_push_invalid_tokens_total`, `vault_push_malformed_signals_total`,
+`vault_push_skipped_total` (sends not started because the device left an
+active login after the tokens were loaded).
+
+### Acceptance tests
+
+1. A new message signals its recipients except the sender, without text;
+   membership events and messages only the sender receives signal nothing.
+2. Signals are validated and fuzzed; malformed, oversized, non-canonical and
+   over-long recipient lists are rejected.
+3. Collapsing: the first signal is sent at once, 50 in the window become one
+   push after it, other rooms are separate, quiet pairs are forgotten.
+4. Only rejected tokens are deleted; provider and database failures do not
+   delete and do not stop later sends; the pending bound drops new pairs.
+5. FCM: a data-only body with exactly the documented fields, a valid RS256
+   assertion for the messaging scope, cached access tokens renewed before
+   expiry, error answers mapped without leaking the token (only
+   `UNREGISTERED` deletes; bare 404 and sender mismatch keep), credentials with a
+   foreign `token_uri`, wrong type, project or key refused.
+6. End to end with PostgreSQL and Redis: Chat's publisher to Auth's
+   subscriber and dispatcher; the sender and a revoked login get nothing, a
+   rejected token is deleted, an active device is woken.
+7. With PostgreSQL and one worker: a logout, a revoke-all or a move of the
+   token to another user, committed while an earlier device of the user is
+   being sent to, stops the send to the affected device; a device that
+   cannot be checked gets nothing.
+
+### Operator configuration
+
+Push stays disabled until an operator enables it. On the VPS, from the
+checkout (`/opt/vault-chat`):
+
+1. Create `secrets/push` with owner `65532:65532` and mode `0700`.
+2. Copy the Firebase service account file to `secrets/push/fcm.json` through a
+   private channel, with owner `65532:65532` and mode `0400`. Auth runs as UID
+   65532 and refuses a file that others can read. It must belong to the same
+   Firebase project as the Android build.
+3. Copy `deployments/push.env.example` to `.env.push`, mode `0600`.
+4. Allow outbound HTTPS to `oauth2.googleapis.com` and `fcm.googleapis.com` in
+   the host or provider policy.
+5. Run `scripts/vps.sh up`.
+
+The presence of `.env.push` makes the VPS helper add
+`deployments/docker-compose.push.yml`. The overlay changes Auth only: it mounts
+the narrow directory read-only with automatic host-directory creation disabled
+and adds a dedicated bridge network for outbound traffic. No host ports are
+published. Backups include the opt-in and the encrypted key, and a restore
+repairs their ownership and modes. To pause push, leave the variable in
+`.env.push` empty. To stop for good, also delete the key from Firebase.
+
+These steps were checked against rendered Compose configuration and synthetic
+fixtures, not against a real Firebase project.

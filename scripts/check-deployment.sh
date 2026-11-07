@@ -76,3 +76,20 @@ for name in ["auth","chat","media","gateway"]:
     assert v[0]["read_only"] and not v[0]["bind"].get("create_host_path",False)
     assert all("rpc-ca" not in v["source"] for v in s["volumes"])
 print("mTLS overlay: isolated service keys, no CA signing key mounts")'
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
+REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
+S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
+VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
+import json,sys
+c=json.load(sys.stdin)
+auth=c["services"]["auth"]
+assert auth["environment"]["AUTH_PUSH_FCM_CREDENTIALS_FILE"]=="/run/secrets/push/fcm.json"
+v=[v for v in auth["volumes"] if v["target"]=="/run/secrets/push"]
+assert len(v)==1 and v[0]["source"].endswith("/secrets/push")
+assert v[0]["read_only"] and not v[0]["bind"].get("create_host_path",False)
+assert "push-egress" in auth["networks"] and not c["networks"]["push-egress"].get("internal",False)
+for name,s in c["services"].items():
+    assert name=="auth" or ("push-egress" not in s.get("networks",{}) and all("/secrets/push" not in v["source"] for v in s.get("volumes",[]) if isinstance(v,dict)))
+assert not auth.get("ports")
+print("Push overlay: key and egress for Auth only, read-only mount, no new ports")'

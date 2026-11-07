@@ -7,8 +7,8 @@ root_only
 lock_operations
 [ $# = 1 ] || { echo 'Usage: scripts/vps.sh restore BACKUP_DIR' >&2; exit 1; }
 backup_dir=$(realpath "$1")
-[ ! -e "$VAULT_ROOT/.env.vps" ] && [ ! -e "$VAULT_ROOT/.env.email" ] && [ ! -e "$VAULT_ROOT/secrets" ] || {
-    echo 'Restore requires a fresh checkout without .env.vps, .env.email or secrets' >&2; exit 1;
+[ ! -e "$VAULT_ROOT/.env.vps" ] && [ ! -e "$VAULT_ROOT/.env.email" ] && [ ! -e "$VAULT_ROOT/.env.push" ] && [ ! -e "$VAULT_ROOT/secrets" ] || {
+    echo 'Restore requires a fresh checkout without .env.vps, .env.email, .env.push or secrets' >&2; exit 1;
 }
 [ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$VAULT_PROJECT")" ] || {
     echo 'Project volumes already exist; restore into a fresh project' >&2; exit 1;
@@ -65,6 +65,14 @@ if email_policy_present; then
     chown -R 65532:65532 "$VAULT_ROOT/secrets/mail"
     find "$VAULT_ROOT/secrets/mail" -type d -exec chmod 700 {} +
     find "$VAULT_ROOT/secrets/mail" -type f -exec chmod 400 {} +
+fi
+if [ -f "$VAULT_ROOT/.env.push" ]; then
+    chmod 600 "$VAULT_ROOT/.env.push"
+fi
+if [ -d "$VAULT_ROOT/secrets/push" ]; then
+    chown -R 65532:65532 "$VAULT_ROOT/secrets/push"
+    find "$VAULT_ROOT/secrets/push" -type d -exec chmod 700 {} +
+    find "$VAULT_ROOT/secrets/push" -type f -exec chmod 400 {} +
 fi
 if [ -f "$VAULT_ROOT/.env.rpc" ]; then
     chown -R 65532:65532 "$VAULT_ROOT/secrets/rpc"

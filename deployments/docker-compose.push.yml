@@ -1,0 +1,15 @@
+# Explicit opt-in: use with .env.push; see docs/push.md.
+services:
+  auth:
+    environment:
+      AUTH_PUSH_FCM_CREDENTIALS_FILE: ${AUTH_PUSH_FCM_CREDENTIALS_FILE-/run/secrets/push/fcm.json}
+    networks:
+      - push-egress
+    volumes:
+      - type: bind
+        source: ../secrets/push
+        target: /run/secrets/push
+        read_only: true
+        bind: {create_host_path: false}
+networks:
+  push-egress: {}

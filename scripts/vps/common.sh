@@ -14,6 +14,9 @@ compose() {
     if [ -f "$VAULT_ROOT/.env.email" ]; then
         set -- --env-file "$VAULT_ROOT/.env.email" -f "$VAULT_ROOT/deployments/docker-compose.email.yml" "$@"
     fi
+    if [ -f "$VAULT_ROOT/.env.push" ]; then
+        set -- --env-file "$VAULT_ROOT/.env.push" -f "$VAULT_ROOT/deployments/docker-compose.push.yml" "$@"
+    fi
     if [ -f "$VAULT_ROOT/.env.rpc" ]; then
         set -- -f "$VAULT_ROOT/deployments/docker-compose.mtls.yml" "$@"
     fi

@@ -26,6 +26,9 @@ type Config struct {
 	MailEnabled                                                                                            bool
 	PublicURL, MailKeyFile, SMTPAddress, SMTPFrom, SMTPUsername, SMTPPasswordFile, SMTPTLSMode, SMTPCAFile string
 	EmailLegacyDeadline                                                                                    *time.Time
+	// PushFCMCredentialsFile is a private FCM service account file; empty
+	// disables push (docs/push.md).
+	PushFCMCredentialsFile string
 }
 
 // Load reads configuration from AUTH_* environment variables. DatabaseURL
@@ -41,6 +44,8 @@ func Load() (*Config, error) {
 		LogLevel:          envOr("AUTH_LOG_LEVEL", "info"),
 		RedisAddr:         envOr("AUTH_REDIS_ADDR", "localhost:6379"),
 		RedisPassword:     os.Getenv("AUTH_REDIS_PASSWORD"),
+
+		PushFCMCredentialsFile: os.Getenv("AUTH_PUSH_FCM_CREDENTIALS_FILE"),
 	}
 
 	var err error

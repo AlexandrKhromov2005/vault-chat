@@ -36,12 +36,14 @@ type Pipeliner interface {
 	Pipelined(ctx context.Context, fn func(redis.Pipeliner) error) ([]redis.Cmder, error)
 }
 
-// publication is one encoded event and the users it is published to.
+// publication is one encoded event and the users it is published to, plus
+// the push signals of a new message (docs/push.md).
 type publication struct {
 	kind       domain.EventKind
 	roomID     string
 	payload    []byte
 	recipients []string
+	signals    [][]byte
 }
 
 // change holds the publications of one committed change and the context of
@@ -142,8 +144,13 @@ func (p *Publisher) Notify(ctx context.Context, events ...domain.Event) {
 			p.logger.ErrorContext(ctx, "encode chat event failed", "kind", event.Kind, "error", err)
 			continue
 		}
+		signals, err := pushSignals(event)
+		if err != nil {
+			// The event itself is still published; only the wake-up is lost.
+			p.logger.ErrorContext(ctx, "encode push signal failed", "kind", event.Kind, "error", err)
+		}
 		publications = append(publications, publication{kind: event.Kind, roomID: event.RoomID, payload: payload,
-			recipients: slices.Clone(event.Recipients)})
+			recipients: slices.Clone(event.Recipients), signals: signals})
 	}
 	if len(publications) == 0 {
 		return
@@ -208,6 +215,9 @@ func (p *Publisher) publish(queued change) {
 			for _, user := range publication.recipients {
 				pipe.Publish(ctx, eventbus.UserChannel(user), publication.payload)
 			}
+			for _, signal := range publication.signals {
+				pipe.Publish(ctx, eventbus.PushSignalChannel, signal)
+			}
 		}
 		return nil
 	})
@@ -235,6 +245,21 @@ func (p *Publisher) drop(queued change, reason string) {
 		return
 	}
 	p.logger.WarnContext(queued.ctx, "chat events dropped", "reason", reason, "dropped_total", total)
+}
+
+// pushSignals wakes the devices of a new message's recipients other than its
+// sender. The signal names the room only.
+func pushSignals(event domain.Event) ([][]byte, error) {
+	if event.Kind != domain.MessageCreated || event.Message == nil {
+		return nil, nil
+	}
+	recipients := make([]string, 0, len(event.Recipients))
+	for _, user := range event.Recipients {
+		if user != event.Message.SenderID {
+			recipients = append(recipients, user)
+		}
+	}
+	return eventbus.EncodePushSignals(event.RoomID, recipients)
 }
 
 // Encode converts an event to its protobuf wire form, chatv1.Event.
