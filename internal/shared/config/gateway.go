@@ -36,6 +36,11 @@ type GatewayConfig struct {
 	RefreshRateLimitBurst     uint32
 	LogLevel                  string
 	WebSocket                 WebSocketConfig
+	// ProfileCacheAddr is the Redis instance of the public profile cache
+	// (docs/adr/0004-public-profile-cache.md); empty disables the cache. It
+	// must differ from RedisAddr, whose rate limits must not be evicted.
+	ProfileCacheAddr     string
+	ProfileCachePassword string
 }
 
 // WebSocketConfig holds the limits of real-time connections (GATEWAY_WS_*).
@@ -73,6 +78,11 @@ func LoadGateway() (*GatewayConfig, error) {
 		LogLevel:      envOr("GATEWAY_LOG_LEVEL", "info"),
 	}
 
+	cfg.ProfileCacheAddr = os.Getenv("GATEWAY_PROFILE_CACHE_ADDR")
+	cfg.ProfileCachePassword = os.Getenv("GATEWAY_PROFILE_CACHE_PASSWORD")
+	if cfg.ProfileCacheAddr != "" && cfg.ProfileCacheAddr == cfg.RedisAddr {
+		return nil, errors.New("GATEWAY_PROFILE_CACHE_ADDR must name a Redis instance other than GATEWAY_REDIS_ADDR")
+	}
 	if (cfg.TLSCertPath == "") != (cfg.TLSKeyPath == "") {
 		return nil, errors.New("environment variables GATEWAY_TLS_CERT_PATH and GATEWAY_TLS_KEY_PATH must be set together")
 	}

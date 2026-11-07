@@ -25,7 +25,13 @@ case "$command" in
         done
         docker build --network "${VAULT_BUILD_NETWORK:-default}" -f "$script_dir/../Dockerfile.minio" \
             -t "vault-chat/minio:$tag" "$script_dir/..";;
-    up) root_only; check_rpc_images; compose up -d --no-build --wait;;
+    up)
+        root_only
+        check_rpc_images
+        if [ -f "$VAULT_ROOT/.env.monitoring" ]; then
+            python3 "$script_dir/monitoring/config.py" "$VAULT_ROOT" check-networks
+        fi
+        compose up -d --no-build --wait;;
     status) compose ps;;
     invite) root_only; compose exec -T auth /usr/local/bin/invite "$@";;
     install|update|backup|restore|tls|monitoring|mtls)

@@ -22,11 +22,13 @@ Grafana, runtime configs, systemd units и textfile timer. Повторная у
 сохраняет пароль. Prometheus/Alertmanager configs проверяются до запуска.
 Мониторинг автоматически следует за systemd lifecycle приложения.
 
-UI и метрики не публикуются в интернет. Prometheus, Alertmanager, Grafana
-и node exporter слушают host loopback; blackbox и четыре metrics-порта
-публикуются только на 127.0.0.1. Docker socket в контейнеры не передаётся.
-Node exporter получает readonly host rootfs/proc/sys и host PID/network,
-чтобы показывать ресурсы VPS, а не своего контейнера.
+UI и метрики не публикуются в интернет. Prometheus, Alertmanager, Grafana,
+node exporter и blackbox слушают host loopback. Каждый сервис имеет отдельную
+`internal`-сеть метрик `/29` с одним фиксированным адресом; Prometheus читает
+эти адреса с хоста без публикации портов. Blackbox проверяет фиксированные
+адреса зависимостей с хоста и не подключается к их Docker-сетям. Docker socket
+в контейнеры не передаётся. Node exporter получает readonly host rootfs/proc/sys
+и host PID/network, чтобы показывать ресурсы VPS, а не своего контейнера.
 
 ## Открыть дашборд
 
@@ -54,9 +56,10 @@ Alertmanager — localhost:19093 через тот же туннель.
 
 `AUTH_METRICS_ADDR`, `CHAT_METRICS_ADDR`, `MEDIA_METRICS_ADDR`,
 `GATEWAY_METRICS_ADDR` включают отдельные HTTP listeners. Без переменной
-listener не запускается. В Compose overlay внутренний порт 9100 у каждого
-контейнера отображается в отдельный loopback-порт VPS 9101–9104.
-Публичные `/metrics` и `/debug/pprof` в Gateway не добавляются.
+listener не запускается. Compose overlay привязывает каждый listener к
+фиксированному адресу собственной `internal`-сети; адреса и подсети хранятся
+в `.env.monitoring`, а пересечения с существующими Docker networks отклоняются
+до запуска. Публичные `/metrics` и `/debug/pprof` в Gateway не добавляются.
 
 HTTP labels: фиксированный kind, ограниченный method и status. URI/query,
 пользователь, комната, токены и содержимое сообщений не используются как labels.
@@ -75,7 +78,8 @@ Redis pipeline и невалидное событие. Redis failure может 
 
 Правила находятся в `deployments/monitoring/alerts.yml`:
 
-- Недоступные метрики и dependency probes: 2 минуты.
+- Недоступные метрики и scrape probe-jobs: 2 минуты; отдельный алерт на
+  отсутствие `probe_success` каждого ожидаемого target 5 минут.
 - API 5xx >10% при ≥5 запросах/5m; неожиданные RPC-ошибки >10%.
 - Потери real-time событий и очередь >80%.
 - RAM <10%, root disk <15%, CPU >90% длительное время.
@@ -137,10 +141,14 @@ Backup приложения сохраняет `.env.monitoring`, secrets и met
 История Prometheus, Grafana DB и silences Alertmanager не входят в application
 backup; дашборд и datasource восстанавливаются из Git, затем повторяется
 monitoring install. Внешнее копирование данных приложения остаётся отдельной задачей.
-После изменения портов/получателя повторять install; secret files не коммитить.
+После изменения портов/получателя или обновления monitoring overlay повторять
+install; secret files не коммитить.
 
 Проверки: `xmake monitoring` (private exposure + promtool fixtures),
 `xmake deployment` (ops/privacy/secrets), `xmake ci` (весь проект).
+Изолированная приёмка `PYTHONDONTWRITEBYTECODE=1 python3 tests/ops/monitoring_acceptance.py`
+дополнительно проверяет host access, отсутствие egress и межсетевого доступа,
+все targets/probes и failure alerts на одноразовых Docker resources.
 
 ## Тематические дашборды
 

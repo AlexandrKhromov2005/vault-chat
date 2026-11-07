@@ -9,6 +9,7 @@ case "${1:-status}" in
             echo 'Systemd installation requires the standard VPS checkout/project' >&2; exit 1;
         }
         python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT"
+        python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT" check-networks
         chown 472:472 "$VAULT_ROOT/secrets/grafana_admin_password"
         chmod 400 "$VAULT_ROOT/secrets/grafana_admin_password"
         chown -R 65534:65534 "$VAULT_ROOT/secrets/monitoring"
@@ -29,6 +30,7 @@ case "${1:-status}" in
         systemctl restart vault-monitoring.service
         ;;
     up)
+        python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT" check-networks
         monitor_compose up -d --no-build --force-recreate
         python3 "$VAULT_ROOT/scripts/monitoring/config.py" "$VAULT_ROOT" ready
         ;;

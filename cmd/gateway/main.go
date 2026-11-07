@@ -20,6 +20,7 @@ import (
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/profilecache"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/ratelimit"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/realtime"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/router"
@@ -119,8 +120,26 @@ func run() error {
 		}
 	}()
 
+	// The profile cache is a Redis instance of its own, so that evicting
+	// profiles never evicts rate limits (docs/adr/0004-public-profile-cache.md).
+	// It gets the same short timeouts and no retries as the limiter's client.
+	authHandler := handler.NewAuthHandler(authClient, logger)
+	if cfg.ProfileCacheAddr != "" {
+		cacheClient := ratelimit.NewRedisClient(cfg.ProfileCacheAddr, cfg.ProfileCachePassword)
+		defer func() { _ = cacheClient.Close() }()
+		profiles := profilecache.New(cacheClient)
+		authHandler.WithProfileCache(profiles)
+		for _, result := range []string{"hit", "miss", "error"} {
+			metrics.CounterSeries("vault_profile_cache_requests_total", "Profile cache lookups by result; failed writes count as errors.", "result", result, func() float64 {
+				hits, misses, errs := profiles.Counts()
+				return float64(map[string]uint64{"hit": hits, "miss": misses, "error": errs}[result])
+			})
+		}
+	}
+
 	// Redis is deliberately not a readiness dependency: the rate limiter
-	// fails open, so the gateway keeps serving without it.
+	// fails open and the profile cache only saves calls, so the gateway keeps
+	// serving without either.
 	checks := map[string]handler.Check{
 		"auth": checkGRPCHealth(authHealth, "auth"),
 		"chat": checkGRPCHealth(chatHealth, "chat"),
@@ -154,7 +173,7 @@ func run() error {
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: metrics.HTTP(router.New(router.Deps{
-			Auth:                      handler.NewAuthHandler(authClient, logger),
+			Auth:                      authHandler,
 			Chat:                      handler.NewChatHandler(chatClient, logger),
 			Health:                    health,
 			Media:                     mediaHandler,

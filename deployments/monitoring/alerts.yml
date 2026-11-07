@@ -2,7 +2,7 @@ groups:
   - name: vault-chat
     rules:
       - alert: ServiceMetricsUnavailable
-        expr: up{job=~"auth|chat|media|gateway|node|alertmanager|grafana|blackbox"} == 0
+        expr: up{job=~"auth|chat|media|gateway|node|alertmanager|grafana|blackbox|gateway-ready|storage-ready|data-tcp"} == 0
         for: 2m
         labels: {severity: critical}
         annotations: {summary: 'Metrics unavailable for {{ $labels.job }}'}
