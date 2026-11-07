@@ -38,7 +38,9 @@ class Monitoring(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / '.env.vps').write_text('PUBLIC_IP=168.113.171.56\n')
-            (root / '.env.monitoring').write_text('GRAFANA_PORT=13000\n')
+            (root / '.env.monitoring').write_text(
+                'GRAFANA_PORT=13000\nAUTH_METRICS_HOST_PORT=9101\nCHAT_METRICS_HOST_PORT=9102\n'
+                'MEDIA_METRICS_HOST_PORT=9103\nGATEWAY_METRICS_HOST_PORT=9104\n')
             config.render(root)
             settings = config.settings(root)
             self.assertEqual(settings['GRAFANA_PORT'], 13000)
@@ -52,6 +54,10 @@ class Monitoring(unittest.TestCase):
                 '172.31.240.42:5432', '172.31.240.50:5432'])
             self.assertEqual(jobs['storage-ready']['static_configs'][0]['targets'], [
                 'http://172.31.240.66:9000/minio/health/ready'])
+            with (root / '.env.monitoring').open('a') as stream:
+                stream.write('UNKNOWN_SETTING=1\n')
+            with self.assertRaises(ValueError):
+                config.settings(root)
 
     def test_network_overlap_is_rejected_except_for_own_exact_network(self):
         config = load('config')

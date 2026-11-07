@@ -11,6 +11,8 @@ import urllib.request
 
 PORTS = {'PROMETHEUS_PORT': 9090, 'ALERTMANAGER_PORT': 9093, 'GRAFANA_PORT': 3000,
          'NODE_EXPORTER_PORT': 9100, 'BLACKBOX_PORT': 9115, 'ALERT_JOURNAL_PORT': 9080}
+LEGACY_PORTS = {'AUTH_METRICS_HOST_PORT', 'CHAT_METRICS_HOST_PORT',
+                'MEDIA_METRICS_HOST_PORT', 'GATEWAY_METRICS_HOST_PORT'}
 NETWORK_DEFAULTS = {
     'AUTH_METRICS_SUBNET': '172.31.240.0/29',
     'AUTH_METRICS_IPV4_ADDRESS': '172.31.240.2',
@@ -66,6 +68,8 @@ def settings(root):
     env = root / '.env.monitoring'
     supplied = values(env) if env.exists() else {}
     for key, value in supplied.items():
+        if key in LEGACY_PORTS:
+            continue
         if key not in DEFAULTS:
             raise ValueError(f'Unknown monitoring setting: {key}')
         result[key] = value
