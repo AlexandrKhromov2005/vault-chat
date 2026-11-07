@@ -32,6 +32,10 @@ type Provider interface {
 // Devices is Auth's token store: the tokens of a user's active logins.
 type Devices interface {
 	PushTargets(ctx context.Context, userID string) ([]string, error)
+	// IsPushTarget reports whether token still belongs to an active login of
+	// userID. It is the authorization of each provider request: the tokens
+	// PushTargets returned are only candidates.
+	IsPushTarget(ctx context.Context, userID, token string) (bool, error)
 	DeletePushToken(ctx context.Context, token string) error
 }
 
@@ -78,8 +82,8 @@ type Dispatcher struct {
 	pending map[target]*entry
 	ready   chan target
 
-	sent, failed, dropped, invalid, malformed atomic.Uint64
-	lastWarn                                  atomic.Int64
+	sent, failed, dropped, invalid, malformed, skipped atomic.Uint64
+	lastWarn                                           atomic.Int64
 }
 
 // NewDispatcher creates a dispatcher; call Run to start it.
@@ -190,7 +194,21 @@ func (d *Dispatcher) send(ctx context.Context, key target) {
 		return
 	}
 	for _, token := range tokens {
-		err := d.provider.Send(ctx, Message{Token: token, RoomID: key.roomID})
+		// The list is a snapshot, and sends to earlier devices take time:
+		// a login revoked or a token moved to another user meanwhile must
+		// not get a send started. Each request is checked right before it
+		// starts; when the check fails, nothing more is sent.
+		active, err := d.devices.IsPushTarget(ctx, key.userID, token)
+		if err != nil {
+			d.failed.Add(1)
+			d.warn(ctx, "check push target failed", err)
+			return
+		}
+		if !active {
+			d.skipped.Add(1)
+			continue
+		}
+		err = d.provider.Send(ctx, Message{Token: token, RoomID: key.roomID})
 		switch {
 		case err == nil:
 			d.sent.Add(1)
@@ -221,10 +239,12 @@ func (d *Dispatcher) warn(ctx context.Context, message string, err error) {
 	d.logger.WarnContext(ctx, message, "error", err, "failed_total", d.failed.Load())
 }
 
-// Stats is an approximate view for metrics.
+// Stats is an approximate view for metrics. Skipped counts sends not started
+// because the device left the user's active logins after the tokens were
+// loaded.
 type Stats struct {
-	Pending                                   int
-	Sent, Failed, Dropped, Invalid, Malformed uint64
+	Pending                                            int
+	Sent, Failed, Dropped, Invalid, Malformed, Skipped uint64
 }
 
 // Stats returns counters since start.
@@ -233,5 +253,5 @@ func (d *Dispatcher) Stats() Stats {
 	pending := len(d.pending)
 	d.mu.Unlock()
 	return Stats{Pending: pending, Sent: d.sent.Load(), Failed: d.failed.Load(), Dropped: d.dropped.Load(), Invalid: d.invalid.Load(),
-		Malformed: d.malformed.Load()}
+		Malformed: d.malformed.Load(), Skipped: d.skipped.Load()}
 }

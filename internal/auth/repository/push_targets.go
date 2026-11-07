@@ -31,6 +31,22 @@ ORDER BY d.updated_at DESC LIMIT $3`, userID, r.legacyDeadline, MaxPushDevicesPe
 	return tokens, nil
 }
 
+// IsPushTarget reports whether token belongs to an active login of userID,
+// with the access-token rule. The dispatcher calls it right before each
+// provider request, so a revocation or a move of the token to another login
+// committed before the call stops the request.
+func (r *SessionRepository) IsPushTarget(ctx context.Context, userID, token string) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM push_devices d WHERE d.user_id=$1::uuid AND d.token=$2 AND EXISTS (
+SELECT 1 FROM sessions current JOIN users u ON u.id=current.user_id
+WHERE current.family_id=d.family_id AND current.user_id=$1::uuid AND `+activeSession("$3")+`))`,
+		userID, token, r.legacyDeadline).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("check push target: %w", err)
+	}
+	return active, nil
+}
+
 // DeletePushToken removes a token the provider no longer accepts, whichever
 // login holds it now.
 func (r *SessionRepository) DeletePushToken(ctx context.Context, token string) error {

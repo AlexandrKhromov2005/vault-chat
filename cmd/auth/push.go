@@ -43,6 +43,7 @@ func startPush(ctx context.Context, cfg *config.Config, sessions *repository.Ses
 	metrics.Counter("vault_push_dropped_total", "Push signals dropped because too many pairs were pending.", stats(func(s push.Stats) float64 { return float64(s.Dropped) }))
 	metrics.Counter("vault_push_invalid_tokens_total", "Device tokens deleted after the provider rejected them.", stats(func(s push.Stats) float64 { return float64(s.Invalid) }))
 	metrics.Counter("vault_push_malformed_signals_total", "Push signals dropped as malformed.", stats(func(s push.Stats) float64 { return float64(s.Malformed) }))
+	metrics.Counter("vault_push_skipped_total", "Push sends not started because the device left an active login meanwhile.", stats(func(s push.Stats) float64 { return float64(s.Skipped) }))
 
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{}, 2)

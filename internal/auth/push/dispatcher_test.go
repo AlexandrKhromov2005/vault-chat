@@ -171,6 +171,7 @@ func TestDispatcherStartsNoSendForDevicesRevokedMeanwhile(t *testing.T) {
 	h.d.Signal(eventbus.PushSignal{RoomID: room, UserIDs: []string{user}})
 	h.drain()
 	require.Equal(t, []Message{{"first-device", room}, {"kept-device", room}}, h.provider.messages())
+	require.Equal(t, Stats{Pending: 1, Sent: 2, Skipped: 1}, h.d.Stats())
 }
 
 // When the device cannot be checked, nothing is sent to it.
@@ -182,7 +183,7 @@ func TestDispatcherSendsNothingWhenTheDeviceCannotBeChecked(t *testing.T) {
 	h.d.Signal(eventbus.PushSignal{RoomID: room, UserIDs: []string{user}})
 	h.drain()
 	require.Empty(t, h.provider.messages())
-	require.NotZero(t, h.d.Stats().Failed)
+	require.Equal(t, Stats{Pending: 1, Failed: 1}, h.d.Stats(), "one failure stops the sends of the pair")
 }
 
 func TestDispatcherSurvivesTokenStoreOutage(t *testing.T) {

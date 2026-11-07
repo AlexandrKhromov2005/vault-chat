@@ -123,6 +123,9 @@ to the documented statuses, and the routes being authenticated.
 4. For each user it loads the tokens of active logins (same rule as access
    tokens) and sends `{"type":"sync","room_id":"…"}` as an FCM data-only
    message with high priority, collapse key `room:<id>` and a one-hour TTL.
+   The loaded list is only a set of candidates: right before each provider
+   request the dispatcher checks again that the token belongs to an active
+   login of that user, and skips it otherwise.
 5. Only FCM's verdict `UNREGISTERED` deletes the token that was sent. A bare
    `404` (a proxy or a wrong endpoint) and `SENDER_ID_MISMATCH` (credentials
    of another Firebase project) are configuration errors and keep the token.
@@ -156,6 +159,17 @@ to the documented statuses, and the routes being authenticated.
 - Auth → FCM: needs egress to `oauth2.googleapis.com` and
   `fcm.googleapis.com`; Google learns device tokens and room ids, never text.
 - Provider answers decide deletion of exactly the token that was sent.
+- Revocation → provider request: the authorization of each request is the
+  check made right before it starts (`IsPushTarget`, the access-token rule on
+  the current rows). A logout, revoke-all, refresh reuse, credential change
+  or a move of the token to another login that committed before that check
+  stops the request, even when the user's tokens were loaded earlier and
+  other devices of the user were being sent to meanwhile. A revocation that
+  commits after the check does not stop that request: it is already in
+  flight, like a push FCM has accepted, which cannot be recalled. The window
+  is the time between one indexed query and the start of the HTTP request;
+  the payload is a room id only, and the next signal for that device is
+  refused.
 
 ### Resource budgets
 
@@ -172,6 +186,8 @@ to the documented statuses, and the routes being authenticated.
 - Redis unavailable: Chat drops signals with its events (counted); Auth
   resubscribes every second. Signals published meanwhile are lost.
 - Auth database unavailable: the send for that pair fails and is counted.
+  If the check before a request fails, that request and the rest of the
+  pair are not sent (fail closed).
 - FCM unavailable or rejecting the service account: sends fail and are
   counted; tokens are not deleted.
 - Malformed signals and send failures: counted, each logged at most every
@@ -179,7 +195,9 @@ to the documented statuses, and the routes being authenticated.
 
 Metrics: `vault_push_pending`, `vault_push_sent_total`,
 `vault_push_failures_total`, `vault_push_dropped_total`,
-`vault_push_invalid_tokens_total`, `vault_push_malformed_signals_total`.
+`vault_push_invalid_tokens_total`, `vault_push_malformed_signals_total`,
+`vault_push_skipped_total` (sends not started because the device left an
+active login after the tokens were loaded).
 
 ### Acceptance tests
 
@@ -199,6 +217,10 @@ Metrics: `vault_push_pending`, `vault_push_sent_total`,
 6. End to end with PostgreSQL and Redis: Chat's publisher to Auth's
    subscriber and dispatcher; the sender and a revoked login get nothing, a
    rejected token is deleted, an active device is woken.
+7. With PostgreSQL and one worker: a logout, a revoke-all or a move of the
+   token to another user, committed while an earlier device of the user is
+   being sent to, stops the send to the affected device; a device that
+   cannot be checked gets nothing.
 
 ### Operator configuration
 
