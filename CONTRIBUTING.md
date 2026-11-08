@@ -45,6 +45,7 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 - Python 3.11+, OpenSSL, `age` and `age-keygen`, for mandatory deployment/crypto checks
 - Node.js 22.23.4, for web tests
 - Buf 1.47.2, for protobuf lint
+- Erlang/OTP 28.5.0.8 and rebar3 3.27.3, for the Calls checks (`calls/`)
 - `golangci-lint` v2.14.0 built with Go 1.27.3
 - `govulncheck` v1.9.0 built with Go 1.27.3 (pin the toolchain explicitly)
 - `git` with `user.name` and `user.email` configured
@@ -627,7 +628,7 @@ xmake ci              # run the complete local CI pipeline (see below);
 
 | Step | Command | Description |
 |------|---------|-------------|
-| Preflight | `xmake doctor` | Compatible pinned analyzers, Node, crypto and local Docker |
+| Preflight | `xmake doctor` | Compatible pinned analyzers, Node, Erlang/OTP, rebar3, crypto and local Docker |
 | Secrets | `xmake secret-scan` | Tracked Git blobs; findings never print secret values |
 | Verification gates | `xmake dev-test` | Regression tests of stale/failed evidence and isolation |
 | Protobuf | `xmake proto` | Buf lint |
@@ -635,6 +636,7 @@ xmake ci              # run the complete local CI pipeline (see below);
 | Vet | `xmake vet` | `go vet` static analysis |
 | Lint | `xmake lint` | `golangci-lint` full suite |
 | Build | `xmake build` | Every package compiles |
+| Calls | `xmake calls` | EUnit, xref and Dialyzer of the Calls control plane |
 | Tests | `xmake test-integration` | All tests with race detector, including PostgreSQL and S3 integration tests and the web client's tests |
 | Coverage | `xmake test-coverage` | Each `service` and `handler` package >= 70% |
 | Fuzz regression | `xmake fuzz -t 10s` | Every fuzz target for 10s |

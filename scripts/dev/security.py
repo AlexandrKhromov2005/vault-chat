@@ -8,6 +8,13 @@ import subprocess
 import sys
 
 GO_TOOLS = {'golangci-lint': 'v2.14.0', 'govulncheck': 'v1.9.0'}
+# Calls (calls/) is pinned by ADR 0005.
+OTP = '28.5.0.8'
+REBAR3 = '3.27.3'
+# Prints the full OTP version and the path of the emulator that erl starts.
+OTP_PROBE = ('{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])),'
+             ' io:format("~s ~s", [string:trim(V), filename:join([code:root_dir(), "erts-" ++ erlang:system_info(version), "bin", "beam.smp"])]),'
+             ' halt().')
 
 
 def output(args, cwd=None, env=None):
@@ -32,6 +39,17 @@ def version(value):
 def check_node(value):
     if version(value) != (22, 23, 4):
         raise ValueError('Node.js 22.23.4 required for verified CI (includes the current 22.x security fixes)')
+
+
+def check_otp(value):
+    if value != OTP:
+        raise ValueError(f'Erlang/OTP {OTP} required for Calls; found {value}')
+
+
+def check_rebar3(value):
+    match = re.match(r'rebar (\S+) on Erlang/OTP ', value)
+    if not match or match.group(1) != REBAR3:
+        raise ValueError(f'rebar3 {REBAR3} required for Calls')
 
 
 def check_go_tool(name, built, target):
@@ -88,8 +106,8 @@ def inventory(root):
     go = output(['go', 'version'])
     if version(go) != version(target):
         raise ValueError(f'Go {target} required; found {go}')
-    programs = ['go', 'node', 'python3', 'xmake', 'docker', 'buf', 'openssl', 'age', 'age-keygen', 'cc', *GO_TOOLS]
-    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v2', 'build_network': build_network()}
+    programs = ['go', 'node', 'python3', 'xmake', 'docker', 'buf', 'openssl', 'age', 'age-keygen', 'cc', 'erl', 'escript', 'rebar3', *GO_TOOLS]
+    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v3', 'build_network': build_network()}
     for program in programs:
         binary = shutil.which(program)
         if not binary:
@@ -101,6 +119,12 @@ def inventory(root):
         with binary.open('rb') as file:
             result[name + '_sha256'] = hashlib.file_digest(file, 'sha256').hexdigest()
     check_node(output(['node', '--version']))
+    otp, emulator = output(['erl', '-noshell', '-eval', OTP_PROBE]).split(' ', 1)
+    check_otp(otp)
+    with open(emulator, 'rb') as file:
+        result['otp'], result['beam_sha256'] = otp, hashlib.file_digest(file, 'sha256').hexdigest()
+    result['rebar3'] = output(['rebar3', 'version'])
+    check_rebar3(result['rebar3'])
     for name, expected in GO_TOOLS.items():
         build = output(['go', 'version', '-m', shutil.which(name)])
         check_go_tool(name, build.splitlines()[0].rsplit(': ', 1)[-1], target)
@@ -122,7 +146,7 @@ if __name__ == '__main__':
         os.environ['PATH'] = str(root / '.tools/bin') + os.pathsep + os.environ.get('PATH', '')
         if sys.argv[1:] == ['doctor']:
             inventory(root)
-            print('Security tools ready; Go analyzers pinned and compatible, crypto tools present.')
+            print('Security tools ready; Go analyzers and Erlang/OTP pinned and compatible, crypto tools present.')
         else:
             scan(root, '--staged' in sys.argv)
             print('Tracked-secret scan passed (heuristic; review is still required).')

@@ -2,6 +2,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import unittest
 import subprocess
 import tempfile
@@ -42,6 +43,22 @@ class Security(unittest.TestCase):
         security.check_go_tool('lint', 'go1.27.3', '1.27.3')
         with self.assertRaisesRegex(ValueError, 'built'):
             security.check_go_tool('lint', 'go1.25.9', '1.27.3')
+
+    def test_erlang_toolchain_is_pinned_exactly(self):
+        security.check_otp('28.5.0.8')
+        for other in ('28.5.0.7', '28.5', '28.5.0.80', '27.3.4.2', ''):
+            with self.assertRaisesRegex(ValueError, 'Erlang/OTP'):
+                security.check_otp(other)
+        security.check_rebar3('rebar 3.27.3 on Erlang/OTP 28 Erts 16.4.0.7')
+        for other in ('rebar 3.27.2 on Erlang/OTP 28 Erts 16.4.0.7', 'rebar 3.27.30 on Erlang/OTP 28 Erts 16.4.0.7',
+                      'rebar3 3.27.3', ''):
+            with self.assertRaisesRegex(ValueError, 'rebar3'):
+                security.check_rebar3(other)
+
+    def test_ci_runs_the_calls_checks(self):
+        # A commit that breaks Calls must not receive green evidence.
+        steps = re.search(r'local steps = \{(.*?)\n        \}', (ROOT / 'xmake.lua').read_text(), re.S).group(1)
+        self.assertIn('{"calls"}', steps)
 
     def test_staged_secret_cannot_hide_behind_a_clean_working_file(self):
         with tempfile.TemporaryDirectory() as directory:
