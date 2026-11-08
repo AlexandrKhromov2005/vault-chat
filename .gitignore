@@ -35,3 +35,7 @@ deployments/monitoring/runtime/
 
 # Pinned local developer tools
 .tools/
+
+# Calls (Erlang) build output
+calls/_build/
+calls/rebar3.crashdump

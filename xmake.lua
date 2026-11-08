@@ -52,6 +52,17 @@ check("dev-test", "Test the verification gates.", {{"python3", "-m", "unittest",
 check("proto", "Lint protobuf API definitions.", {{"buf", "lint", "api/proto"}})
 check("ci", "Verify a committed snapshot with disposable infrastructure.", {{"python3", "scripts/dev/verification.py", "run"}})
 
+-- `xmake calls` checks the Calls control plane (calls/, Erlang/OTP 28 and
+-- rebar3); it is not part of `xmake ci` until CI pins those tools.
+task("calls")
+    set_menu({usage = "xmake calls", description = "Test the Calls control plane: EUnit, xref and Dialyzer.", options = {}})
+    on_run(function ()
+        os.cd("calls")
+        for _, step in ipairs({"eunit", "xref", "dialyzer"}) do
+            os.execv("rebar3", {step})
+        end
+    end)
+
 task("setup")
     set_menu({usage = "xmake setup", description = "Download modules and install commit/push security hooks.", options = {}})
     on_run(function ()

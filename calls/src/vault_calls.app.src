@@ -1,0 +1,15 @@
+{application, vault_calls, [
+    {description, "Vault Chat call control plane"},
+    {vsn, "0.1.0"},
+    {registered, [vault_calls_sup, vault_calls_registry, vault_call_sup]},
+    {mod, {vault_calls_app, []}},
+    {applications, [kernel, stdlib]},
+    %% Timeouts of docs/adr/0005-call-control.md, in milliseconds.
+    {env, [
+        {ringing_timeout, 30000},
+        {connecting_timeout, 30000},
+        {heartbeat_timeout, 45000},
+        {max_call_duration, 7200000}
+    ]},
+    {licenses, ["Proprietary"]}
+]}.
