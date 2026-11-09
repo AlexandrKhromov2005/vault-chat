@@ -549,9 +549,9 @@ Future work, in order, after implementation is authorized:
 
 ### 12.2 Zig: isolated media processing
 
-**Candidate scope.** First evaluate PNG/JPEG previews. The current
-[Media service](docs/media/files.md) validates uploads and stores private objects;
-it does not resize images or decode audio/video. **Zig is the selected language
+**Implemented scope.** PNG/JPEG previews run through the opt-in isolated worker
+overlay. The [Media service](docs/media/files.md) validates uploads and stores private objects;
+it does not decode audio/video. **Zig is the selected language
 for the isolated preview decoder** (architecture owner, review of #122,
 2026-11-04); it is an architecture decision, not a measured result. A Go
 implementation of the same contract is the reference baseline. A 2× gain over
@@ -560,7 +560,7 @@ optimization, and Zig must pass the gates recorded in
 [ADR 0006](docs/adr/0006-image-previews.md). Compare with suitable existing
 image-processing tools too, using equivalent output and codec settings.
 
-In the proposed design, Go Media owns authorization, metadata, task scheduling
+In the implemented design, Go Media owns authorization, metadata, task scheduling
 and publication of results. The worker is a separate process/container receiving
 a bounded job and returning a bounded preview. It gets neither Auth secrets nor unrestricted
 storage access, arbitrary client paths or URLs. Media validates the result before
@@ -575,7 +575,7 @@ memory budgets. A timeout, crash or OOM must leave the original intact and the
 main upload/download service available. An unavailable preview uses a placeholder;
 retries are bounded and duplicate jobs must not publish conflicting results.
 
-Future work, in order, after implementation is authorized:
+Implementation and remaining rollout stages:
 
 - [x] **Z1 — design and baseline:** specify the preview contract, codec/library
   choices, job identity, access checks, budgets and cancellation/cleanup behavior.
@@ -585,7 +585,7 @@ Future work, in order, after implementation is authorized:
   synthetic image corpus, including IPC, decoding and encoding costs. Compare
   output quality, throughput, p95/p99, peak memory and maintenance/build cost;
   attribute any improvement from a different codec library separately.
-- [ ] **Z3 — acceptance:** cover corrupt/truncated files, excessive decoded size,
+- [x] **Z3 — acceptance:** cover corrupt/truncated files, excessive decoded size,
   invalid worker output, unauthorized result access, membership changes, duplicate
   jobs, a full queue, timeout/OOM/crash and S3/database outages. Commit disposable
   fixtures, behavioral regressions and fuzz targets; verify bounded recovery and
