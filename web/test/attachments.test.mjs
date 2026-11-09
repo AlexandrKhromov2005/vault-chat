@@ -266,3 +266,53 @@ test('an upload answered after another room was opened stays with its room', asy
   assert.deepEqual(texts($('pending-files')), []);
   assert.equal(submitButton($).disabled, false);
 });
+
+const imageMessage = { messages: [message(1, ['f-image'])], next_cursor: '' };
+const imageInfo = { ...info('f-image', 'photo.png'), content_type: 'image/png' };
+
+test('an image shows the authorized server preview once', () => downloads(async ({ blobs }) => {
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
+    .on('GET /api/v1/files/f-image', imageInfo)
+    .on('GET /api/v1/files/f-image/preview', () => new Blob(['jpeg']));
+  const { $, workspace } = await openTeam(api);
+  await settle();
+  const image = $('message-list').querySelector('img.attachment-preview');
+
+  assert.equal(image.hidden, false);
+  assert.equal(image.src, 'blob:1');
+  assert.equal($('message-list').querySelector('.preview-placeholder').hidden, true);
+  assert.equal(await blobs[0].text(), 'jpeg');
+
+  await workspace.refresh();
+  await settle();
+  assert.equal(api.calls.filter((call) => call.key === 'GET /api/v1/files/f-image/preview').length, 1);
+}));
+
+test('a pending preview keeps a placeholder and can be retried', async () => {
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
+    .on('GET /api/v1/files/f-image', imageInfo)
+    .on('GET /api/v1/files/f-image/preview', () => {
+      throw new ApiError(404, 'not_found', 'preview not ready');
+    });
+  const { $ } = await openTeam(api);
+  await settle();
+
+  assert.equal($('message-list').querySelector('.preview-placeholder').textContent, 'Превью пока недоступно');
+  assert.equal($('message-list').querySelector('img.attachment-preview').hidden, true);
+});
+
+test('a preview answered after sign-out creates no object URL', () => downloads(async ({ blobs }) => {
+  const late = deferred();
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
+    .on('GET /api/v1/files/f-image', imageInfo)
+    .on('GET /api/v1/files/f-image/preview', () => late.promise);
+  const { workspace } = await openTeam(api);
+  workspace.reset();
+  late.resolve(new Blob(['jpeg']));
+  await settle();
+
+  assert.deepEqual(blobs, []);
+}));

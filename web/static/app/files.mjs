@@ -36,6 +36,10 @@ export function downloadFile(api, fileId) {
   return api.blob(`/api/v1/files/${encodeURIComponent(fileId)}/content`);
 }
 
+export function downloadPreview(api, fileId) {
+  return api.blob(`/api/v1/files/${encodeURIComponent(fileId)}/preview`);
+}
+
 // FileInfos caches file metadata, which never changes. Every request checks
 // current membership, so a file of a room the user is not a member of
 // resolves as {file_id, unavailable: true}. Membership can come back with a
@@ -116,5 +120,38 @@ export class Attachments {
   // that were sent, so files attached while the send was under way stay.
   remove(...fileIds) {
     this.#items = this.#items.filter((item) => !fileIds.includes(item.file_id));
+  }
+}
+
+// PreviewCache keeps at most 50 server-rendered JPEG blobs per signed-in scope.
+// A 404 is not cached: the asynchronous render may become ready later.
+export class PreviewCache {
+  #api;
+  #known = new Map();
+  #loading = new Map();
+
+  constructor(api) {
+    this.#api = api;
+  }
+
+  get(fileId) {
+    if (this.#known.has(fileId)) return Promise.resolve(this.#known.get(fileId));
+    if (!this.#loading.has(fileId)) {
+      const loading = this.#load(fileId).finally(() => this.#loading.delete(fileId));
+      this.#loading.set(fileId, loading);
+    }
+    return this.#loading.get(fileId);
+  }
+
+  async #load(fileId) {
+    try {
+      const blob = await downloadPreview(this.#api, fileId);
+      if (this.#known.size >= 50) this.#known.delete(this.#known.keys().next().value);
+      this.#known.set(fileId, blob);
+      return blob;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
   }
 }

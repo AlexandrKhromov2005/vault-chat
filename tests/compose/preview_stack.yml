@@ -1,0 +1,39 @@
+services:
+  auth:
+    volumes:
+      - type: bind
+        source: ${TEST_JWT_DIR}/auth_jwt_private.pem
+        target: /run/secrets/auth_jwt_private.pem
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${TEST_JWT_DIR}/auth_jwt_public.pem
+        target: /run/secrets/auth_jwt_public.pem
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${TEST_RPC_DIR}/auth
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  chat:
+    volumes:
+      - type: bind
+        source: ${TEST_RPC_DIR}/chat
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  media:
+    volumes:
+      - type: bind
+        source: ${TEST_RPC_DIR}/media
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+  gateway:
+    volumes:
+      - type: bind
+        source: ${TEST_RPC_DIR}/gateway
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}

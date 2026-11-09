@@ -19,6 +19,10 @@ actor IDs nor knowledge of a file UUID grant access.
    `GET /api/v1/files/{file_id}/content`. Every new request checks current
    membership. Removing a member blocks subsequent downloads; an already started
    download is not revoked midway.
+4. For PNG/JPEG, read the asynchronous `p320` render at
+   `GET /api/v1/files/{file_id}/preview`. It returns a private baseline JPEG,
+   at most 320 pixels per side and 256 KiB, or `404` while no render is ready.
+   The same live membership check applies; the original remains unchanged.
 
 For example, after obtaining a token and room ID:
 
@@ -84,7 +88,8 @@ Image publication also atomically enqueues a `p320` preview job. With
 mTLS preview worker endpoints to enable two bounded scheduler slots, retries,
 missing-job sweeps and immutable-object garbage collection. Rendering failures
 never remove or replace the original file. Queue size and oldest-job age are
-exported by Media metrics. The HTTP preview endpoint is introduced separately.
+exported by Media metrics. The HTTP endpoint and web placeholder are available
+when the preview overlay is enabled; without a ready render the endpoint is 404.
 
 ## Development stack
 
@@ -111,6 +116,7 @@ VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT=127.0.0.1:9000 \
   go test -race ./internal/media/storage
 VAULT_CHAT_COMPOSE_GATEWAY_URL=http://127.0.0.1:8080 \
   go test -tags compose -count=1 ./tests/compose
+PYTHONDONTWRITEBYTECODE=1 python3 tests/compose/preview_stack_acceptance.py
 ```
 
 The S3 integration fixture uses `minioadmin` development credentials. The Compose
