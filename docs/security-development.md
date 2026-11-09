@@ -55,7 +55,11 @@ listeners, so it is opt-in, not an automatic retry. Its value is recorded in the
 tool inventory; use the same setting for publish/push/merge evidence checks.
 Individual fixture commands have a 15-minute deadline and core checks 30 minutes.
 The validated Unix Docker endpoint is recorded in the tool inventory and pinned
-for build, run and cleanup. `DOCKER_CONFIG` is preserved as an absolute path to
+for build, run and cleanup. If `vuln.go.dev` is unreachable, set `GOVULNDB` to an
+absolute `file://` path containing a fresh snapshot of the official
+`github.com/golang/vulndb` `data/osv` directory. Arbitrary mirrors are rejected;
+the URL and content fingerprint are recorded in the receipt and the isolated
+checks receive exactly that snapshot. `DOCKER_CONFIG` is preserved as an absolute path to
 the existing client configuration; its contents are not copied. Image builds
 explicitly use the default builder on that daemon, regardless of the stored
 Buildx selection. Switching the current Docker context cannot retarget fixtures.

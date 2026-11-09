@@ -64,3 +64,19 @@ class Security(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class VulnerabilityDatabase(unittest.TestCase):
+    def test_local_snapshot_is_fingerprinted_and_remote_override_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = Path(directory) / 'GO-2026-0001.json'
+            entry.write_text('{"id":"GO-2026-0001"}')
+            url = Path(directory).as_uri()
+            with patch.dict(os.environ, {'GOVULNDB': url}):
+                first = security.vulndb()
+                self.assertEqual(first['url'], url)
+                entry.write_text('{"id":"GO-2026-0001","changed":true}')
+                self.assertNotEqual(first['sha256'], security.vulndb()['sha256'])
+            with patch.dict(os.environ, {'GOVULNDB': 'https://mirror.invalid'}):
+                with self.assertRaisesRegex(ValueError, 'official|file'):
+                    security.vulndb()
