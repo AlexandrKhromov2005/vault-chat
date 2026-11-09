@@ -1,0 +1,44 @@
+# Opt-in isolated preview workers. No Media or public endpoint is changed.
+x-preview-worker: &preview-worker
+  image: vault-chat/preview:${VAULT_IMAGE_TAG:-local}
+  build:
+    context: ..
+    dockerfile: Dockerfile.preview
+    network: ${PREVIEW_BUILD_NETWORK:-default}
+  restart: unless-stopped
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  networks: [preview]
+  mem_limit: 192m
+  memswap_limit: 192m
+  cpus: 1.0
+  pids_limit: 16
+  environment:
+    PREVIEW_DECODER_PATH: /usr/local/bin/preview-decoder
+    PREVIEW_GRPC_ADDR: ":50054"
+    PREVIEW_METRICS_ADDR: ""
+    RPC_TLS_MODE: mtls
+    RPC_TLS_SERVICE: preview
+    RPC_TLS_DIR: /run/secrets/rpc
+  volumes:
+    - type: bind
+      source: ${PREVIEW_RPC_CERTS_DIR:-../secrets/rpc/preview}
+      target: /run/secrets/rpc
+      read_only: true
+      bind: {create_host_path: false}
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/service", "-health", "127.0.0.1:50054"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
+  stop_grace_period: 15s
+
+services:
+  media-preview-1: *preview-worker
+  media-preview-2: *preview-worker
+
+networks:
+  preview: {internal: true}

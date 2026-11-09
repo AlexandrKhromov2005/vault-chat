@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 
-SERVICES = ('auth', 'chat', 'media', 'gateway')
+SERVICES = ('auth', 'chat', 'media', 'gateway', 'preview')
 
 
 def openssl(*args):
@@ -29,19 +29,26 @@ def issue(directory, rotate=False):
     existing = runtime.exists()
     if existing and not ca.exists():
         raise ValueError('RPC leaves exist without their CA; refusing to replace it')
+    to_generate = SERVICES
     if existing and not rotate:
+        missing = []
         for service in SERVICES:
             leaf = runtime / service
-            for name in ['ca.pem', 'tls.crt', 'tls.key']:
-                if not (leaf / name).is_file():
-                    raise ValueError('Incomplete RPC certificate set; use --rotate after inspection')
+            present = [(leaf / name).is_file() for name in ['ca.pem', 'tls.crt', 'tls.key']]
+            if any(present) and not all(present):
+                raise ValueError('Incomplete RPC certificate set; use --rotate after inspection')
+            if not all(present):
+                missing.append(service)
+                continue
             if (leaf / 'ca.pem').read_bytes() != (ca / 'ca.pem').read_bytes():
                 raise ValueError('RPC trust bundle differs from deployment CA')
             openssl('verify', '-CAfile', ca / 'ca.pem', '-verify_hostname', service + '.vault.internal', leaf / 'tls.crt')
             if openssl('pkey', '-in', leaf / 'tls.key', '-pubout') != openssl('x509', '-in', leaf / 'tls.crt', '-pubkey', '-noout'):
                 raise ValueError('RPC certificate/key mismatch')
-        print('Existing RPC CA and certificates preserved')
-        return
+        if not missing:
+            print('Existing RPC CA and certificates preserved')
+            return
+        to_generate = missing
     with tempfile.TemporaryDirectory(prefix='.rpc-', dir=root) as temporary:
         staging = Path(temporary)
         if not ca.exists():
@@ -54,7 +61,7 @@ def issue(directory, rotate=False):
             candidate.rename(ca)
         generated = staging / 'rpc'
         generated.mkdir()
-        for service in SERVICES:
+        for service in to_generate:
             leaf = generated / service
             leaf.mkdir()
             config = leaf / 'extensions.cnf'
@@ -69,7 +76,7 @@ def issue(directory, rotate=False):
             (leaf / 'request.csr').unlink()
             shutil.copyfile(ca / 'ca.pem', leaf / 'ca.pem')
         runtime.mkdir(exist_ok=True)
-        for service in SERVICES:
+        for service in to_generate:
             destination = runtime / service
             destination.mkdir(exist_ok=True)
             for name in ['ca.pem', 'tls.key', 'tls.crt']:
