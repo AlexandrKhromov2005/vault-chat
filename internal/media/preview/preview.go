@@ -70,16 +70,9 @@ func DecodeRGB(data []byte) (int, int, []byte, error) {
 }
 
 func decodeImage(data []byte) (*image.RGBA, error) {
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || (format != "png" && format != "jpeg") || cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, ErrInvalid
-	}
-	need, ok := decodedBytes(data, format, cfg.Width, cfg.Height)
-	if !ok {
-		return nil, ErrInvalid
-	}
-	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels || need > MaxDecoded {
-		return nil, ErrSkipped
+	_, format, err := inspect(data)
+	if err != nil {
+		return nil, err
 	}
 	var img image.Image
 	if format == "png" {
