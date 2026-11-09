@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   Attachments,
   FileInfos,
+  PreviewCache,
   MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
   downloadFile,
@@ -142,4 +143,30 @@ test('removing the sent files keeps the ones attached meanwhile', () => {
   attachments.remove(...sent);
 
   assert.deepEqual(attachments.items.map((item) => item.file_id), ['f-3']);
+});
+
+test('PreviewCache shares loads, retries pending previews and caches success', async () => {
+  let ready = false;
+  const api = fakeApi(() => {
+    if (!ready) throw new ApiError(404, 'not_found', 'preview not ready');
+    return new Blob(['jpeg']);
+  });
+  const previews = new PreviewCache(api);
+
+  assert.deepEqual(await Promise.all([previews.get('f-1'), previews.get('f-1')]), [null, null]);
+  assert.equal(api.calls.length, 1);
+  ready = true;
+  assert.equal(await (await previews.get('f-1')).text(), 'jpeg');
+  await previews.get('f-1');
+  assert.equal(api.calls.length, 2);
+  assert.equal(api.calls[0].path, '/api/v1/files/f-1/preview');
+});
+
+test('PreviewCache bounds retained blobs', async () => {
+  const api = fakeApi((_, path) => new Blob([path]));
+  const previews = new PreviewCache(api);
+  for (let i = 0; i < 50; i++) await previews.get(`f-${i}`);
+  await previews.get('f-50');
+  await previews.get('f-0');
+  assert.equal(api.calls.length, 52);
 });

@@ -47,4 +47,6 @@ message GetFileResponse {
 }
 message DownloadRequest {
   string file_id = 1;
+  // False returns the immutable original; true returns its ready p320 JPEG.
+  bool preview = 2;
 }

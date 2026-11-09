@@ -459,3 +459,24 @@ Race/unit и PostgreSQL integration проверяют конкурентный 
 retry/outage, terminal states, атомарную постановку, sweeper, сохранение v1 при
 сбое v2 и отказ удалить текущий объект. Публичный endpoint и веб-клиент остаются
 следующим блоком Z3c2; production этот PR не развёртывает.
+
+### Приватная выдача и веб-клиент (Z3c2), 2026-11-09
+
+`media.v1.DownloadRequest.preview` выбирает текущий immutable render вместо
+оригинала, сохраняя обратную совместимость RPC. `Service.DownloadPreview` сначала
+повторно проверяет membership, затем читает pointer и не больше 256 КиБ JPEG.
+Gateway предоставляет `GET /api/v1/files/{file_id}/preview` с `nosniff` и
+`private, no-store`; отсутствие preview и потеря доступа не различаются (`404`).
+Публичных или presigned URL нет.
+
+Веб-клиент загружает JPEG через bearer token как Blob и не вставляет оригинал в
+DOM. Placeholder остаётся при `404`, а следующий render может повторить запрос.
+Scope хранит не больше 50 Blob, общие in-flight запросы дедуплицируются. Object
+URL отзываются при повторном render и очистке комнаты; ответ прежнего render или
+завершённой пользовательской scope не меняет страницу. Оригинал скачивается
+отдельной кнопкой.
+
+`tests/compose/preview_stack_acceptance.py` поднимает одноразовый полный стек с
+synthetic JWT/mTLS ключами и двумя настоящими workers. Сценарий проверяет реальный
+JPEG 640×320 → 320×160, bytes оригинала, security headers, outsider/removed member
+и live web tests. Unit-проверки RPC/Gateway и 206 web tests проходят отдельно.

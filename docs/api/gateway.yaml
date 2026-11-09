@@ -979,6 +979,30 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/files/{file_id}/preview:
+    parameters:
+      - {name: file_id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Download the ready p320 JPEG as a current room member
+      tags: [media]
+      security: [{bearerAuth: []}]
+      description: |
+        Returns 404 while the asynchronous preview is pending, failed, skipped
+        or after membership is revoked. The original remains downloadable.
+        Responses have nosniff and private, no-store headers; no object URL is exposed.
+      responses:
+        "200":
+          description: Server-rendered baseline JPEG, at most 320 pixels per side and 256 KiB.
+          content:
+            image/jpeg:
+              schema: {type: string, format: binary}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+
 components:
   securitySchemes:
     bearerAuth:

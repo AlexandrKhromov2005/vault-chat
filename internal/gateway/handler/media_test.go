@@ -55,11 +55,17 @@ func (s *mediaServer) Upload(stream grpc.ClientStreamingServer[mediav1.UploadReq
 	s.uploads <- data
 	return stream.SendAndClose(&mediav1.UploadResponse{File: &mediav1.File{Id: "file", RoomId: first.RoomId, Filename: first.Filename, Size: int64(len(data)), CreatedAt: timestamppb.Now()}})
 }
-func (s *mediaServer) Download(_ *mediav1.DownloadRequest, stream grpc.ServerStreamingServer[mediav1.DownloadResponse]) error {
-	if err := stream.Send(&mediav1.DownloadResponse{File: &mediav1.File{Id: "file", Filename: "a.txt", ContentType: "text/plain", Size: 5}}); err != nil {
+func (s *mediaServer) Download(request *mediav1.DownloadRequest, stream grpc.ServerStreamingServer[mediav1.DownloadResponse]) error {
+	file := &mediav1.File{Id: "file", Filename: "a.txt", ContentType: "text/plain", Size: 5}
+	data := []byte("hello")
+	if request.GetPreview() {
+		file = &mediav1.File{Id: "file", Filename: "preview.jpg", ContentType: "image/jpeg", Size: 4}
+		data = []byte("jpeg")
+	}
+	if err := stream.Send(&mediav1.DownloadResponse{File: file}); err != nil {
 		return err
 	}
-	return stream.Send(&mediav1.DownloadResponse{Data: []byte("hello")})
+	return stream.Send(&mediav1.DownloadResponse{Data: data})
 }
 func TestMediaHTTP(t *testing.T) {
 	backend := &mediaServer{uploads: make(chan []byte, 5)}
@@ -116,6 +122,11 @@ func TestMediaHTTP(t *testing.T) {
 	h.Download(w, r)
 	if w.Code != 200 || w.Body.String() != "hello" || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Disposition") != "attachment; filename=a.txt" {
 		t.Fatalf("download: %+v %s", w.Result().Header, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	h.Preview(w, r)
+	if w.Code != 200 || w.Body.String() != "jpeg" || w.Header().Get("Content-Type") != "image/jpeg" || w.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("preview: %+v %s", w.Result().Header, w.Body.String())
 	}
 }
 
