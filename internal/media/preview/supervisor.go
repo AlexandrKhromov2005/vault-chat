@@ -20,6 +20,8 @@ const (
 var (
 	// ErrWorker marks a decoder crash, timeout or invalid process response.
 	ErrWorker = errors.New("preview: decoder worker failed")
+	// ErrUnavailable marks capacity or connectivity failures before a result exists.
+	ErrUnavailable = errors.New("preview: decoder worker unavailable")
 )
 
 // Result is the bounded RGB response of a decoder worker.

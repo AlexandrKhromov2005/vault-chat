@@ -5,6 +5,7 @@ CREATE TABLE preview_jobs (
  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','running','ready','failed','skipped')),
  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
  infrastructure_retries INTEGER NOT NULL DEFAULT 0 CHECK (infrastructure_retries >= 0),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  lease_owner TEXT,
  lease_until TIMESTAMPTZ,
@@ -17,7 +18,7 @@ CREATE INDEX preview_jobs_claim_idx ON preview_jobs (next_attempt_at, lease_unti
 CREATE TABLE preview_objects (
  key TEXT PRIMARY KEY,
  file_id UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
- state TEXT NOT NULL DEFAULT 'uploading' CHECK (state IN ('uploading','ready','replaced')),
+ state TEXT NOT NULL DEFAULT 'uploading' CHECK (state IN ('uploading','ready','replaced','collecting')),
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  replaced_at TIMESTAMPTZ
 );

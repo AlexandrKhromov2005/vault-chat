@@ -123,8 +123,8 @@ func TestRPCClientMapsDependencyOutage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, err = NewRPCClient(conn).Decode(ctx, encodePNG(t, solid(2, 1, color.NRGBA{A: 255})))
-	if !errors.Is(err, ErrWorker) {
-		t.Fatalf("outage: %v, want ErrWorker", err)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("outage: %v, want ErrUnavailable", err)
 	}
 }
 

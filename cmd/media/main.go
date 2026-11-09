@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -21,6 +22,7 @@ import (
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/handler"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/preview"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/storage"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
@@ -83,7 +85,35 @@ func run() error {
 		return err
 	}
 	defer chat.Close()
-	svc := service.New(&storage.Postgres{Pool: pool}, blobs, handler.Gate{Client: chatv1.NewChatServiceClient(chat)})
+	repo := &storage.Postgres{Pool: pool}
+	svc := service.New(repo, blobs, handler.Gate{Client: chatv1.NewChatServiceClient(chat)})
+	var previews *service.PreviewScheduler
+	if len(cfg.PreviewGRPCAddrs) != 0 {
+		workers := make([]preview.Decoder, 0, len(cfg.PreviewGRPCAddrs))
+		for _, address := range cfg.PreviewGRPCAddrs {
+			conn, err := rpcTLS.Dial(address, "preview")
+			if err != nil {
+				return fmt.Errorf("dial preview worker: %w", err)
+			}
+			defer conn.Close()
+			workers = append(workers, preview.NewRPCClient(conn))
+		}
+		previews = service.NewPreviewScheduler(repo, blobs, workers, uuid.NewString())
+		metrics.Gauge("vault_media_preview_queue_jobs", "Pending and running preview jobs.", func() float64 {
+			count, _, err := previewStats(ctx, repo)
+			if err != nil {
+				return 0
+			}
+			return float64(count)
+		})
+		metrics.Gauge("vault_media_preview_queue_oldest_seconds", "Age of the oldest unfinished preview job.", func() float64 {
+			_, age, err := previewStats(ctx, repo)
+			if err != nil {
+				return 0
+			}
+			return age
+		})
+	}
 	listener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		return err
@@ -96,18 +126,40 @@ func run() error {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
+		maintainTicker := time.NewTicker(5 * time.Minute)
+		defer maintainTicker.Stop()
+		var previewTicker *time.Ticker
+		var previewTicks <-chan time.Time
+		if previews != nil {
+			previewTicker = time.NewTicker(500 * time.Millisecond)
+			previewTicks = previewTicker.C
+			defer previewTicker.Stop()
+		}
+		maintain := func() {
+			sweepCtx, done := context.WithTimeout(ctx, 30*time.Second)
+			defer done()
+			if err := svc.Sweep(sweepCtx); err != nil {
+				logger.Error("media cleanup failed", "error", err)
+			}
+			if previews != nil {
+				if err := previews.Maintain(sweepCtx); err != nil {
+					logger.Error("preview maintenance failed", "error", err)
+				}
+			}
+		}
+		maintain()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				sweepCtx, done := context.WithTimeout(ctx, 30*time.Second)
-				err := svc.Sweep(sweepCtx)
+			case <-maintainTicker.C:
+				maintain()
+			case <-previewTicks:
+				runCtx, done := context.WithTimeout(ctx, 30*time.Second)
+				err := previews.RunOnce(runCtx)
 				done()
-				if err != nil {
-					logger.Error("media cleanup failed", "error", err)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					logger.Error("preview scheduling failed", "error", err)
 				}
 			}
 		}
@@ -115,7 +167,7 @@ func run() error {
 	defer func() { stop(); <-workerDone }()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
-	logger.Info("media listening", "addr", cfg.GRPCAddr)
+	logger.Info("media listening", "addr", cfg.GRPCAddr, "preview_workers", len(cfg.PreviewGRPCAddrs))
 	select {
 	case err := <-serveErr:
 		if !errors.Is(err, grpc.ErrServerStopped) {
@@ -134,4 +186,10 @@ func run() error {
 		<-done
 	}
 	return nil
+}
+
+func previewStats(ctx context.Context, repo *storage.Postgres) (int, float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return repo.PreviewQueueStats(ctx)
 }

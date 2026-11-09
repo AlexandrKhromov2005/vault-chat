@@ -79,6 +79,13 @@ most 100 pending uploads older than an hour. Completed
 files are retained, including files not yet attached to a message. Quotas,
 retention, deletion and malware scanning remain future work.
 
+Image publication also atomically enqueues a `p320` preview job. With
+`MEDIA_PREVIEW_GRPC_ADDRS` unset, rendering stays disabled. Set it to at most two
+mTLS preview worker endpoints to enable two bounded scheduler slots, retries,
+missing-job sweeps and immutable-object garbage collection. Rendering failures
+never remove or replace the original file. Queue size and oldest-job age are
+exported by Media metrics. The HTTP preview endpoint is introduced separately.
+
 ## Development stack
 
 Compose starts four applications, three independent PostgreSQL instances, Redis

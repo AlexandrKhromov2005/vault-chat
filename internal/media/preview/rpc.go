@@ -101,6 +101,8 @@ func (c *RPCClient) Decode(ctx context.Context, data []byte) (Result, error) {
 			return Result{}, fmt.Errorf("%w: %w", ErrSkipped, err)
 		case codes.Canceled:
 			return Result{}, err
+		case codes.Unavailable:
+			return Result{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		default:
 			return Result{}, fmt.Errorf("%w: %w", ErrWorker, err)
 		}
