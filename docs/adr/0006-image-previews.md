@@ -307,6 +307,38 @@ wall-clock лимиты и смерть внучатого процесса. `Fu
 `xmake fuzz`. Это ещё не сетевой сервис и не песочница: gRPC/mTLS, контейнерные
 seccomp/no-new-privileges/read-only FS, очередь и интеграция Media остаются Z3b+.
 
+### RPC и изолированные контейнеры (Z3b), 2026-11-09
+
+`preview.v1.PreviewService.Decode` принимает только байты изображения и возвращает
+`width`, `height`, `rgb`. Wire-лимиты: 10 МиБ + 64 КиБ на запрос и 300 КиБ + 4 КиБ
+на ответ. `RPCHandler` допускает одну активную задачу; одновременная получает
+`Unavailable`. `InvalidArgument` означает повреждённый вход, `OutOfRange` — бюджет,
+`Internal` — сбой decoder. `RPCClient` повторно проверяет размеры и длину ответа.
+
+Сервис `cmd/preview` использует идентичность `preview` и mTLS из ADR 0001. ACL
+разрешает `Decode` только `media`; `gateway` и другие идентичности получают
+`PermissionDenied`, стандартный health доступен известным сервисам. Собственный
+`-health` проверяет mTLS health, `-check` выполняет реальный decode с идентичностью
+Media; `-check -image` используется для тяжёлой acceptance-фикстуры.
+
+`Dockerfile.preview` скачивает Zig через `fetch_zig.sh` с перебором community
+mirrors, проверкой ZSF minisign и `file:` в trusted comment, затем сверяет SHA-256;
+`stb_image` package hash, digest Debian и версия util-linux с `prlimit` также закреплены.
+Decoder собирается как static `x86_64-linux-musl`, поэтому не зависит от libc runtime. `deployments/docker-compose.preview.yml` запускает
+два opt-in worker на отдельной internal network, без портов и egress: UID 65532,
+read-only root FS, все capabilities сняты, `no-new-privileges`, Docker seccomp по
+умолчанию, 192 МиБ без swap, 1 CPU и 16 PIDs. В каждый контейнер монтируются только
+leaf `preview` и CA, но не CA signing key или секреты других сервисов. Если Docker
+bridge не может скачать pinned toolchain, допускается явный
+`PREVIEW_BUILD_NETWORK=host`: он меняет только доверенную сборку, не runtime network.
+
+`tests/compose/preview_acceptance.py` создаёт одноразовые synthetic CA/certificates,
+проверяет реальные decode с `media`, запрет `gateway`, isolation inspect, затем
+повторяет 24-Мп JPEG при 64 МиБ на первом worker и 192 МиБ на втором. Проверено:
+OOM ограничен decoder, supervisor остаётся жив, второй worker успешно декодирует,
+первый после этого обрабатывает маленький вход. Media и production этот overlay не
+подключает; очередь, публикация превью и rollout остаются следующими этапами.
+
 ### Замер `Make` в процессе (Go), 2026-11-05
 
 Это **только замер `Make` внутри процесса**: декодирование, уменьшение и
