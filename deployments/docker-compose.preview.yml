@@ -1,4 +1,4 @@
-# Opt-in isolated preview workers. No Media or public endpoint is changed.
+# Opt-in isolated preview workers and the Media queue that calls them.
 x-preview-worker: &preview-worker
   image: vault-chat/preview:${VAULT_IMAGE_TAG:-local}
   build:
@@ -37,6 +37,11 @@ x-preview-worker: &preview-worker
   stop_grace_period: 15s
 
 services:
+  media:
+    image: vault-chat/media:${VAULT_IMAGE_TAG:-local}
+    networks: [preview]
+    environment:
+      MEDIA_PREVIEW_GRPC_ADDRS: passthrough:///media-preview-1:50054,passthrough:///media-preview-2:50054
   media-preview-1: *preview-worker
   media-preview-2: *preview-worker
 

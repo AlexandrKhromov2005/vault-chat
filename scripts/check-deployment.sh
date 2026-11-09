@@ -97,9 +97,13 @@ print("Push overlay: key and egress for Auth only, read-only mount, no new ports
 VAULT_IMAGE_TAG=validation docker compose -f deployments/docker-compose.preview.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin); services=c["services"]
-assert set(services)=={"media-preview-1","media-preview-2"}
+assert set(services)=={"media","media-preview-1","media-preview-2"}
 assert c["networks"]["preview"]["internal"] is True
+assert set(services["media"]["networks"])=={"preview"}
+assert services["media"]["environment"]["MEDIA_PREVIEW_GRPC_ADDRS"]=="passthrough:///media-preview-1:50054,passthrough:///media-preview-2:50054"
 for name,s in services.items():
+    if name=="media":
+        continue
     assert set(s["networks"])=={"preview"} and not s.get("ports")
     assert s["user"]=="65532:65532" and s["read_only"] is True
     assert s["cap_drop"]==["ALL"] and "no-new-privileges:true" in s["security_opt"]

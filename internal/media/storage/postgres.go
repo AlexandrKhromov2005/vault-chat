@@ -24,16 +24,27 @@ func (p *Postgres) Create(ctx context.Context, f *domain.File) error {
 	return nil
 }
 
-// Ready atomically makes a completed upload visible.
+// Ready atomically makes a completed upload visible and enqueues image previews.
 func (p *Postgres) Ready(ctx context.Context, id string) error {
-	tag, err := p.Pool.Exec(ctx, `UPDATE files SET ready=true WHERE id=$1::uuid AND NOT ready`, id)
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin file publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var contentType string
+	err = tx.QueryRow(ctx, `UPDATE files SET ready=true WHERE id=$1::uuid AND NOT ready RETURNING content_type`, id).Scan(&contentType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("publish file: %w", err)
 	}
-	if tag.RowsAffected() != 1 {
-		return domain.ErrNotFound
+	if contentType == "image/png" || contentType == "image/jpeg" {
+		if _, err := tx.Exec(ctx, `INSERT INTO preview_jobs(file_id,preset,decoder_version) VALUES($1::uuid,'p320','zig-1') ON CONFLICT DO NOTHING`, id); err != nil {
+			return fmt.Errorf("enqueue preview: %w", err)
+		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // Get reads only completed uploads.
