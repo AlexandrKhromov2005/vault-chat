@@ -577,11 +577,11 @@ retries are bounded and duplicate jobs must not publish conflicting results.
 
 Future work, in order, after implementation is authorized:
 
-- [ ] **Z1 — design and baseline:** specify the preview contract, codec/library
+- [x] **Z1 — design and baseline:** specify the preview contract, codec/library
   choices, job identity, access checks, budgets and cancellation/cleanup behavior.
   Measure the Go baseline first; define the benefit required for adoption before
   comparing results. A learning experiment is not a production-performance claim.
-- [ ] **Z2 — isolated prototype:** benchmark the worker on the same hardware and
+- [x] **Z2 — isolated prototype:** benchmark the worker on the same hardware and
   synthetic image corpus, including IPC, decoding and encoding costs. Compare
   output quality, throughput, p95/p99, peak memory and maintenance/build cost;
   attribute any improvement from a different codec library separately.
