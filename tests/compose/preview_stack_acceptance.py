@@ -82,6 +82,11 @@ def main():
                  'TestCompose_(PrivateAttachments|AuthorizedImagePreview)$', './tests/compose'], timeout=240)
             run(['node', '--test', 'web/test/gateway.test.mjs'], timeout=300)
             print('full stack preview, original download, membership revocation and live web: OK')
+        except BaseException:
+            status = run(compose + ['ps'], check=False)
+            logs = run(compose + ['logs', '--tail', '100', 'auth', 'chat', 'media', 'gateway'], check=False)
+            print(status.stdout, logs.stdout, logs.stderr, file=sys.stderr)
+            raise
         finally:
             run(compose + ['down', '-v', '--rmi', 'local', '--remove-orphans'], check=False, timeout=180)
 
