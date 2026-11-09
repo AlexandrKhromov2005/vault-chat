@@ -32,15 +32,21 @@ def main():
         temporary = Path(directory)
         jwt = temporary / 'jwt'
         subprocess.run([str(ROOT / 'scripts/gen-jwt-keys.sh'), str(jwt)], check=True, capture_output=True)
-        certs.issue(temporary / 'rpc')
+        secrets = temporary / 'secrets'
+        certs.issue(secrets)
+        rpc = secrets / 'rpc'
+        for identity in ('auth', 'chat', 'media', 'gateway', 'preview'):
+            for name in ('ca.pem', 'tls.crt', 'tls.key'):
+                if not (rpc / identity / name).is_file():
+                    raise RuntimeError(f'missing synthetic RPC mount: {rpc / identity / name}')
         gateway_port = port()
         auth_port = port()
         env = dict(
             os.environ,
             COMPOSE_PROJECT_NAME=project,
             TEST_JWT_DIR=str(jwt),
-            TEST_RPC_DIR=str(temporary / 'rpc'),
-            PREVIEW_RPC_CERTS_DIR=str(temporary / 'rpc/preview'),
+            TEST_RPC_DIR=str(rpc),
+            PREVIEW_RPC_CERTS_DIR=str(rpc / 'preview'),
             GATEWAY_HOST_PORT=gateway_port,
             POSTGRES_HOST_PORT=auth_port,
             CHAT_POSTGRES_HOST_PORT=port(),
