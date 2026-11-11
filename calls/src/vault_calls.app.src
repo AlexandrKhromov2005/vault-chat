@@ -1,9 +1,9 @@
 {application, vault_calls, [
     {description, "Vault Chat call control plane"},
     {vsn, "0.1.0"},
-    {registered, [vault_calls_sup, vault_calls_registry, vault_calls_store, vault_call_sup, vault_calls_recovery]},
+    {registered, [vault_calls_sup, vault_calls_registry, vault_calls_store, vault_call_sup, vault_calls_recovery, vault_calls_http]},
     {mod, {vault_calls_app, []}},
-    {applications, [kernel, stdlib, ssl, epgsql]},
+    {applications, [kernel, stdlib, inets, ssl, epgsql]},
     %% Timeouts of docs/adr/0005-call-control.md, in milliseconds.
     {env, [
         {ringing_timeout, 30000},

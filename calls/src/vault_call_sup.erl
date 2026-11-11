@@ -12,16 +12,24 @@ a normally ended call remains ended.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
--spec start_call(vault_call:start_args()) -> supervisor:startchild_ret() | vault_calls_store:create_reply().
+-spec start_call(vault_call:start_args()) -> supervisor:startchild_ret() | {ok, replay} | vault_calls_store:create_reply().
 start_call(#{id := Id} = Args) ->
     case vault_calls_store:create_call(vault_calls_store, Args) of
-        {ok, _} -> start_existing(#{id => Id});
+        {ok, _} ->
+            case start_existing(#{id => Id}) of
+                {error, not_found} -> {ok, replay};
+                {error, {not_found, _}} -> {ok, replay};
+                Result -> Result
+            end;
         {error, _} = Error -> Error
     end.
 
 -spec start_existing(#{id := binary()}) -> supervisor:startchild_ret().
 start_existing(Args) ->
-    supervisor:start_child(?MODULE, [Args]).
+    case supervisor:start_child(?MODULE, [Args]) of
+        {error, {already_started, Pid}} -> {ok, Pid};
+        Result -> Result
+    end.
 
 -spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
