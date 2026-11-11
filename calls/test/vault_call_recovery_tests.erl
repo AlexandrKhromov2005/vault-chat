@@ -14,6 +14,7 @@ recovery_test_() ->
         fun client_commands_replay_their_original_response/1,
         fun signals_are_ordered_and_idempotent/1,
         fun simultaneous_signals_have_unique_server_sequences/1,
+        fun signal_rate_is_bounded_per_device/1,
         fun the_two_hundredth_signal_is_the_last_one/1,
         fun invalid_signal_payloads_leave_no_rows/1,
         fun expired_journals_are_purged/1
@@ -135,6 +136,20 @@ simultaneous_signals_have_unique_server_sequences(_) ->
     [?_assertEqual(lists:seq(2, 33), ServerSequences),
      ?_assertEqual({error, candidate_limit}, Limit)].
 
+signal_rate_is_bounded_per_device(#{connection := Connection}) ->
+    _ = new_call(<<"signal-rate">>),
+    {ok, connecting} = vault_call:command(<<"signal-rate">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, connecting, 1} = vault_call:signal(
+        <<"signal-rate">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    Results = signals_concurrently_at(<<"signal-rate">>, lists:seq(2, 20)),
+    Limited = vault_call:signal(<<"signal-rate">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice-21">>, 21),
+    {ok, _} = epgsql:squery(Connection, "UPDATE call_signals SET created_at = clock_timestamp() - interval '2 seconds'"),
+    AfterWindow = vault_call:signal(
+        <<"signal-rate">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice-21">>, 21),
+    [?_assertEqual(19, length([ok || {ok, _, _} <- Results])),
+     ?_assertEqual({error, signal_rate_limited}, Limited),
+     ?_assertEqual({ok, connecting, 21}, AfterWindow)].
+
 the_two_hundredth_signal_is_the_last_one(#{connection := Connection}) ->
     _ = new_call(<<"signal-capacity">>),
     {ok, connecting} = vault_call:command(<<"signal-capacity">>, {accept, <<"bob">>, <<"bob-laptop">>}),
@@ -176,10 +191,13 @@ expired_journals_are_purged(#{connection := Connection}) ->
      ?_assertEqual(0, binary_to_integer(Signals))].
 
 signals_concurrently(SenderSequences) ->
+    signals_concurrently_at(<<"concurrent-signals">>, SenderSequences).
+
+signals_concurrently_at(Id, SenderSequences) ->
     Self = self(),
     Tagged = [{make_ref(), SenderSeq} || SenderSeq <- SenderSequences],
     [spawn(fun() -> Self ! {Ref, vault_call:signal(
-        <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, candidate,
+        Id, <<"alice">>, <<"alice-phone">>, candidate,
         <<"ice-", (integer_to_binary(SenderSeq))/binary>>, SenderSeq)} end)
      || {Ref, SenderSeq} <- Tagged],
     [receive {Ref, Result} -> Result after 3000 -> error(signal_timeout) end || {Ref, _} <- Tagged].
