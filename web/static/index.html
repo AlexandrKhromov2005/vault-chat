@@ -18,6 +18,22 @@
     </div>
   </header>
 
+  <section id="call" class="call-panel" aria-labelledby="call-title" hidden>
+    <div class="call-info">
+      <h2 id="call-title"></h2>
+      <p id="call-status" role="status"></p>
+      <p id="call-error" class="error" role="alert"></p>
+    </div>
+    <div class="call-actions">
+      <button id="call-accept" type="button" class="primary" hidden>Принять</button>
+      <button id="call-reject" type="button" hidden>Отклонить</button>
+      <button id="call-cancel" type="button" hidden>Отменить вызов</button>
+      <button id="call-end" type="button" class="danger" hidden>Завершить</button>
+      <button id="call-dismiss" type="button" hidden>Закрыть</button>
+    </div>
+    <audio id="call-audio" autoplay hidden></audio>
+  </section>
+
   <section id="email-action" class="security-panel stack" aria-labelledby="email-action-title" hidden>
     <h2 id="email-action-title"></h2>
     <p id="email-action-description" class="hint"></p>
@@ -156,7 +172,10 @@
         <header class="room-header">
           <h2 id="room-title"></h2>
           <span id="room-kind" class="hint"></span>
-          <button id="toggle-members" type="button" aria-pressed="false">Участники</button>
+          <div class="room-actions">
+            <button id="call-start" type="button" title="Аудиозвонок собеседнику" hidden>Позвонить</button>
+            <button id="toggle-members" type="button" aria-pressed="false">Участники</button>
+          </div>
         </header>
         <div id="messages" class="messages">
           <button id="load-older" type="button" hidden>Показать более ранние</button>

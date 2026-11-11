@@ -363,6 +363,16 @@ label {
   margin-left: auto;
 }
 
+.room-header .room-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.room-header .room-actions button {
+  margin-left: 0;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -522,4 +532,42 @@ button.small {
 .attachment-preview[hidden],
 .preview-placeholder[hidden] {
   display: none;
+}
+
+.call-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.call-panel[data-state="ringing"][data-role="callee"] {
+  background: #eaf2ff;
+}
+
+.call-panel h2 {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.call-panel p {
+  margin: 0;
+}
+
+.call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button.danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: var(--accent-text);
 }
