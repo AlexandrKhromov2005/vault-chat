@@ -55,10 +55,10 @@ func TestWebApp_ContentSecurityPolicy(t *testing.T) {
 	rec := serveWeb(newWebApp(), http.MethodGet, "/")
 
 	// Only the client's own scripts, styles and API; no inline code, no
-	// framing, no plugins. Untrusted message text therefore cannot run even
-	// if it ever reached the DOM as markup.
+	// framing, no plugins. Blob URLs are limited to images so authorized
+	// server-rendered previews can be displayed without making them public.
 	require.Equal(t,
-		"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "+
+		"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; "+
 			"connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
 		rec.Header().Get("Content-Security-Policy"))
 }
