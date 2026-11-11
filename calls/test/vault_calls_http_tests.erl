@@ -7,6 +7,7 @@ http_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         fun full_call_lifecycle/1,
         fun invalid_requests_are_bounded/1,
+        fun a_freed_connection_slot_accepts_again/1,
         fun dependencies_fail_closed/1
     ]}.
 
@@ -91,6 +92,31 @@ invalid_requests_are_bounded(_) ->
      ?_assertEqual(400, status(InvalidJson)),
      ?_assertEqual(413, status(Oversized)),
      ?_assertEqual(404, status(Missing))].
+
+a_freed_connection_slot_accepts_again(_) ->
+    Sockets = [open_connection() || _ <- lists:seq(1, 200)],
+    ok = wait_for_connections(200, 100),
+    Extra = open_connection(),
+    ok = gen_tcp:send(Extra, <<"GET /api/v1/calls/missing HTTP/1.1\r\nhost: localhost\r\n\r\n">>),
+    ok = gen_tcp:close(hd(Sockets)),
+    Response = gen_tcp:recv(Extra, 0, 1000),
+    [gen_tcp:close(Socket) || Socket <- [Extra | Sockets]],
+    [?_assertMatch({ok, <<"HTTP/1.1 401", _/binary>>}, Response)].
+
+open_connection() ->
+    {ok, Socket} = gen_tcp:connect("127.0.0.1", vault_calls_http:port(),
+                                  [binary, {active, false}], 1000),
+    Socket.
+
+wait_for_connections(Count, Attempts) ->
+    State = sys:get_state(vault_calls_http),
+    case {map_size(maps:get(connections, State)), Attempts} of
+        {Count, _} -> ok;
+        {_, 0} -> error({connection_count, State});
+        _ ->
+            timer:sleep(10),
+            wait_for_connections(Count, Attempts - 1)
+    end.
 
 dependencies_fail_closed(_) ->
     ok = application:set_env(vault_calls, auth_available, false),

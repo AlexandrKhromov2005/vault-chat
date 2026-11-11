@@ -13,7 +13,9 @@ recovery_test_() ->
         fun an_expired_call_ends_during_startup/1,
         fun a_database_outage_blocks_the_transition/1,
         fun client_commands_replay_their_original_response/1,
+        fun replayed_heartbeat_does_not_refresh_the_deadline/1,
         fun signals_are_ordered_and_idempotent/1,
+        fun replayed_offer_does_not_restore_pending_state/1,
         fun simultaneous_signals_have_unique_server_sequences/1,
         fun signal_rate_is_bounded_per_device/1,
         fun the_two_hundredth_signal_is_the_last_one/1,
@@ -138,6 +140,31 @@ signals_are_ordered_and_idempotent(_) ->
      ?_assertEqual({ok, connecting, 2}, Second),
      ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After),
      ?_assertMatch({ok, [#{signal_seq := 2, kind := candidate}]}, AfterOne)].
+
+replayed_heartbeat_does_not_refresh_the_deadline(_) ->
+    Id = <<"heartbeat-replay">>,
+    _ = new_call(Id),
+    ok = connect(Id),
+    Meta = command_meta(<<"heartbeat-replay-command">>, <<"alice-phone">>),
+    {ok, active} = vault_call:command(Id, {heartbeat, <<"alice">>, <<"alice-phone">>}, Meta),
+    {active, Before} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    timer:sleep(5),
+    Replay = vault_call:command(Id, {heartbeat, <<"alice">>, <<"alice-phone">>}, Meta),
+    {active, After} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    [?_assertEqual({ok, active}, Replay),
+     ?_assertEqual(Before, After)].
+
+replayed_offer_does_not_restore_pending_state(_) ->
+    Id = <<"offer-replay">>,
+    _ = new_call(Id),
+    {ok, connecting} = vault_call:command(Id, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, connecting, 1} = vault_call:signal(Id, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    {ok, connecting, 2} = vault_call:signal(Id, <<"bob">>, <<"bob-laptop">>, answer, <<"sdp-answer">>, 1),
+    {connecting, Before} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    Replay = vault_call:signal(Id, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    {connecting, After} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    [?_assertEqual({ok, connecting, 1}, Replay),
+     ?_assertEqual(Before, After)].
 
 simultaneous_signals_have_unique_server_sequences(#{connection := Connection}) ->
     _ = new_call(<<"concurrent-signals">>),
