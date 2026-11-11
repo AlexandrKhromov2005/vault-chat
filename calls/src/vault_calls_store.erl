@@ -5,7 +5,7 @@
 -include_lib("epgsql/include/epgsql.hrl").
 
 -export([start_link/0, start_link/1, stop/1, connect/1, migrate/1, create_call/2]).
--export([get_call/2, list_active/1, persist/4]).
+-export([get_call/2, list_active/1, persist/4, replay/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -type create_args() :: #{id := binary(), room_id := binary(), caller := binary(),
@@ -49,6 +49,10 @@ list_active(Store) ->
 persist(Store, Id, Expected, Next) ->
     request(Store, {persist, Id, Expected, Next}, 2500).
 
+-spec replay(gen_server:server_ref(), command_meta()) -> persist_reply().
+replay(Store, Meta) ->
+    request(Store, {replay, Meta}, 2500).
+
 -spec connect(binary()) -> {ok, epgsql:connection()} | {error, badarg | unavailable}.
 connect(Url) ->
     case connection_options(Url) of
@@ -83,6 +87,8 @@ handle_call(list_active, _From, Connection) ->
     {reply, safe(fun() -> active(Connection) end), Connection};
 handle_call({persist, Id, Expected, Next}, _From, Connection) ->
     {reply, safe(fun() -> save(Connection, Id, Expected, Next) end), Connection};
+handle_call({replay, Meta}, _From, Connection) ->
+    {reply, safe(fun() -> replay_saved(Connection, Meta) end), Connection};
 handle_call(_Request, _From, Connection) ->
     {reply, {error, badarg}, Connection}.
 
@@ -97,6 +103,22 @@ handle_info(_Message, Connection) ->
 -spec terminate(term(), epgsql:connection()) -> ok.
 terminate(_Reason, Connection) ->
     close(Connection).
+
+-spec replay_saved(epgsql:connection(), term()) -> persist_reply().
+replay_saved(Connection, #{device := Device, command_id := CommandId, fingerprint := Fingerprint})
+  when is_binary(Device), byte_size(Device) > 0, byte_size(Device) =< 256,
+       is_binary(CommandId), byte_size(CommandId) > 0, byte_size(CommandId) =< 128,
+       is_binary(Fingerprint), byte_size(Fingerprint) =:= 32 ->
+    case query(Connection, "SELECT fingerprint, response FROM call_commands WHERE device = $1 AND command_id = $2",
+               [Device, CommandId]) of
+        {ok, _, [{Fingerprint, Response}]} ->
+            #{<<"state">> := State} = json:decode(Response),
+            {ok, state_from_binary(State)};
+        {ok, _, [{_, _}]} -> {error, command_id_reused};
+        {ok, _, []} -> {error, not_found}
+    end;
+replay_saved(_Connection, _Meta) ->
+    {error, badarg}.
 
 -spec create(epgsql:connection(), term()) -> create_reply().
 create(Connection, #{id := Id, room_id := Room, caller := Caller, caller_device := Device,

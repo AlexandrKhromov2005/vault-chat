@@ -38,6 +38,8 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   matrix and owns the timers: ringing 30 s, connecting 30 s, a heartbeat from
   each device within 45 s, at most 2 h active. Accepted commands commit before
   the in-memory state changes; timers restart from their persisted deadlines.
+  A repeated command id returns its original response, including after `ended`;
+  a different request fingerprint receives `command_id_reused`.
 - `vault_call_sup`: the calls' supervisor; an abnormal exit restores only that
   call from its row. Application startup recovers every unfinished call.
 - `vault_calls_registry`: names calls by id, monitored, in a protected ETS table.
@@ -46,5 +48,5 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   fingerprint replay checks. Ending releases participants and capacity in the
   same transaction. Database statements and locks have bounded timeouts.
 
-Not yet: the signal journal and client-facing command replay API, the HTTP
-prototype interface, Auth and Chat adapters and measurements (E2.3).
+Not yet: the signal journal, the HTTP prototype interface, Auth and Chat
+adapters and measurements (E2.3).
