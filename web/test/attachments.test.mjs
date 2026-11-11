@@ -270,7 +270,7 @@ test('an upload answered after another room was opened stays with its room', asy
 const imageMessage = { messages: [message(1, ['f-image'])], next_cursor: '' };
 const imageInfo = { ...info('f-image', 'photo.png'), content_type: 'image/png' };
 
-test('an image shows the authorized server preview only after it loads', () => downloads(async ({ blobs }) => {
+test('an image keeps its placeholder until the authorized server preview loads', () => downloads(async ({ blobs }) => {
   const api = scripted()
     .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
     .on('GET /api/v1/files/f-image', imageInfo)
@@ -281,7 +281,8 @@ test('an image shows the authorized server preview only after it loads', () => d
   const placeholder = $('message-list').querySelector('.preview-placeholder');
 
   assert.equal(image.src, 'blob:1');
-  assert.equal(image.hidden, true);
+  assert.equal(image.hidden, false);
+  assert.equal(image.getAttribute('loading'), 'lazy');
   assert.equal(placeholder.hidden, false);
   image.dispatchEvent(new Event('load'));
   assert.equal(image.hidden, false);
