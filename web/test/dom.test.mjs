@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 
 import { debounce, el, formatTime } from '../static/app/dom.mjs';
+import * as dom from '../static/app/dom.mjs';
 import { loadPage, parseHTML } from './minidom.mjs';
 
 loadPage();
@@ -56,6 +57,10 @@ test('debounce runs once with the last arguments', async () => {
 
 test('formatTime shows day, month and time', () => {
   assert.match(formatTime('2026-10-18T12:05:00Z'), /\d{2}:05/);
+});
+
+test('formatClock keeps message timestamps on one line', () => {
+  assert.match(dom.formatClock?.('2026-10-18T12:05:00Z') ?? 'missing', /^\d{2}:05$/);
 });
 
 test('every element the client looks up exists in index.html', () => {
