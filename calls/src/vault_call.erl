@@ -121,14 +121,9 @@ handle_event({call, From}, {payload_signal, User, Device, Kind, Payload, SenderS
         _ -> {keep_state_and_data, [{reply, From, {error, conflict}}]}
     end;
 handle_event({call, From}, {Command, Meta}, State, Data) when tuple_size(Command) >= 3 ->
-    case vault_calls_store:replay(vault_calls_store, Meta) of
-        {ok, ReplayState} -> {keep_state_and_data, [{reply, From, {ok, ReplayState}}]};
-        {error, not_found} ->
-            case role(element(2, Command), element(3, Command), Data) of
-                stranger -> {keep_state_and_data, [{reply, From, {error, not_found}}]};
-                Role -> run(Command, Role, State, Data, From, Meta)
-            end;
-        {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
+    case role(element(2, Command), element(3, Command), Data) of
+        stranger -> {keep_state_and_data, [{reply, From, {error, not_found}}]};
+        Role -> run(Command, Role, State, Data, From, Meta)
     end;
 handle_event({call, From}, _Malformed, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, badarg}}]};
@@ -138,13 +133,17 @@ handle_event(info, _Message, _State, _Data) ->
 -spec run_payload_signal(signal_kind(), binary(), pos_integer(), device(), role(), state_name(), data(), gen_statem:from()) ->
     gen_statem:event_handler_result(state_name()).
 run_payload_signal(Kind, Payload, SenderSeq, Device, Role, State, Data, From) ->
+    case signal(State, Role, Kind, Data) of
+        {ok, Next} -> commit_signal(Kind, Payload, SenderSeq, Device, State, Next, Data, From);
+        conflict -> replay_signal_or_conflict(Kind, Payload, SenderSeq, Device, Data, From)
+    end.
+
+-spec replay_signal_or_conflict(signal_kind(), binary(), pos_integer(), device(), data(), gen_statem:from()) ->
+    gen_statem:event_handler_result(state_name()).
+replay_signal_or_conflict(Kind, Payload, SenderSeq, Device, Data, From) ->
     case vault_calls_store:replay_signal(vault_calls_store, maps:get(id, Data), Device, SenderSeq, Kind, Payload) of
         {ok, State, SignalSeq} -> {keep_state_and_data, [{reply, From, {ok, State, SignalSeq}}]};
-        {error, not_found} ->
-            case signal(State, Role, Kind, Data) of
-                {ok, Next} -> commit_signal(Kind, Payload, SenderSeq, Device, State, Next, Data, From);
-                conflict -> {keep_state_and_data, [{reply, From, {error, conflict}}]}
-            end;
+        {error, not_found} -> {keep_state_and_data, [{reply, From, {error, conflict}}]};
         {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
     end.
 
@@ -156,6 +155,8 @@ commit_signal(Kind, Payload, SenderSeq, Device, State, NextData, Data, From) ->
     case vault_calls_store:append_signal(vault_calls_store, maps:get(id, Data), Expected,
                                          NextData#{signal => Signal}) of
         {ok, State, SignalSeq} -> {keep_state, NextData, [{reply, From, {ok, State, SignalSeq}}]};
+        {replay, SavedState, SignalSeq} ->
+            {keep_state_and_data, [{reply, From, {ok, SavedState, SignalSeq}}]};
         {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
     end.
 
@@ -194,10 +195,18 @@ run({heartbeat, _, _}, Role, active, Data, From, Meta) when Role =:= caller; Rol
 run({signal, _, _, Kind}, Role, State, Data, From, Meta) when Role =:= caller; Role =:= callee ->
     case signal(State, Role, Kind, Data) of
         {ok, Next} -> commit(State, Next, From, Meta, State);
-        conflict -> {keep_state_and_data, [{reply, From, {error, conflict}}]}
+        conflict -> replay_or_conflict(Meta, From)
     end;
-run(_Command, _Role, _State, _Data, From, _Meta) ->
-    {keep_state_and_data, [{reply, From, {error, conflict}}]}.
+run(_Command, _Role, _State, _Data, From, Meta) ->
+    replay_or_conflict(Meta, From).
+
+-spec replay_or_conflict(map(), gen_statem:from()) -> gen_statem:event_handler_result(state_name()).
+replay_or_conflict(Meta, From) ->
+    case vault_calls_store:replay(vault_calls_store, Meta) of
+        {ok, State} -> {keep_state_and_data, [{reply, From, {ok, State}}]};
+        {error, not_found} -> {keep_state_and_data, [{reply, From, {error, conflict}}]};
+        {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
+    end.
 
 -spec signal(state_name(), role(), signal_kind(), data()) -> {ok, data()} | conflict.
 signal(connecting, caller, offer, #{pending_offer := none} = Data) ->
@@ -224,6 +233,7 @@ commit(NextState, NextData0, From, Meta, State) ->
     Expected = {State, maps:get(state_version, NextData0)},
     case vault_calls_store:persist(vault_calls_store, maps:get(id, NextData0), Expected,
                                    NextData#{command => Meta}) of
+        {replay, SavedState} -> {keep_state_and_data, [{reply, From, {ok, SavedState}}]};
         {ok, ended} -> {stop_and_reply, normal, [{reply, From, {ok, ended}}]};
         {ok, NextState} when NextState =:= State ->
             {keep_state, NextData, [{reply, From, {ok, NextState}} | timer_actions(Meta)]};

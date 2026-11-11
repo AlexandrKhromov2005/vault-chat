@@ -38,8 +38,9 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   matrix and owns the timers: ringing 30 s, connecting 30 s, a heartbeat from
   each device within 45 s, at most 2 h active. Accepted commands commit before
   the in-memory state changes; timers restart from their persisted deadlines.
-  A repeated command id returns its original response, including after `ended`;
-  a different request fingerprint receives `command_id_reused`.
+  A repeated command id returns its original response, including after `ended`,
+  without changing process state or timers; a different request fingerprint
+  receives `command_id_reused`.
 - `vault_call_sup`: the calls' supervisor; an abnormal exit restores only that
   call from its row. Application startup recovers every unfinished call.
 - `vault_calls_registry`: names calls by id, monitored, in a protected ETS table.
@@ -57,4 +58,23 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   `vault_calls_chat_stub` provide synthetic sessions and direct rooms with
   configurable delays and outage switches; they are not production adapters.
 
-Not yet: measurements (E2.3) and production adapters.
+## Load acceptance
+
+`VAULT_CALLS_LOADGEN_COUNT` defaults to 200. With the disposable database URL
+above, `scripts/dev/calls-load` starts the HTTP prototype and runs full call
+lifecycles in batches of eight concurrent clients. It measures command p95/p99,
+throughput, scheduler utilization and RSS sampled every 20 ms. One process is
+killed and recovered, then the whole VM is killed with `kill -9` and a second VM
+verifies all 200 calls. Latency or RSS-growth failure is reported only after the
+restart check. The metrics JSON includes `baseline_rss_bytes`, `rss_delta_bytes`
+and `gate_status`; a high baseline is reported as `baseline_rss_exceeded` rather
+than a passed absolute RSS gate. `xmake ci` runs this scenario after the Calls
+checks.
+
+The 2026-11-11 local run completed 200 calls and 1600 commands with zero errors,
+177.9 commands/s, p95 81.46 ms and p99 121.64 ms; crash and restart recovery both
+passed. The host BEAM baseline was 2.06 GiB and the sampled peak delta was about
+24.5 MiB, so the 256-MiB absolute RSS gate remains explicitly unmet on this host
+(`baseline_rss_exceeded`). This is prototype evidence, not production acceptance.
+
+Not yet: production adapters.

@@ -14,7 +14,7 @@ start_link() ->
 
 -spec port() -> non_neg_integer().
 port() ->
-    gen_server:call(?MODULE, port, 5000).
+    persistent_term:get({?MODULE, port}).
 
 -spec init([]) -> {ok, state()} | ignore | {error, term()}.
 init([]) ->
@@ -52,6 +52,10 @@ handle_info(accept, #{listener := Listener, connections := Connections} = State)
         {error, closed} -> {stop, normal, State}
     end;
 handle_info({'DOWN', Ref, process, _Pid, _Reason}, #{connections := Connections} = State) ->
+    case map_size(Connections) >= 200 of
+        true -> self() ! accept;
+        false -> ok
+    end,
     {noreply, State#{connections := maps:remove(Ref, Connections)}};
 handle_info(_Message, State) ->
     {noreply, State}.
@@ -69,6 +73,7 @@ start_server() ->
     case gen_tcp:listen(0, Options) of
         {ok, Listener} ->
             {ok, Port} = inet:port(Listener),
+            persistent_term:put({?MODULE, port}, Port),
             self() ! accept,
             {ok, #{listener => Listener, port => Port, connections => #{}}};
         {error, _} = Error -> Error

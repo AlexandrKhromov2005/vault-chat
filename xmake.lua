@@ -63,6 +63,8 @@ task("calls")
         end
     end)
 
+check("calls-load", "Measure 200 Calls and verify crash and kill -9 recovery.", {{"sh", "scripts/dev/calls-load"}})
+
 task("setup")
     set_menu({usage = "xmake setup", description = "Download modules and install commit/push security hooks.", options = {}})
     on_run(function ()
@@ -124,7 +126,7 @@ task("ci-checks")
         import("core.project.task")
         local steps = {
             {"doctor"}, {"secret-scan"}, {"dev-test"}, {"proto"},
-            {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"calls"}, {"test-integration"},
+            {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"calls"}, {"calls-load"}, {"test-integration"},
             {"test-coverage"}, {"deployment"}, {"monitoring"}, {"fuzz", {time = "10s"}}, {"vuln"},
         }
         local timings = {}

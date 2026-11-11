@@ -8,11 +8,14 @@ recovery_test_() ->
         fun creation_is_persistent/1,
         fun ending_releases_participants_and_capacity/1,
         fun a_crashed_process_recovers_active_state/1,
+        fun a_replayed_creation_does_not_reset_a_crashed_call/1,
         fun an_application_restart_recovers_active_state/1,
         fun an_expired_call_ends_during_startup/1,
         fun a_database_outage_blocks_the_transition/1,
         fun client_commands_replay_their_original_response/1,
+        fun replayed_heartbeat_does_not_refresh_the_deadline/1,
         fun signals_are_ordered_and_idempotent/1,
+        fun replayed_offer_does_not_restore_pending_state/1,
         fun simultaneous_signals_have_unique_server_sequences/1,
         fun signal_rate_is_bounded_per_device/1,
         fun the_two_hundredth_signal_is_the_last_one/1,
@@ -33,7 +36,7 @@ setup() ->
         "TRUNCATE call_commands, call_signals, call_participants, calls; UPDATE call_capacity SET active_calls = 0"),
     ok = vault_calls_store:stop(Store),
     [ok = application:set_env(vault_calls, Key, Value) || {Key, Value} <-
-        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 300},
+        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 2000},
          {heartbeat_timeout, 150}, {max_call_duration, 5000}]],
     {ok, _} = application:ensure_all_started(vault_calls),
     #{connection => Connection}.
@@ -62,6 +65,20 @@ a_crashed_process_recovers_active_state(_) ->
     receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
     timer:sleep(50),
     [?_assertEqual({ok, active}, vault_call:state(<<"crash">>))].
+
+a_replayed_creation_does_not_reset_a_crashed_call(_) ->
+    Id = <<"replay-crash">>,
+    Args = #{id => Id, room_id => <<"room-", Id/binary>>, caller => <<"alice">>,
+             caller_device => <<"alice-phone">>, callee => <<"bob">>,
+             command_id => <<"create-", Id/binary>>, fingerprint => crypto:hash(sha256, Id)},
+    {ok, Pid} = vault_call_sup:start_call(Args),
+    ok = connect(Id),
+    {ok, Pid} = vault_call_sup:start_call(Args),
+    Ref = monitor(process, Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
+    timer:sleep(50),
+    [?_assertEqual({ok, active}, vault_call:state(Id))].
 
 an_application_restart_recovers_active_state(_) ->
     _ = new_call(<<"restart">>),
@@ -123,6 +140,31 @@ signals_are_ordered_and_idempotent(_) ->
      ?_assertEqual({ok, connecting, 2}, Second),
      ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After),
      ?_assertMatch({ok, [#{signal_seq := 2, kind := candidate}]}, AfterOne)].
+
+replayed_heartbeat_does_not_refresh_the_deadline(_) ->
+    Id = <<"heartbeat-replay">>,
+    _ = new_call(Id),
+    ok = connect(Id),
+    Meta = command_meta(<<"heartbeat-replay-command">>, <<"alice-phone">>),
+    {ok, active} = vault_call:command(Id, {heartbeat, <<"alice">>, <<"alice-phone">>}, Meta),
+    {active, Before} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    timer:sleep(5),
+    Replay = vault_call:command(Id, {heartbeat, <<"alice">>, <<"alice-phone">>}, Meta),
+    {active, After} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    [?_assertEqual({ok, active}, Replay),
+     ?_assertEqual(Before, After)].
+
+replayed_offer_does_not_restore_pending_state(_) ->
+    Id = <<"offer-replay">>,
+    _ = new_call(Id),
+    {ok, connecting} = vault_call:command(Id, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, connecting, 1} = vault_call:signal(Id, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    {ok, connecting, 2} = vault_call:signal(Id, <<"bob">>, <<"bob-laptop">>, answer, <<"sdp-answer">>, 1),
+    {connecting, Before} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    Replay = vault_call:signal(Id, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    {connecting, After} = sys:get_state(vault_calls_registry:whereis_name(Id)),
+    [?_assertEqual({ok, connecting, 1}, Replay),
+     ?_assertEqual(Before, After)].
 
 simultaneous_signals_have_unique_server_sequences(#{connection := Connection}) ->
     _ = new_call(<<"concurrent-signals">>),

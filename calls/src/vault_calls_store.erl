@@ -14,7 +14,8 @@
                          fingerprint := binary()}.
 -type command_meta() :: #{device := binary(), command_id := binary(), fingerprint := binary()}.
 -type create_reply() :: {ok, map()} | {error, busy | capacity | command_id_reused | badarg | unavailable}.
--type persist_reply() :: {ok, atom()} | {error, not_found | conflict | command_id_reused | badarg | unavailable}.
+-type persist_reply() :: {ok, atom()} | {replay, atom()} |
+                       {error, not_found | conflict | command_id_reused | badarg | unavailable}.
 -export_type([create_args/0, create_reply/0, command_meta/0]).
 
 -spec start_link() -> gen_server:start_ret().
@@ -60,7 +61,8 @@ signals_after(Store, Id, After) ->
     request(Store, {signals_after, Id, After}, 2500).
 
 -spec append_signal(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} |
+    {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
 append_signal(Store, Id, Expected, Next) ->
     request(Store, {append_signal, Id, Expected, Next}, 2500).
 
@@ -73,7 +75,8 @@ replay_signal(Store, Id, Device, SenderSeq, Kind, Payload) ->
 persist(Store, Id, Expected, Next) ->
     request(Store, {persist, Id, Expected, Next}, 2500).
 
--spec replay(gen_server:server_ref(), command_meta()) -> persist_reply().
+-spec replay(gen_server:server_ref(), command_meta()) ->
+    {ok, atom()} | {error, not_found | command_id_reused | badarg | unavailable}.
 replay(Store, Meta) ->
     request(Store, {replay, Meta}, 2500).
 
@@ -136,7 +139,8 @@ handle_info(_Message, Connection) ->
 terminate(_Reason, Connection) ->
     close(Connection).
 
--spec replay_saved(epgsql:connection(), term()) -> persist_reply().
+-spec replay_saved(epgsql:connection(), term()) ->
+    {ok, atom()} | {error, not_found | command_id_reused | badarg | unavailable}.
 replay_saved(Connection, #{device := Device, command_id := CommandId, fingerprint := Fingerprint})
   when is_binary(Device), byte_size(Device) > 0, byte_size(Device) =< 256,
        is_binary(CommandId), byte_size(CommandId) > 0, byte_size(CommandId) =< 128,
@@ -241,18 +245,20 @@ save(Connection, Id, {ExpectedState, ExpectedVersion},
 save(_Connection, _Id, _Expected, _Next) ->
     {error, badarg}.
 
--spec save_transaction(epgsql:connection(), tuple()) -> {ok, atom()} | {error, not_found | conflict}.
+-spec save_transaction(epgsql:connection(), tuple()) -> {ok, atom()} | {replay, atom()} | {error, not_found | conflict}.
 save_transaction(Connection, {Id, ExpectedState, ExpectedVersion, Device, CommandId, Fingerprint, Next}) ->
-    _ = query(Connection, "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [Device, CommandId]),
-    case query(Connection, "SELECT fingerprint, response FROM call_commands WHERE device = $1 AND command_id = $2",
-               [Device, CommandId]) of
-        {ok, _, [{Fingerprint, Response}]} ->
+    [_, Replay, Call] = batch(Connection, [
+        {"SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [Device, CommandId]},
+        {"SELECT fingerprint, response FROM call_commands WHERE device = $1 AND command_id = $2", [Device, CommandId]},
+        {"SELECT state, state_version FROM calls WHERE id = $1 FOR UPDATE", [Id]}]),
+    case Replay of
+        {ok, [{Fingerprint, Response}]} ->
             #{<<"state">> := State} = json:decode(Response),
-            {ok, state_from_binary(State)};
-        {ok, _, [{_, _}]} -> abort(command_id_reused);
-        {ok, _, []} ->
-            case query(Connection, "SELECT state, state_version FROM calls WHERE id = $1 FOR UPDATE", [Id]) of
-                {ok, _, [{State, Version}]} ->
+            {replay, state_from_binary(State)};
+        {ok, [{_, _}]} -> abort(command_id_reused);
+        {ok, []} ->
+            case Call of
+                {ok, [{State, Version}]} ->
                     case {state_from_binary(State), Version} of
                         {ExpectedState, ExpectedVersion} ->
                             persist_row(Connection, Id, ExpectedState, ExpectedVersion,
@@ -286,7 +292,8 @@ saved_signal(_Connection, _Id, _Device, _SenderSeq, _Kind, _Payload) ->
     {error, badarg}.
 
 -spec append(epgsql:connection(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} |
+    {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg}.
 append(Connection, Id, {ExpectedState, ExpectedVersion}, Next)
   when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128,
        is_atom(ExpectedState), is_integer(ExpectedVersion), ExpectedVersion >= 0, is_map(Next) ->
@@ -305,7 +312,7 @@ append(_Connection, _Id, _Expected, _Next) ->
     {error, badarg}.
 
 -spec append_transaction(epgsql:connection(), tuple()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} | {error, not_found | conflict | seq_reused}.
 append_transaction(Connection, {Id, ExpectedState, ExpectedVersion,
                                 #{signal := #{sender_device := Device, sender_seq := SenderSeq,
                                               kind := Kind, payload := Payload}} = Next}) ->
@@ -318,7 +325,7 @@ append_transaction(Connection, {Id, ExpectedState, ExpectedVersion,
                 "WHERE call_id = $1 AND sender_device = $2 AND sender_seq = $3", [Id, Device, SenderSeq]) of
                 {ok, _, [{ExistingKind, ExistingPayload, ExistingSeq}]} ->
                     case {ExistingKind, ExistingPayload} of
-                        {KindBinary, Payload} -> {ok, state_from_binary(State), ExistingSeq};
+                        {KindBinary, Payload} -> {replay, state_from_binary(State), ExistingSeq};
                         _ -> {error, seq_reused}
                     end;
                 {ok, _, []} ->
@@ -445,23 +452,45 @@ persist_row(Connection, Id, ExpectedState, ExpectedVersion, Device, CommandId, F
               state_entered_at := Entered, caller_heartbeat_at := CallerHeartbeat,
               callee_heartbeat_at := CalleeHeartbeat}) ->
     NextStateBinary = atom_to_binary(NextState),
-    {ok, 1} = query(Connection,
-        "UPDATE calls SET state = $2, state_version = $3, callee_device = $4, "
-        "connected_caller = $5, connected_callee = $6, offered = $7, pending_offer = $8, "
-        "state_entered_at = to_timestamp($9 / 1000.0), "
-        "caller_heartbeat_at = case when $10::bigint = 0 then null else to_timestamp($10::bigint / 1000.0) end, "
-        "callee_heartbeat_at = case when $11::bigint = 0 then null else to_timestamp($11::bigint / 1000.0) end, "
-        "ended_at = case when $2 = 'ended' then clock_timestamp() else null end "
-        "WHERE id = $1 AND state = $12 AND state_version = $13",
-        [Id, NextStateBinary, NextVersion, CalleeDevice, lists:member(caller, Connected),
-         lists:member(callee, Connected), Offered, nullable_role(Pending), Entered, CallerHeartbeat, CalleeHeartbeat,
-         atom_to_binary(ExpectedState), ExpectedVersion]),
     Encoded = iolist_to_binary(json:encode(#{<<"state">> => NextStateBinary})),
-    {ok, 1} = query(Connection,
-        "INSERT INTO call_commands (device, command_id, call_id, fingerprint, response) "
-        "VALUES ($1, $2, $3, $4, $5)", [Device, CommandId, Id, Fingerprint, Encoded]),
+    [{ok, 1}, {ok, 1}] = batch(Connection, [
+        {"UPDATE calls SET state = $2, state_version = $3, callee_device = $4, "
+         "connected_caller = $5, connected_callee = $6, offered = $7, pending_offer = $8, "
+         "state_entered_at = to_timestamp($9 / 1000.0), "
+         "caller_heartbeat_at = case when $10::bigint = 0 then null else to_timestamp($10 / 1000.0) end, "
+         "callee_heartbeat_at = case when $11::bigint = 0 then null else to_timestamp($11 / 1000.0) end, "
+         "ended_at = case when $2 = 'ended' then clock_timestamp() else null end "
+         "WHERE id = $1 AND state = $12 AND state_version = $13",
+         [Id, NextStateBinary, NextVersion, CalleeDevice, lists:member(caller, Connected),
+          lists:member(callee, Connected), Offered, nullable_role(Pending), Entered, CallerHeartbeat, CalleeHeartbeat,
+          atom_to_binary(ExpectedState), ExpectedVersion]},
+        {"INSERT INTO call_commands (device, command_id, call_id, fingerprint, response) "
+         "VALUES ($1, $2, $3, $4, $5)", [Device, CommandId, Id, Fingerprint, Encoded]}]),
     NextState =:= ended andalso release(Connection, Id),
     {ok, NextState}.
+
+-spec batch(epgsql:connection(), list()) -> list().
+batch(Connection, Statements) ->
+    Prepared = [prepare(Connection, Sql, Params) || {Sql, Params} <- Statements],
+    Results = epgsql:execute_batch(Connection, Prepared),
+    case lists:any(fun(Result) -> element(1, Result) =:= error end, Results) of
+        true -> abort(unavailable);
+        false -> Results
+    end.
+
+-spec prepare(epgsql:connection(), iodata(), list()) -> {epgsql:statement(), list()}.
+prepare(Connection, Sql, Params) ->
+    case get({vault_prepared, Sql}) of
+        undefined ->
+            Name = "vault_" ++ integer_to_list(erlang:unique_integer([positive])),
+            case epgsql:parse(Connection, Name, Sql, []) of
+                {ok, Statement} ->
+                    put({vault_prepared, Sql}, Statement),
+                    {Statement, Params};
+                {error, _} -> abort(unavailable)
+            end;
+        Statement -> {Statement, Params}
+    end.
 
 -spec release(epgsql:connection(), binary()) -> ok.
 release(Connection, Id) ->
@@ -497,28 +526,27 @@ state_from_binary(<<"callee">>) -> callee.
 
 -spec create_transaction(epgsql:connection(), tuple()) -> {ok, map()}.
 create_transaction(Connection, {Id, Room, Caller, Device, Callee, CommandId, Fingerprint}) ->
-    _ = query(Connection, "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [Device, CommandId]),
-    case query(Connection, "SELECT fingerprint, response FROM call_commands WHERE device = $1 AND command_id = $2",
-               [Device, CommandId]) of
-        {ok, _, [{Fingerprint, Response}]} ->
+    [_, Replay] = batch(Connection, [
+        {"SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [Device, CommandId]},
+        {"SELECT fingerprint, response FROM call_commands WHERE device = $1 AND command_id = $2", [Device, CommandId]}]),
+    case Replay of
+        {ok, [{Fingerprint, Response}]} ->
             {ok, json:decode(Response)};
-        {ok, _, [{_, _}]} ->
+        {ok, [{_, _}]} ->
             abort(command_id_reused);
-        {ok, _, []} ->
+        {ok, []} ->
             insert_participants(Connection, Id, Caller, Callee),
             {ok, _, [{Active, Limit}]} = query(Connection,
                 "SELECT active_calls, capacity_limit FROM call_capacity WHERE id = 1 FOR UPDATE", []),
             Active < Limit orelse abort(capacity),
-            {ok, 1} = query(Connection,
-                "INSERT INTO calls (id, room_id, caller_id, caller_device, callee_id) VALUES ($1, $2, $3, $4, $5)",
-                [Id, Room, Caller, Device, Callee]),
             Body = #{<<"call_id">> => Id, <<"state">> => <<"ringing">>},
             Encoded = iolist_to_binary(json:encode(Body)),
-            {ok, 1} = query(Connection,
-                "INSERT INTO call_commands (device, command_id, call_id, fingerprint, response) "
-                "VALUES ($1, $2, $3, $4, $5)",
-                [Device, CommandId, Id, Fingerprint, Encoded]),
-            {ok, 1} = query(Connection, "UPDATE call_capacity SET active_calls = active_calls + 1 WHERE id = 1", []),
+            [{ok, 1}, {ok, 1}, {ok, 1}] = batch(Connection, [
+                {"INSERT INTO calls (id, room_id, caller_id, caller_device, callee_id) VALUES ($1, $2, $3, $4, $5)",
+                 [Id, Room, Caller, Device, Callee]},
+                {"INSERT INTO call_commands (device, command_id, call_id, fingerprint, response) "
+                 "VALUES ($1, $2, $3, $4, $5)", [Device, CommandId, Id, Fingerprint, Encoded]},
+                {"UPDATE call_capacity SET active_calls = active_calls + 1 WHERE id = 1", []}]),
             {ok, Body}
     end.
 
