@@ -17,6 +17,8 @@ init([]) ->
     Flags = #{strategy => rest_for_one, intensity => 5, period => 10},
     Children = [
         #{id => vault_calls_registry, start => {vault_calls_registry, start_link, []}},
-        #{id => vault_call_sup, start => {vault_call_sup, start_link, []}, type => supervisor}
+        #{id => vault_calls_store, start => {vault_calls_store, start_link, []}},
+        #{id => vault_call_sup, start => {vault_call_sup, start_link, []}, type => supervisor},
+        #{id => vault_calls_recovery, start => {vault_calls_recovery, start_link, []}}
     ],
     {ok, {Flags, Children}}.

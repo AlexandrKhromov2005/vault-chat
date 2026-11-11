@@ -23,9 +23,21 @@ calls_test_() ->
     ]}.
 
 setup() ->
-    ok = application:load(vault_calls),
+    Url = case os:getenv("VAULT_CHAT_TEST_CALLS_DATABASE_URL") of
+        false -> error(database_url_required);
+        Value -> unicode:characters_to_binary(Value)
+    end,
+    _ = application:load(vault_calls),
+    {ok, Store} = vault_calls_store:start_link(Url),
+    ok = vault_calls_store:migrate(Store),
+    {ok, Connection} = vault_calls_store:connect(Url),
+    [{ok, [], []}, {ok, 1}] = epgsql:squery(Connection,
+        "TRUNCATE call_commands, call_signals, call_participants, calls; UPDATE call_capacity SET active_calls = 0"),
+    ok = epgsql:close(Connection),
+    ok = vault_calls_store:stop(Store),
     [ok = application:set_env(vault_calls, Key, Value) || {Key, Value} <-
-        [{ringing_timeout, 300}, {connecting_timeout, 300}, {heartbeat_timeout, 150}, {max_call_duration, 5000}]],
+        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 300},
+         {heartbeat_timeout, 400}, {max_call_duration, 5000}]],
     {ok, _} = application:ensure_all_started(vault_calls),
     ok.
 
@@ -33,17 +45,23 @@ cleanup(_) ->
     ok = application:stop(vault_calls),
     ok = application:unload(vault_calls).
 
-call(Id) ->
-    {ok, Pid} = vault_call_sup:start_call(#{id => Id, caller => ?CALLER, caller_device => ?PHONE, callee => ?CALLEE}),
+call(Id) -> call(Id, ?CALLER, ?CALLEE).
+
+call(Id, Caller, Callee) ->
+    {ok, Pid} = vault_call_sup:start_call(#{id => Id, room_id => <<"room-", Id/binary>>,
+        caller => Caller, caller_device => <<Caller/binary, "-phone">>, callee => Callee,
+        command_id => <<"create-", Id/binary>>, fingerprint => crypto:hash(sha256, Id)}),
     Pid.
 
 cmd(Id, Name, User, Device) -> vault_call:command(Id, {Name, User, Device}).
 sig(Id, User, Device, Kind) -> vault_call:command(Id, {signal, User, Device, Kind}).
 
-connect(Id) ->
-    {ok, connecting} = cmd(Id, accept, ?CALLEE, <<"bob-laptop">>),
-    {ok, connecting} = cmd(Id, connected, ?CALLER, ?PHONE),
-    {ok, active} = cmd(Id, connected, ?CALLEE, <<"bob-laptop">>).
+connect(Id) -> connect(Id, ?CALLER, ?CALLEE).
+
+connect(Id, Caller, Callee) ->
+    {ok, connecting} = cmd(Id, accept, Callee, <<"bob-laptop">>),
+    {ok, connecting} = cmd(Id, connected, Caller, <<Caller/binary, "-phone">>),
+    {ok, active} = cmd(Id, connected, Callee, <<"bob-laptop">>).
 
 accept_takes_one_callee_device(_) ->
     call(<<"c1">>),
@@ -64,19 +82,20 @@ both_devices_connected_make_the_call_active(_) ->
      ?_assertEqual({ok, active}, Second), ?_assertEqual({ok, active}, vault_call:state(<<"c2">>))].
 
 only_the_right_role_ends_a_ringing_call(_) ->
-    [call(Id) || Id <- [<<"c3">>, <<"c4">>]],
+    call(<<"c3">>),
+    call(<<"c4">>, <<"carol">>, <<"dave">>),
     [?_assertEqual({error, conflict}, cmd(<<"c3">>, cancel, ?CALLEE, <<"bob-laptop">>)),
      ?_assertEqual({error, conflict}, cmd(<<"c3">>, reject, ?CALLER, ?PHONE)),
      ?_assertEqual({error, conflict}, cmd(<<"c3">>, cancel, ?CALLER, <<"alice-laptop">>)),
      ?_assertEqual({ok, ended}, cmd(<<"c3">>, cancel, ?CALLER, ?PHONE)),
      ?_assertEqual({error, not_found}, cmd(<<"c3">>, accept, ?CALLEE, <<"bob-laptop">>)),
-     ?_assertEqual({ok, ended}, cmd(<<"c4">>, reject, ?CALLEE, <<"bob-phone">>)),
+     ?_assertEqual({ok, ended}, cmd(<<"c4">>, reject, <<"dave">>, <<"bob-phone">>)),
      ?_assertEqual({error, not_found}, vault_call:state(<<"c4">>))].
 
 ringing_and_connecting_time_out(_) ->
     call(<<"c5">>),
-    call(<<"c6">>),
-    {ok, connecting} = cmd(<<"c6">>, accept, ?CALLEE, <<"bob-laptop">>),
+    call(<<"c6">>, <<"carol">>, <<"dave">>),
+    {ok, connecting} = cmd(<<"c6">>, accept, <<"dave">>, <<"bob-laptop">>),
     timer:sleep(450),
     [?_assertEqual({error, not_found}, vault_call:state(<<"c5">>)),
      ?_assertEqual({error, not_found}, vault_call:state(<<"c6">>))].
@@ -89,6 +108,7 @@ heartbeats_keep_an_active_call_and_a_missed_one_ends_it(_) ->
     Alive = [begin timer:sleep(60), Beat(Both) end || _ <- lists:seq(1, 6)],
     StillActive = vault_call:state(<<"c7">>),
     _ = [begin timer:sleep(60), Beat([{?CALLER, ?PHONE}]) end || _ <- lists:seq(1, 4)],
+    timer:sleep(300),
     [?_assert(lists:all(fun(R) -> R =:= {ok, active} end, lists:append(Alive))),
      ?_assertEqual({ok, active}, StillActive),
      ?_assertEqual({error, not_found}, vault_call:state(<<"c7">>))].
@@ -147,15 +167,15 @@ simultaneous_accepts_have_one_winner(_) ->
 
 a_crash_ends_only_its_own_call(_) ->
     Crashed = call(<<"c10">>),
-    call(<<"c11">>),
-    connect(<<"c11">>),
+    call(<<"c11">>, <<"carol">>, <<"dave">>),
+    connect(<<"c11">>, <<"carol">>, <<"dave">>),
     Ref = monitor(process, Crashed),
     exit(Crashed, kill),
     receive {'DOWN', Ref, process, Crashed, killed} -> ok after 1000 -> error(not_killed) end,
     timer:sleep(20),
-    [?_assertEqual({error, not_found}, vault_call:state(<<"c10">>)),
+    [?_assertEqual({ok, ringing}, vault_call:state(<<"c10">>)),
      ?_assertEqual({ok, active}, vault_call:state(<<"c11">>)),
-     ?_assertEqual({ok, active}, cmd(<<"c11">>, heartbeat, ?CALLER, ?PHONE))].
+     ?_assertEqual({ok, active}, cmd(<<"c11">>, heartbeat, <<"carol">>, <<"carol-phone">>))].
 
 malformed_commands_do_not_crash_the_call(_) ->
     call(<<"c12">>),
