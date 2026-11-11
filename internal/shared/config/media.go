@@ -2,13 +2,16 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 )
 
 // MediaConfig holds private storage and internal RPC settings.
 type MediaConfig struct {
 	GRPCAddr, DatabaseURL, AuthGRPCAddr, ChatGRPCAddr, S3Endpoint, S3AccessKey, S3SecretKey, S3Bucket, LogLevel string
 	S3Secure                                                                                                    bool
+	PreviewGRPCAddrs                                                                                            []string
 }
 
 // LoadMedia requires independent database and object storage credentials.
@@ -26,6 +29,14 @@ func LoadMedia() (*MediaConfig, error) {
 	}
 	if c.S3Secure, err = strconv.ParseBool(envOr("MEDIA_S3_SECURE", "false")); err != nil {
 		return nil, fmt.Errorf("MEDIA_S3_SECURE: %w", err)
+	}
+	for address := range strings.SplitSeq(os.Getenv("MEDIA_PREVIEW_GRPC_ADDRS"), ",") {
+		if address = strings.TrimSpace(address); address != "" {
+			c.PreviewGRPCAddrs = append(c.PreviewGRPCAddrs, address)
+		}
+	}
+	if len(c.PreviewGRPCAddrs) > 2 {
+		return nil, fmt.Errorf("MEDIA_PREVIEW_GRPC_ADDRS supports at most two workers")
 	}
 	return c, nil
 }

@@ -12,6 +12,7 @@ spec.loader.exec_module(certs)
 
 class Certificates(unittest.TestCase):
     def test_repeat_and_rotation_preserve_ca_and_isolate_service_keys(self):
+        self.assertIn('preview', certs.SERVICES)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             certs.issue(root)
@@ -29,6 +30,22 @@ class Certificates(unittest.TestCase):
             self.assertEqual(before['rpc-ca/ca.pem'], (root / 'rpc-ca/ca.pem').read_bytes())
             self.assertNotEqual(before['rpc/auth/tls.key'], (root / 'rpc/auth/tls.key').read_bytes())
             certs.issue(root)  # Verify all rotated certs and key pairs.
+
+    def test_preview_is_added_to_legacy_set_without_rotation(self):
+        original = certs.SERVICES
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            try:
+                certs.SERVICES = ('auth', 'chat', 'media', 'gateway')
+                certs.issue(root)
+            finally:
+                certs.SERVICES = original
+            before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+            certs.issue(root)
+            for path, content in before.items():
+                self.assertEqual(content, (root / path).read_bytes())
+            self.assertTrue((root / 'rpc/preview/tls.key').is_file())
+            certs.issue(root)
 
     def test_incomplete_ca_is_not_replaced(self):
         with tempfile.TemporaryDirectory() as directory:

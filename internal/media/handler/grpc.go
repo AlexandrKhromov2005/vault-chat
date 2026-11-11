@@ -31,6 +31,7 @@ type Files interface {
 	Upload(context.Context, string, string, string, []byte) (*domain.File, error)
 	Get(context.Context, string) (*domain.File, error)
 	Download(context.Context, string) (*domain.File, io.ReadCloser, error)
+	DownloadPreview(context.Context, string) (*domain.File, io.ReadCloser, error)
 }
 
 // Auth validates bearer tokens without trusting caller-supplied actor IDs.
@@ -186,7 +187,11 @@ func (h *Handler) Download(r *mediav1.DownloadRequest, s grpc.ServerStreamingSer
 	if err != nil {
 		return err
 	}
-	f, body, err := h.files.Download(ctx, r.GetFileId())
+	download := h.files.Download
+	if r.GetPreview() {
+		download = h.files.DownloadPreview
+	}
+	f, body, err := download(ctx, r.GetFileId())
 	if err != nil {
 		return safeError(err)
 	}

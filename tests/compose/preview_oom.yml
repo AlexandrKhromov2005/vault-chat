@@ -1,0 +1,5 @@
+# Acceptance only: force the first worker's decoder to exceed its cgroup.
+services:
+  media-preview-1:
+    mem_limit: 64m
+    memswap_limit: 64m

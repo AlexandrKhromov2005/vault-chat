@@ -2,6 +2,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/preview"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/validator"
 )
 
@@ -19,6 +21,7 @@ type Repository interface {
 	Create(context.Context, *domain.File) error
 	Ready(context.Context, string) error
 	Get(context.Context, string) (*domain.File, error)
+	GetPreview(context.Context, string) (string, error)
 	RemovePending(context.Context, string) error
 	Expired(context.Context) ([]string, error)
 }
@@ -131,6 +134,32 @@ func (s *Service) Download(ctx context.Context, id string) (*domain.File, io.Rea
 		return nil, nil, fmt.Errorf("open private blob: %w", err)
 	}
 	return f, body, nil
+}
+
+// DownloadPreview checks membership before opening the current immutable render.
+func (s *Service) DownloadPreview(ctx context.Context, id string) (*domain.File, io.ReadCloser, error) {
+	f, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, err := s.repo.GetPreview(ctx, f.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	body, err := s.blobs.Open(ctx, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open private preview: %w", err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(body, preview.MaxOutput+1))
+	closeErr := body.Close()
+	if readErr != nil || closeErr != nil || len(data) > preview.MaxOutput {
+		return nil, nil, fmt.Errorf("read private preview: %w", errors.Join(readErr, closeErr, validator.ErrInvalidFile))
+	}
+	safe := *f
+	safe.Name = "preview.jpg"
+	safe.ContentType = "image/jpeg"
+	safe.Size = int64(len(data))
+	return &safe, io.NopCloser(bytes.NewReader(data)), nil
 }
 
 // Sweep reclaims only uploads still pending for over an hour, beyond the 30s

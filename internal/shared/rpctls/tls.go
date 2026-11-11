@@ -73,12 +73,14 @@ func (c *Config) Enabled() bool { return c.tls != nil }
 
 // CertificateExpiry is the loaded certificate expiry, or zero in plaintext mode.
 func (c *Config) CertificateExpiry() float64 { return c.expiry }
-func known(s string) bool                    { return s == "auth" || s == "chat" || s == "media" || s == "gateway" }
+func known(s string) bool {
+	return s == "auth" || s == "chat" || s == "media" || s == "gateway" || s == "preview"
+}
 func identity(cert *x509.Certificate) string {
 	if len(cert.URIs) != 1 {
 		return ""
 	}
-	for _, s := range []string{"auth", "chat", "media", "gateway"} {
+	for _, s := range []string{"auth", "chat", "media", "gateway", "preview"} {
 		if cert.URIs[0].String() == "spiffe://vault-chat/service/"+s {
 			return s
 		}
@@ -137,7 +139,7 @@ func (c *Config) authorize(ctx context.Context, method string) error {
 		return status.Error(codes.Unauthenticated, "unknown RPC identity")
 	}
 	allowed := method == "/grpc.health.v1.Health/Check" || method == "/grpc.health.v1.Health/Watch"
-	if caller == "gateway" {
+	if caller == "gateway" && c.service != "preview" {
 		allowed = allowed || strings.HasPrefix(method, "/"+c.service+".v1."+strings.ToUpper(c.service[:1])+c.service[1:]+"Service/")
 	}
 	switch c.service {
@@ -147,6 +149,8 @@ func (c *Config) authorize(ctx context.Context, method string) error {
 		allowed = allowed || (caller == "media" && method == "/chat.v1.ChatService/GetRoom")
 	case "media":
 		allowed = allowed || (caller == "chat" && method == "/media.v1.MediaService/GetFile")
+	case "preview":
+		allowed = allowed || caller == "media" && method == "/preview.v1.PreviewService/Decode"
 	}
 	if !allowed {
 		return status.Error(codes.PermissionDenied, "RPC not permitted for this service")

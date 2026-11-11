@@ -138,6 +138,11 @@ class Verification(unittest.TestCase):
         for name in ('AWS_SECRET_ACCESS_KEY', 'AUTH_DATABASE_URL', 'VAULT_CHAT_TEST_DATABASE_URL', 'GOFLAGS'):
             self.assertNotIn(name, env)
 
+    def test_receipt_bound_local_vulndb_reaches_the_isolated_checks(self):
+        tools = dict(TOOLS, govulndb={'url': 'file:///tmp/official-vulndb', 'sha256': 'snapshot'})
+        env = verification.check_environment(tools)
+        self.assertEqual(env['GOVULNDB'], 'file:///tmp/official-vulndb')
+
     def test_existing_docker_namespace_is_never_started_or_cleaned(self):
         with patch.object(verification.subprocess, 'check_output', return_value='existing'), \
                 patch.object(verification, 'run_process') as mutate:

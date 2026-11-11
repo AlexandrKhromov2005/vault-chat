@@ -1,0 +1,19 @@
+syntax = "proto3";
+package preview.v1;
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/preview/v1;previewv1";
+
+// PreviewService is internal only. mTLS authorizes Media, not end users.
+service PreviewService {
+  rpc Decode(DecodeRequest) returns (DecodeResponse);
+}
+
+message DecodeRequest {
+  bytes image = 1;
+}
+
+message DecodeResponse {
+  uint32 width = 1;
+  uint32 height = 2;
+  bytes rgb = 3;
+}

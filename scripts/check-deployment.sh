@@ -93,3 +93,25 @@ for name,s in c["services"].items():
     assert name=="auth" or ("push-egress" not in s.get("networks",{}) and all("/secrets/push" not in v["source"] for v in s.get("volumes",[]) if isinstance(v,dict)))
 assert not auth.get("ports")
 print("Push overlay: key and egress for Auth only, read-only mount, no new ports")'
+
+VAULT_IMAGE_TAG=validation docker compose -f deployments/docker-compose.preview.yml config --format json | python3 -c '
+import json,sys
+c=json.load(sys.stdin); services=c["services"]
+assert set(services)=={"media","media-preview-1","media-preview-2"}
+assert c["networks"]["preview"]["internal"] is True
+assert set(services["media"]["networks"])=={"preview"}
+assert services["media"]["environment"]["MEDIA_PREVIEW_GRPC_ADDRS"]=="passthrough:///media-preview-1:50054,passthrough:///media-preview-2:50054"
+for name,s in services.items():
+    if name=="media":
+        continue
+    assert set(s["networks"])=={"preview"} and not s.get("ports")
+    assert s["user"]=="65532:65532" and s["read_only"] is True
+    assert s["cap_drop"]==["ALL"] and "no-new-privileges:true" in s["security_opt"]
+    assert int(s["mem_limit"])==192*1024*1024 and int(s["memswap_limit"])==192*1024*1024
+    assert float(s["cpus"])==1.0 and int(s["pids_limit"])==16
+    assert s["environment"]["RPC_TLS_MODE"]=="mtls" and s["environment"]["RPC_TLS_SERVICE"]=="preview"
+    assert s["environment"]["PREVIEW_DECODER_PATH"]=="/usr/local/bin/preview-decoder"
+    assert len(s["volumes"])==1 and s["volumes"][0]["target"]=="/run/secrets/rpc" and s["volumes"][0]["read_only"]
+    assert s["volumes"][0]["source"].endswith("/secrets/rpc/preview") and not s["volumes"][0]["bind"].get("create_host_path",False)
+    assert s["healthcheck"]["test"][:3]==["CMD","/usr/local/bin/service","-health"]
+print("Preview Compose: two isolated mTLS workers, bounded resources and no public ports")'

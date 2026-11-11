@@ -1,0 +1,33 @@
+ARG GO_VERSION=1.27.3
+ARG ALPINE_VERSION=3.24
+
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS go-build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/service ./cmd/preview
+
+FROM alpine:${ALPINE_VERSION} AS zig-build
+ARG ZIG_VERSION=0.17.1
+ARG ZIG_SHA256=3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+RUN apk add --no-cache minisign=0.12-r2 python3=3.14.10-r1
+WORKDIR /src/tools/preview/zig
+COPY tools/preview/zig .
+RUN test "$(uname -m)" = "x86_64" && \
+    sh ./fetch_zig.sh /tmp/zig.tar.xz "$ZIG_VERSION" "$ZIG_SHA256"
+RUN mkdir /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1 && \
+    /opt/zig/zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast --prefix /out/zig
+
+FROM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+RUN test "$(dpkg-query -W -f='${Version}' util-linux)" = "2.38.1-5+deb12u3" && \
+    test "$(prlimit --version | awk '{print $4}')" = "2.38.1"
+COPY --from=go-build /out/service /usr/local/bin/service
+COPY --from=zig-build /out/zig/bin/preview-decoder /usr/local/bin/preview-decoder
+USER 65532:65532
+ENV PREVIEW_DECODER_PATH=/usr/local/bin/preview-decoder
+ENTRYPOINT ["/usr/local/bin/service"]

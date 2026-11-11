@@ -177,6 +177,9 @@ func New(d Deps) http.Handler {
 		root.Handle("GET /api/v1/files/{file_id}/content", middleware.Chain(protected(d.Media.Download),
 			middleware.FileTransfer(transfer.MaxDuration, transfer.IdleTimeout), middleware.CORS(d.CORSAllowedOrigins),
 			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger, clientIP)))
+		root.Handle("GET /api/v1/files/{file_id}/preview", middleware.Chain(protected(d.Media.Preview),
+			middleware.FileTransfer(transfer.MaxDuration, transfer.IdleTimeout), middleware.CORS(d.CORSAllowedOrigins),
+			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger, clientIP)))
 	}
 	root.Handle("/api/", middleware.Chain(api,
 		middleware.Timeout(d.RequestTimeout),
