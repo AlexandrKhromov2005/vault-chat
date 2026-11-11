@@ -48,8 +48,8 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   fingerprint replay checks. Ending releases participants and capacity in the
   same transaction. The signal journal assigns per-call `signal_seq`, replays
   matching `sender_seq` and supports catch-up with `signals_after`. Signals are
-  limited to 200 per call and 32 candidates per device; SDP is capped at 8 KiB
-  and candidates at 512 bytes. Commands expire after 24 h and signals one hour
+  limited to 20/s per device, 200 per call and 32 candidates per device; SDP is
+  capped at 8 KiB and candidates at 512 bytes. Commands expire after 24 h and signals one hour
   after `ended`, with cleanup at startup and hourly. Database statements and
   locks have bounded timeouts.
 
