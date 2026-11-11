@@ -126,7 +126,8 @@ def execute_checks(snapshot, environment, log):
         run(compose + ['run', '--rm', '--no-deps', 's3-init'])
         run(compose + ['images', '--format', 'json'])
         port = run(compose + ['port', 'postgres', '5432'], True).rsplit(':', 1)[1]
-        for variable, database in [('DATABASE', 'auth_test'), ('CHAT_DATABASE', 'chat_test'), ('MEDIA_DATABASE', 'media_test')]:
+        for variable, database in [('DATABASE', 'auth_test'), ('CHAT_DATABASE', 'chat_test'),
+                                   ('MEDIA_DATABASE', 'media_test'), ('CALLS_DATABASE', 'calls_test')]:
             run(compose + ['exec', '-T', 'postgres', 'createdb', '-U', 'auth', database])
             environment['VAULT_CHAT_TEST_' + variable + '_URL'] = f'postgres://auth:auth@127.0.0.1:{port}/{database}?sslmode=disable'
         environment['VAULT_CHAT_TEST_MEDIA_S3_ENDPOINT'] = run(compose + ['port', 'minio', '9000'], True)

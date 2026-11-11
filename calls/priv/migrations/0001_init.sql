@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS calls (
 
 CREATE TABLE IF NOT EXISTS call_participants (
     user_id text PRIMARY KEY,
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE
+    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS call_capacity (

@@ -6,8 +6,10 @@
 store_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         fun create_replays_its_original_response/1,
+        fun concurrent_replays_share_one_response/1,
         fun concurrent_participants_admit_one_call/1,
-        fun the_two_hundredth_call_is_the_last_one/1
+        fun the_two_hundredth_call_is_the_last_one/1,
+        fun malformed_creation_is_atomic/1
     ]}.
 
 setup() ->
@@ -40,6 +42,27 @@ create_replays_its_original_response(#{store := Store, connection := Connection}
      ?_assertEqual({error, command_id_reused}, Reused),
      ?_assertEqual(1, binary_to_integer(Calls)),
      ?_assertEqual(1, binary_to_integer(Active))].
+
+concurrent_replays_share_one_response(#{url := Url, connection := Connection}) ->
+    {ok, Store1} = vault_calls_store:start_link(Url),
+    {ok, Store2} = vault_calls_store:start_link(Url),
+    Args = args(<<"concurrent-replay">>, <<"alice">>, <<"bob">>),
+    [First, Second] = concurrent_create([{Store1, Args}, {Store2, Args}]),
+    ok = vault_calls_store:stop(Store1),
+    ok = vault_calls_store:stop(Store2),
+    {ok, _, [{Calls}]} = epgsql:squery(Connection, "SELECT count(*) FROM calls"),
+    [?_assertMatch({ok, _}, First),
+     ?_assertEqual(First, Second),
+     ?_assertEqual(1, binary_to_integer(Calls))].
+
+malformed_creation_is_atomic(#{store := Store, connection := Connection}) ->
+    Invalid = (args(<<"invalid">>, <<"alice">>, <<"bob">>))#{callee := <<"alice">>},
+    Reply = vault_calls_store:create_call(Store, Invalid),
+    StillValid = vault_calls_store:create_call(Store, args(<<"valid">>, <<"alice">>, <<"bob">>)),
+    {ok, _, [{Commands}]} = epgsql:squery(Connection, "SELECT count(*) FROM call_commands"),
+    [?_assertEqual({error, badarg}, Reply),
+     ?_assertMatch({ok, _}, StillValid),
+     ?_assertEqual(1, binary_to_integer(Commands))].
 
 concurrent_participants_admit_one_call(#{url := Url}) ->
     Stores = [begin {ok, Store} = vault_calls_store:start_link(Url), Store end || _ <- lists:seq(1, 3)],
