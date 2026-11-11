@@ -16,6 +16,7 @@ calls_test_() ->
         fun ringing_and_connecting_time_out/1,
         fun heartbeats_keep_an_active_call_and_a_missed_one_ends_it/1,
         fun signals_follow_the_matrix/1,
+        fun signals_wait_for_the_previous_answer/1,
         fun simultaneous_accepts_have_one_winner/1,
         fun a_crash_ends_only_its_own_call/1,
         fun malformed_commands_do_not_crash_the_call/1
@@ -112,6 +113,28 @@ signals_follow_the_matrix(_) ->
      ?_assertEqual({error, conflict}, Other),
      ?_assertEqual({error, not_found}, Stranger),
      ?_assertEqual([{ok, active}, {ok, active}, {ok, active}, {error, conflict}], Active)].
+
+signals_wait_for_the_previous_answer(_) ->
+    call(<<"c13">>),
+    {ok, connecting} = cmd(<<"c13">>, accept, ?CALLEE, <<"bob-laptop">>),
+    Connecting = [sig(<<"c13">>, ?CALLER, ?PHONE, offer),
+                  sig(<<"c13">>, ?CALLER, ?PHONE, offer),
+                  sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, answer),
+                  sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, answer),
+                  sig(<<"c13">>, ?CALLER, ?PHONE, offer),
+                  sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, answer)],
+    {ok, connecting} = cmd(<<"c13">>, connected, ?CALLER, ?PHONE),
+    {ok, active} = cmd(<<"c13">>, connected, ?CALLEE, <<"bob-laptop">>),
+    Active = [sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, offer),
+              sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, offer),
+              sig(<<"c13">>, ?CALLER, ?PHONE, answer),
+              sig(<<"c13">>, ?CALLER, ?PHONE, answer),
+              sig(<<"c13">>, ?CALLER, ?PHONE, offer),
+              sig(<<"c13">>, ?CALLEE, <<"bob-laptop">>, answer)],
+    [?_assertEqual([{ok, connecting}, {error, conflict}, {ok, connecting},
+                    {error, conflict}, {ok, connecting}, {ok, connecting}], Connecting),
+     ?_assertEqual([{ok, active}, {error, conflict}, {ok, active},
+                    {error, conflict}, {ok, active}, {ok, active}], Active)].
 
 simultaneous_accepts_have_one_winner(_) ->
     call(<<"c9">>),
