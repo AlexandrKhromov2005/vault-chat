@@ -216,9 +216,17 @@ export class Conversation {
     }
     const url = URL.createObjectURL(blob);
     this.#previewUrls.add(url);
+    image.addEventListener('load', () => {
+      if (!scope.alive || version !== this.#renderVersion) return;
+      image.hidden = false;
+      placeholder.hidden = true;
+    }, { once: true });
+    image.addEventListener('error', () => {
+      if (!scope.alive || version !== this.#renderVersion) return;
+      image.hidden = true;
+      placeholder.textContent = 'Не удалось загрузить превью';
+    }, { once: true });
     image.src = url;
-    image.hidden = false;
-    placeholder.hidden = true;
   }
 
   #revokePreviews() {
