@@ -5,7 +5,7 @@
 -include_lib("epgsql/include/epgsql.hrl").
 
 -export([start_link/0, start_link/1, stop/1, connect/1, migrate/1, create_call/2]).
--export([get_call/2, list_active/1, persist/4, replay/2]).
+-export([get_call/2, list_active/1, signals_after/2, persist/4, replay/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -type create_args() :: #{id := binary(), room_id := binary(), caller := binary(),
@@ -44,6 +44,10 @@ get_call(Store, Id) ->
 -spec list_active(gen_server:server_ref()) -> {ok, [binary()]} | {error, unavailable}.
 list_active(Store) ->
     request(Store, list_active, 2500).
+
+-spec signals_after(gen_server:server_ref(), binary()) -> {error, unavailable}.
+signals_after(_Store, _Id) ->
+    {error, unavailable}.
 
 -spec persist(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) -> persist_reply().
 persist(Store, Id, Expected, Next) ->

@@ -19,7 +19,7 @@ abnormal exit the supervisor restores the process from the database row.
 """.
 -behaviour(gen_statem).
 
--export([start_link/1, command/2, command/3, state/1]).
+-export([start_link/1, command/2, command/3, signal/6, state/1]).
 -export([callback_mode/0, init/1, handle_event/4]).
 -export_type([start_args/0, command/0, reply/0]).
 
@@ -67,6 +67,10 @@ command(Id, Command, Meta) when is_map(Meta) ->
     end;
 command(_Id, _Command, _Meta) ->
     {error, badarg}.
+
+-spec signal(binary(), user(), device(), signal_kind(), binary(), pos_integer()) -> {error, unavailable}.
+signal(_Id, _User, _Device, _Kind, _Payload, _SenderSeq) ->
+    {error, unavailable}.
 
 -spec state(binary()) -> {ok, state_name()} | {error, not_found}.
 state(Id) ->

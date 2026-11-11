@@ -11,7 +11,8 @@ recovery_test_() ->
         fun an_application_restart_recovers_active_state/1,
         fun an_expired_call_ends_during_startup/1,
         fun a_database_outage_blocks_the_transition/1,
-        fun client_commands_replay_their_original_response/1
+        fun client_commands_replay_their_original_response/1,
+        fun signals_are_ordered_and_idempotent/1
     ]}.
 
 setup() ->
@@ -101,6 +102,20 @@ client_commands_replay_their_original_response(_) ->
      ?_assertEqual({error, command_id_reused}, Reused),
      ?_assertEqual({ok, ended}, Ended),
      ?_assertEqual(Ended, EndReplay)].
+
+signals_are_ordered_and_idempotent(_) ->
+    _ = new_call(<<"signals">>),
+    {ok, connecting} = vault_call:command(<<"signals">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    First = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    Replay = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    Reused = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"other">>, 1),
+    Second = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice">>, 2),
+    After = vault_calls_store:signals_after(vault_calls_store, <<"signals">>),
+    [?_assertEqual({ok, connecting, 1}, First),
+     ?_assertEqual(First, Replay),
+     ?_assertEqual({error, seq_reused}, Reused),
+     ?_assertEqual({ok, connecting, 2}, Second),
+     ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After)].
 
 command_meta(Id, Device) ->
     #{device => Device, command_id => Id, fingerprint => crypto:hash(sha256, Id)}.
