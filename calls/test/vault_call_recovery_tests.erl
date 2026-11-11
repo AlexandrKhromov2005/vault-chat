@@ -36,7 +36,7 @@ setup() ->
         "TRUNCATE call_commands, call_signals, call_participants, calls; UPDATE call_capacity SET active_calls = 0"),
     ok = vault_calls_store:stop(Store),
     [ok = application:set_env(vault_calls, Key, Value) || {Key, Value} <-
-        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 300},
+        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 2000},
          {heartbeat_timeout, 150}, {max_call_duration, 5000}]],
     {ok, _} = application:ensure_all_started(vault_calls),
     #{connection => Connection}.

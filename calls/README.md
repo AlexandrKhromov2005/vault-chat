@@ -38,8 +38,9 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   matrix and owns the timers: ringing 30 s, connecting 30 s, a heartbeat from
   each device within 45 s, at most 2 h active. Accepted commands commit before
   the in-memory state changes; timers restart from their persisted deadlines.
-  A repeated command id returns its original response, including after `ended`;
-  a different request fingerprint receives `command_id_reused`.
+  A repeated command id returns its original response, including after `ended`,
+  without changing process state or timers; a different request fingerprint
+  receives `command_id_reused`.
 - `vault_call_sup`: the calls' supervisor; an abnormal exit restores only that
   call from its row. Application startup recovers every unfinished call.
 - `vault_calls_registry`: names calls by id, monitored, in a protected ETS table.
@@ -71,9 +72,9 @@ than a passed absolute RSS gate. `xmake ci` runs this scenario after the Calls
 checks.
 
 The 2026-11-11 local run completed 200 calls and 1600 commands with zero errors,
-225.3 commands/s, p95 63.01 ms and p99 95.74 ms; crash and restart recovery both
+177.9 commands/s, p95 81.46 ms and p99 121.64 ms; crash and restart recovery both
 passed. The host BEAM baseline was 2.06 GiB and the sampled peak delta was about
-21.1 MiB, so the 256-MiB absolute RSS gate remains explicitly unmet on this host
+24.5 MiB, so the 256-MiB absolute RSS gate remains explicitly unmet on this host
 (`baseline_rss_exceeded`). This is prototype evidence, not production acceptance.
 
 Not yet: production adapters.

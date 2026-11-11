@@ -155,6 +155,8 @@ commit_signal(Kind, Payload, SenderSeq, Device, State, NextData, Data, From) ->
     case vault_calls_store:append_signal(vault_calls_store, maps:get(id, Data), Expected,
                                          NextData#{signal => Signal}) of
         {ok, State, SignalSeq} -> {keep_state, NextData, [{reply, From, {ok, State, SignalSeq}}]};
+        {replay, SavedState, SignalSeq} ->
+            {keep_state_and_data, [{reply, From, {ok, SavedState, SignalSeq}}]};
         {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
     end.
 
@@ -231,6 +233,7 @@ commit(NextState, NextData0, From, Meta, State) ->
     Expected = {State, maps:get(state_version, NextData0)},
     case vault_calls_store:persist(vault_calls_store, maps:get(id, NextData0), Expected,
                                    NextData#{command => Meta}) of
+        {replay, SavedState} -> {keep_state_and_data, [{reply, From, {ok, SavedState}}]};
         {ok, ended} -> {stop_and_reply, normal, [{reply, From, {ok, ended}}]};
         {ok, NextState} when NextState =:= State ->
             {keep_state, NextData, [{reply, From, {ok, NextState}} | timer_actions(Meta)]};

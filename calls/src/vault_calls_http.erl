@@ -52,6 +52,10 @@ handle_info(accept, #{listener := Listener, connections := Connections} = State)
         {error, closed} -> {stop, normal, State}
     end;
 handle_info({'DOWN', Ref, process, _Pid, _Reason}, #{connections := Connections} = State) ->
+    case map_size(Connections) >= 200 of
+        true -> self() ! accept;
+        false -> ok
+    end,
     {noreply, State#{connections := maps:remove(Ref, Connections)}};
 handle_info(_Message, State) ->
     {noreply, State}.

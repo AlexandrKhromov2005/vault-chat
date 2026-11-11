@@ -14,7 +14,8 @@
                          fingerprint := binary()}.
 -type command_meta() :: #{device := binary(), command_id := binary(), fingerprint := binary()}.
 -type create_reply() :: {ok, map()} | {error, busy | capacity | command_id_reused | badarg | unavailable}.
--type persist_reply() :: {ok, atom()} | {error, not_found | conflict | command_id_reused | badarg | unavailable}.
+-type persist_reply() :: {ok, atom()} | {replay, atom()} |
+                       {error, not_found | conflict | command_id_reused | badarg | unavailable}.
 -export_type([create_args/0, create_reply/0, command_meta/0]).
 
 -spec start_link() -> gen_server:start_ret().
@@ -60,7 +61,8 @@ signals_after(Store, Id, After) ->
     request(Store, {signals_after, Id, After}, 2500).
 
 -spec append_signal(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} |
+    {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
 append_signal(Store, Id, Expected, Next) ->
     request(Store, {append_signal, Id, Expected, Next}, 2500).
 
@@ -73,7 +75,8 @@ replay_signal(Store, Id, Device, SenderSeq, Kind, Payload) ->
 persist(Store, Id, Expected, Next) ->
     request(Store, {persist, Id, Expected, Next}, 2500).
 
--spec replay(gen_server:server_ref(), command_meta()) -> persist_reply().
+-spec replay(gen_server:server_ref(), command_meta()) ->
+    {ok, atom()} | {error, not_found | command_id_reused | badarg | unavailable}.
 replay(Store, Meta) ->
     request(Store, {replay, Meta}, 2500).
 
@@ -136,7 +139,8 @@ handle_info(_Message, Connection) ->
 terminate(_Reason, Connection) ->
     close(Connection).
 
--spec replay_saved(epgsql:connection(), term()) -> persist_reply().
+-spec replay_saved(epgsql:connection(), term()) ->
+    {ok, atom()} | {error, not_found | command_id_reused | badarg | unavailable}.
 replay_saved(Connection, #{device := Device, command_id := CommandId, fingerprint := Fingerprint})
   when is_binary(Device), byte_size(Device) > 0, byte_size(Device) =< 256,
        is_binary(CommandId), byte_size(CommandId) > 0, byte_size(CommandId) =< 128,
@@ -241,7 +245,7 @@ save(Connection, Id, {ExpectedState, ExpectedVersion},
 save(_Connection, _Id, _Expected, _Next) ->
     {error, badarg}.
 
--spec save_transaction(epgsql:connection(), tuple()) -> {ok, atom()} | {error, not_found | conflict}.
+-spec save_transaction(epgsql:connection(), tuple()) -> {ok, atom()} | {replay, atom()} | {error, not_found | conflict}.
 save_transaction(Connection, {Id, ExpectedState, ExpectedVersion, Device, CommandId, Fingerprint, Next}) ->
     [_, Replay, Call] = batch(Connection, [
         {"SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [Device, CommandId]},
@@ -250,7 +254,7 @@ save_transaction(Connection, {Id, ExpectedState, ExpectedVersion, Device, Comman
     case Replay of
         {ok, [{Fingerprint, Response}]} ->
             #{<<"state">> := State} = json:decode(Response),
-            {ok, state_from_binary(State)};
+            {replay, state_from_binary(State)};
         {ok, [{_, _}]} -> abort(command_id_reused);
         {ok, []} ->
             case Call of
@@ -288,7 +292,8 @@ saved_signal(_Connection, _Id, _Device, _SenderSeq, _Kind, _Payload) ->
     {error, badarg}.
 
 -spec append(epgsql:connection(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} |
+    {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg}.
 append(Connection, Id, {ExpectedState, ExpectedVersion}, Next)
   when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128,
        is_atom(ExpectedState), is_integer(ExpectedVersion), ExpectedVersion >= 0, is_map(Next) ->
@@ -307,7 +312,7 @@ append(_Connection, _Id, _Expected, _Next) ->
     {error, badarg}.
 
 -spec append_transaction(epgsql:connection(), tuple()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused}.
+    {ok, atom(), pos_integer()} | {replay, atom(), pos_integer()} | {error, not_found | conflict | seq_reused}.
 append_transaction(Connection, {Id, ExpectedState, ExpectedVersion,
                                 #{signal := #{sender_device := Device, sender_seq := SenderSeq,
                                               kind := Kind, payload := Payload}} = Next}) ->
@@ -320,7 +325,7 @@ append_transaction(Connection, {Id, ExpectedState, ExpectedVersion,
                 "WHERE call_id = $1 AND sender_device = $2 AND sender_seq = $3", [Id, Device, SenderSeq]) of
                 {ok, _, [{ExistingKind, ExistingPayload, ExistingSeq}]} ->
                     case {ExistingKind, ExistingPayload} of
-                        {KindBinary, Payload} -> {ok, state_from_binary(State), ExistingSeq};
+                        {KindBinary, Payload} -> {replay, state_from_binary(State), ExistingSeq};
                         _ -> {error, seq_reused}
                     end;
                 {ok, _, []} ->
