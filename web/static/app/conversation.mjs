@@ -227,6 +227,7 @@ export class Conversation {
       placeholder.textContent = 'Не удалось загрузить превью';
     }, { once: true });
     image.src = url;
+    image.hidden = false;
   }
 
   #revokePreviews() {
