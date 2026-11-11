@@ -24,8 +24,8 @@ setup() ->
     ok = epgsql:close(Connection),
     ok = vault_calls_store:stop(Store),
     [ok = application:set_env(vault_calls, Key, Value) || {Key, Value} <-
-        [{database_url, Url}, {ringing_timeout, 5000}, {connecting_timeout, 5000},
-         {heartbeat_timeout, 5000}, {max_call_duration, 60000},
+        [{database_url, Url}, {ringing_timeout, 60000}, {connecting_timeout, 60000},
+         {heartbeat_timeout, 60000}, {max_call_duration, 60000},
          {http_enabled, true}, {auth_delay_ms, 0}, {chat_delay_ms, 0},
          {auth_available, true}, {chat_available, true},
          {rooms, #{<<"room-1">> => [<<"alice">>, <<"bob">>]}}]],
@@ -44,7 +44,7 @@ full_call_lifecycle(_) ->
     Created = post(<<"/api/v1/calls">>, <<"alice:phone">>, Body),
     Replay = post(<<"/api/v1/calls">>, <<"alice:phone">>, Body),
     Id = field(Created, <<"call_id">>, <<"missing">>),
-    Reused = post(<<"/api/v1/calls">>, <<"alice:phone">>, Body#{<<"room_id">> := <<"other">>}),
+    Reused = post(<<"/api/v1/calls">>, <<"alice:phone">>, Body#{<<"note">> => <<"other">>}),
     AcceptBody = #{<<"command_id">> => <<"a1">>},
     Accepted = post(<<"/api/v1/calls/", Id/binary, "/accept">>, <<"bob:laptop">>, AcceptBody),
     AcceptReplay = post(<<"/api/v1/calls/", Id/binary, "/accept">>, <<"bob:laptop">>, AcceptBody),
@@ -116,11 +116,20 @@ request(Method, Path, Session, Body) ->
         _ -> [{"authorization", "Bearer prototype:" ++ binary_to_list(Session)}]
     end,
     Url = "http://127.0.0.1:" ++ integer_to_list(vault_calls_http:port()) ++ binary_to_list(Path),
-    Result = httpc:request(Method, {Url, Headers, "application/json", Body}, [{timeout, 5000}], []),
+    HttpRequest = case Method of
+        get -> {Url, Headers};
+        _ -> {Url, Headers, "application/json", Body}
+    end,
+    Result = httpc:request(Method, HttpRequest, [{timeout, 5000}], []),
     case Result of
         {ok, {{_, Status, _}, ResponseHeaders, ResponseBody}} ->
-            case json:decode(iolist_to_binary(ResponseBody)) of
-                Decoded when is_map(Decoded) -> {Status, ResponseHeaders, Decoded};
+            Decoded = try json:decode(iolist_to_binary(ResponseBody)) of
+                Value -> Value
+            catch
+                _:_ -> ResponseBody
+            end,
+            case Decoded of
+                Map when is_map(Map) -> {Status, ResponseHeaders, Map};
                 _ -> {Status, ResponseHeaders, ResponseBody}
             end;
         {error, Reason} -> {0, [], Reason}

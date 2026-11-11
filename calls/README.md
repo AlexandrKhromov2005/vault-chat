@@ -49,9 +49,12 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   same transaction. The signal journal assigns per-call `signal_seq`, replays
   matching `sender_seq` and supports catch-up with `signals_after`. Signals are
   limited to 20/s per device, 200 per call and 32 candidates per device; SDP is
-  capped at 8 KiB and candidates at 512 bytes. Commands expire after 24 h and signals one hour
-  after `ended`, with cleanup at startup and hourly. Database statements and
-  locks have bounded timeouts.
+  capped at 8 KiB and candidates at 512 bytes. Commands expire after 24 h and
+  signals one hour after `ended`, with cleanup at startup and hourly. Database
+  statements and locks have bounded timeouts.
+- `vault_calls_http`: a loopback-only HTTP/1.1 prototype with 32 headers,
+  16-KiB bodies and at most 200 connections. `vault_calls_auth_stub` and
+  `vault_calls_chat_stub` provide synthetic sessions and direct rooms with
+  configurable delays and outage switches; they are not production adapters.
 
-Not yet: the HTTP prototype interface, Auth and Chat adapters and measurements
-(E2.3).
+Not yet: measurements (E2.3) and production adapters.
