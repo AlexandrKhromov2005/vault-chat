@@ -12,7 +12,11 @@ recovery_test_() ->
         fun an_expired_call_ends_during_startup/1,
         fun a_database_outage_blocks_the_transition/1,
         fun client_commands_replay_their_original_response/1,
-        fun signals_are_ordered_and_idempotent/1
+        fun signals_are_ordered_and_idempotent/1,
+        fun simultaneous_signals_have_unique_server_sequences/1,
+        fun the_two_hundredth_signal_is_the_last_one/1,
+        fun invalid_signal_payloads_leave_no_rows/1,
+        fun expired_journals_are_purged/1
     ]}.
 
 setup() ->
@@ -111,11 +115,74 @@ signals_are_ordered_and_idempotent(_) ->
     Reused = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"other">>, 1),
     Second = vault_call:signal(<<"signals">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice">>, 2),
     After = vault_calls_store:signals_after(vault_calls_store, <<"signals">>),
+    AfterOne = vault_calls_store:signals_after(vault_calls_store, <<"signals">>, 1),
     [?_assertEqual({ok, connecting, 1}, First),
      ?_assertEqual(First, Replay),
      ?_assertEqual({error, seq_reused}, Reused),
      ?_assertEqual({ok, connecting, 2}, Second),
-     ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After)].
+     ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After),
+     ?_assertMatch({ok, [#{signal_seq := 2, kind := candidate}]}, AfterOne)].
+
+simultaneous_signals_have_unique_server_sequences(_) ->
+    _ = new_call(<<"concurrent-signals">>),
+    {ok, connecting} = vault_call:command(<<"concurrent-signals">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, connecting, 1} = vault_call:signal(
+        <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    Results = signals_concurrently(lists:seq(2, 33)),
+    ServerSequences = lists:sort([SignalSeq || {ok, connecting, SignalSeq} <- Results]),
+    Limit = vault_call:signal(
+        <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice-34">>, 34),
+    [?_assertEqual(lists:seq(2, 33), ServerSequences),
+     ?_assertEqual({error, candidate_limit}, Limit)].
+
+the_two_hundredth_signal_is_the_last_one(#{connection := Connection}) ->
+    _ = new_call(<<"signal-capacity">>),
+    {ok, connecting} = vault_call:command(<<"signal-capacity">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, 199} = epgsql:squery(Connection,
+        "INSERT INTO call_signals (call_id, sender_device, sender_seq, signal_seq, kind, payload) "
+        "SELECT 'signal-capacity', 'seed', g, g, 'candidate', 'ice' FROM generate_series(1, 199) AS g"),
+    Last = vault_call:signal(<<"signal-capacity">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    Limited = vault_call:signal(<<"signal-capacity">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice">>, 2),
+    [?_assertEqual({ok, connecting, 200}, Last),
+     ?_assertEqual({error, signal_limit}, Limited)].
+
+invalid_signal_payloads_leave_no_rows(_) ->
+    _ = new_call(<<"invalid-signals">>),
+    {ok, connecting} = vault_call:command(<<"invalid-signals">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    Results = [
+        vault_call:signal(<<"invalid-signals">>, <<"alice">>, <<"alice-phone">>, offer,
+                          binary:copy(<<"a">>, 8193), 1),
+        vault_call:signal(<<"invalid-signals">>, <<"alice">>, <<"alice-phone">>, candidate,
+                          binary:copy(<<"a">>, 513), 2),
+        vault_call:signal(<<"invalid-signals">>, <<"alice">>, <<"alice-phone">>, offer, <<255>>, 3),
+        vault_call:signal(<<"invalid-signals">>, <<"alice">>, <<"alice-phone">>, end_of_candidates, <<"bad">>, 4)],
+    After = vault_calls_store:signals_after(vault_calls_store, <<"invalid-signals">>),
+    [?_assertEqual(lists:duplicate(4, {error, badarg}), Results),
+     ?_assertEqual({ok, []}, After)].
+
+expired_journals_are_purged(#{connection := Connection}) ->
+    _ = new_call(<<"retention">>),
+    {ok, connecting} = vault_call:command(<<"retention">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    {ok, connecting, 1} = vault_call:signal(
+        <<"retention">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
+    {ok, ended} = vault_call:command(<<"retention">>, {'end', <<"alice">>, <<"alice-phone">>}),
+    {ok, _} = epgsql:squery(Connection, "UPDATE call_commands SET created_at = clock_timestamp() - interval '25 hours'"),
+    {ok, 1} = epgsql:squery(Connection,
+        "UPDATE calls SET ended_at = clock_timestamp() - interval '2 hours' WHERE id = 'retention'"),
+    ok = vault_calls_store:purge_expired(vault_calls_store),
+    {ok, _, [{Commands, Signals}]} = epgsql:squery(Connection,
+        "SELECT (SELECT count(*) FROM call_commands), (SELECT count(*) FROM call_signals)"),
+    [?_assertEqual(0, binary_to_integer(Commands)),
+     ?_assertEqual(0, binary_to_integer(Signals))].
+
+signals_concurrently(SenderSequences) ->
+    Self = self(),
+    Tagged = [{make_ref(), SenderSeq} || SenderSeq <- SenderSequences],
+    [spawn(fun() -> Self ! {Ref, vault_call:signal(
+        <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, candidate,
+        <<"ice-", (integer_to_binary(SenderSeq))/binary>>, SenderSeq)} end)
+     || {Ref, SenderSeq} <- Tagged],
+    [receive {Ref, Result} -> Result after 3000 -> error(signal_timeout) end || {Ref, _} <- Tagged].
 
 command_meta(Id, Device) ->
     #{device => Device, command_id => Id, fingerprint => crypto:hash(sha256, Id)}.

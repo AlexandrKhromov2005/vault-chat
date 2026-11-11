@@ -46,7 +46,12 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
 - `vault_calls_store`: transactional creation and conditional transitions with
   one active call per user, capacity 200, and a command journal with SHA-256
   fingerprint replay checks. Ending releases participants and capacity in the
-  same transaction. Database statements and locks have bounded timeouts.
+  same transaction. The signal journal assigns per-call `signal_seq`, replays
+  matching `sender_seq` and supports catch-up with `signals_after`. Signals are
+  limited to 200 per call and 32 candidates per device; SDP is capped at 8 KiB
+  and candidates at 512 bytes. Commands expire after 24 h and signals one hour
+  after `ended`, with cleanup at startup and hourly. Database statements and
+  locks have bounded timeouts.
 
-Not yet: the signal journal, the HTTP prototype interface, Auth and Chat
-adapters and measurements (E2.3).
+Not yet: the HTTP prototype interface, Auth and Chat adapters and measurements
+(E2.3).
