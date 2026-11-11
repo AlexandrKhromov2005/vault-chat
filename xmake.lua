@@ -1,6 +1,6 @@
 -- Local checks of the project, as listed in CONTRIBUTING.md.
 --
--- xmake runs Go, golangci-lint, govulncheck, Docker and Node.js; it builds
+-- xmake runs Go, golangci-lint, govulncheck, Docker, Node.js and rebar3; it builds
 -- nothing itself. `xmake ci` runs every check and stops at the first
 -- failure with a non-zero exit code.
 
@@ -52,8 +52,8 @@ check("dev-test", "Test the verification gates.", {{"python3", "-m", "unittest",
 check("proto", "Lint protobuf API definitions.", {{"buf", "lint", "api/proto"}})
 check("ci", "Verify a committed snapshot with disposable infrastructure.", {{"python3", "scripts/dev/verification.py", "run"}})
 
--- `xmake calls` checks the Calls control plane (calls/, Erlang/OTP 28 and
--- rebar3); it is not part of `xmake ci` until CI pins those tools.
+-- `xmake calls` checks the Calls control plane (calls/) with the Erlang/OTP
+-- and rebar3 that `xmake doctor` pins.
 task("calls")
     set_menu({usage = "xmake calls", description = "Test the Calls control plane: EUnit, xref and Dialyzer.", options = {}})
     on_run(function ()
@@ -124,7 +124,7 @@ task("ci-checks")
         import("core.project.task")
         local steps = {
             {"doctor"}, {"secret-scan"}, {"dev-test"}, {"proto"},
-            {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"test-integration"},
+            {"fmt-check"}, {"vet"}, {"lint"}, {"build"}, {"calls"}, {"test-integration"},
             {"test-coverage"}, {"deployment"}, {"monitoring"}, {"fuzz", {time = "10s"}}, {"vuln"},
         }
         local timings = {}

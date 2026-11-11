@@ -13,8 +13,8 @@ xmake calls          # EUnit, xref and Dialyzer
 cd calls && rebar3 eunit
 ```
 
-`xmake calls` is not part of `xmake ci` yet; CI adds the pinned Erlang tools in
-a separate change.
+`xmake ci` runs `xmake calls`; `xmake doctor` refuses other versions of OTP or
+rebar3.
 
 ## What exists
 
