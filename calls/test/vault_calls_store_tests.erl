@@ -9,7 +9,8 @@ store_test_() ->
         fun concurrent_replays_share_one_response/1,
         fun concurrent_participants_admit_one_call/1,
         fun the_two_hundredth_call_is_the_last_one/1,
-        fun malformed_creation_is_atomic/1
+        fun malformed_creation_is_atomic/1,
+        fun database_outage_is_bounded_and_atomic/1
     ]}.
 
 setup() ->
@@ -54,6 +55,18 @@ concurrent_replays_share_one_response(#{url := Url, connection := Connection}) -
     [?_assertMatch({ok, _}, First),
      ?_assertEqual(First, Second),
      ?_assertEqual(1, binary_to_integer(Calls))].
+
+database_outage_is_bounded_and_atomic(#{store := Store, connection := Connection}) ->
+    Database = sys:get_state(Store),
+    ok = epgsql:close(Database),
+    Started = erlang:monotonic_time(millisecond),
+    Reply = vault_calls_store:create_call(Store, args(<<"outage">>, <<"alice">>, <<"bob">>)),
+    Elapsed = erlang:monotonic_time(millisecond) - Started,
+    {ok, _, [{Calls}]} = epgsql:squery(Connection, "SELECT count(*) FROM calls"),
+    [?_assertEqual({error, unavailable}, Reply),
+     ?_assert(Elapsed < 2500),
+     ?_assertEqual(0, binary_to_integer(Calls)),
+     ?_assert(is_process_alive(Store))].
 
 malformed_creation_is_atomic(#{store := Store, connection := Connection}) ->
     Invalid = (args(<<"invalid">>, <<"alice">>, <<"bob">>))#{callee := <<"alice">>},
