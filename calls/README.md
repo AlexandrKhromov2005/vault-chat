@@ -36,14 +36,15 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
 - `vault_call`: one `gen_statem` process per call. It orders the call's
   commands, checks the caller's and the callee's device, applies the signal
   matrix and owns the timers: ringing 30 s, connecting 30 s, a heartbeat from
-  each device within 45 s, at most 2 h active.
-- `vault_call_sup`: the calls' supervisor; a crash ends only that call.
+  each device within 45 s, at most 2 h active. Accepted commands commit before
+  the in-memory state changes; timers restart from their persisted deadlines.
+- `vault_call_sup`: the calls' supervisor; an abnormal exit restores only that
+  call from its row. Application startup recovers every unfinished call.
 - `vault_calls_registry`: names calls by id, monitored, in a protected ETS table.
-- `vault_calls_store`: transactional creation with one active call per user,
-  capacity 200, and a command journal with SHA-256 fingerprint replay checks.
-  Database connections use two-second statement and bounded lock timeouts.
+- `vault_calls_store`: transactional creation and conditional transitions with
+  one active call per user, capacity 200, and a command journal with SHA-256
+  fingerprint replay checks. Ending releases participants and capacity in the
+  same transaction. Database statements and locks have bounded timeouts.
 
-Not yet: transactional transitions and signal logs, release of admission on
-`ended`, restart from the database, the HTTP prototype interface, Auth and Chat
-adapters and measurements (E2.3). The state-machine processes still live only in
-memory; `vault_calls_store` is not yet connected to them.
+Not yet: the signal journal and client-facing command replay API, the HTTP
+prototype interface, Auth and Chat adapters and measurements (E2.3).
