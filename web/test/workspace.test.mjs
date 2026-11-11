@@ -24,7 +24,7 @@ function setup(api, session = signedIn('u-1', 'alice')) {
 
 const roomNames = ($) => $('room-list').querySelectorAll('span.room-name').map((name) => name.textContent);
 
-test('lists rooms, naming a dialog after the other participant', async () => {
+test('lists channels and direct dialogs in separate console groups', async () => {
   const api = scriptedApi()
     .on(ROOMS, { rooms: [dialog, channel], next_cursor: '' })
     .on('GET /api/v1/users/u-2', { user_id: 'u-2', username: 'bob' });
@@ -32,9 +32,25 @@ test('lists rooms, naming a dialog after the other participant', async () => {
 
   await workspace.refresh();
 
-  assert.deepEqual(roomNames($), ['bob', 'Проект']);
+  assert.deepEqual(roomNames($), ['Проект', 'bob']);
+  assert.deepEqual($('room-list').querySelectorAll('h2').map((heading) => heading.textContent), ['CHANNELS', 'DIRECT']);
   assert.equal($('room').hidden, true);
   assert.equal($('no-room').hidden, false);
+});
+
+test('closing a room returns to its preserved list on narrow screens', async () => {
+  const api = scriptedApi().on(ROOMS, { rooms: [channel], next_cursor: '' });
+  const { $, workspace } = setup(api);
+  await workspace.refresh();
+  await click($('room-list').querySelector('button'));
+  assert.equal($('room').hidden, false);
+
+  await click($('close-room'));
+
+  assert.equal($('room').hidden, true);
+  assert.equal($('no-room').hidden, false);
+  assert.equal($('workspace').className.includes('room-open'), false);
+  assert.deepEqual(roomNames($), ['Проект']);
 });
 
 test('a room list answered after sign-out does not reach the next user', async () => {
