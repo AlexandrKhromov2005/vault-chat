@@ -21,11 +21,12 @@ var webContentTypes = map[string]string{
 	".svg":  "image/svg+xml",
 }
 
-// webCSP allows only the client's own scripts, styles, images and API on the
-// same origin (WebSocket included). Without 'unsafe-inline', markup injected
-// through a rendering bug still could not run scripts. Forms are handled by
-// scripts, so form submission and framing are disabled entirely.
-const webCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+// webCSP allows only the client's own scripts, styles and API on the same
+// origin (WebSocket included). Images may also use object URLs created for
+// authorized server-rendered previews. Without 'unsafe-inline',
+// markup injected through a rendering bug still could not run scripts. Forms
+// are handled by scripts, so form submission and framing are disabled entirely.
+const webCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; " +
 	"connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
 
 // WebApp serves the browser client: index.html at "/" and its assets under
