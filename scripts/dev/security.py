@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 
 GO_TOOLS = {'golangci-lint': 'v2.14.0', 'govulncheck': 'v1.9.0'}
 # Calls (calls/) is pinned by ADR 0005.
@@ -99,6 +100,26 @@ def scan(root, staged=False):
         raise ValueError('secret scan failed:\n' + '\n'.join(errors))
 
 
+def vulndb():
+    source = os.environ.get('GOVULNDB', 'https://vuln.go.dev')
+    if source == 'https://vuln.go.dev':
+        return {'url': source}
+    uri = urllib.parse.urlparse(source)
+    if uri.scheme != 'file' or uri.netloc or uri.params or uri.query or uri.fragment:
+        raise ValueError('GOVULNDB must be the official URL or a local file:// snapshot')
+    directory = Path(urllib.parse.unquote(uri.path))
+    if not directory.is_absolute() or not directory.is_dir():
+        raise ValueError('GOVULNDB file snapshot must be an absolute existing directory')
+    entries = sorted(directory.glob('GO-*.json'))
+    if not entries and not (directory / 'index/modules.json').is_file():
+        raise ValueError('GOVULNDB file snapshot has no vulnerability entries')
+    digest = hashlib.sha256()
+    for entry in entries:
+        digest.update(entry.name.encode())
+        digest.update(entry.read_bytes())
+    return {'url': source, 'sha256': digest.hexdigest()}
+
+
 def inventory(root):
     if sys.version_info < (3, 11):
         raise ValueError('Python 3.11+ required')
@@ -107,7 +128,7 @@ def inventory(root):
     if version(go) != version(target):
         raise ValueError(f'Go {target} required; found {go}')
     programs = ['go', 'node', 'python3', 'xmake', 'docker', 'buf', 'openssl', 'age', 'age-keygen', 'cc', 'erl', 'escript', 'rebar3', *GO_TOOLS]
-    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v3', 'build_network': build_network()}
+    result = {'go': go, 'python': sys.version, 'profile': 'local-ci-v3', 'build_network': build_network(), 'govulndb': vulndb()}
     for program in programs:
         binary = shutil.which(program)
         if not binary:

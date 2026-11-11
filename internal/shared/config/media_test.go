@@ -16,8 +16,13 @@ func TestLoadMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.GRPCAddr != ":50053" || c.S3Secure {
+	if c.GRPCAddr != ":50053" || c.S3Secure || len(c.PreviewGRPCAddrs) != 0 {
 		t.Fatalf("defaults: %+v", c)
+	}
+	t.Setenv("MEDIA_PREVIEW_GRPC_ADDRS", "passthrough:///media-preview-1:50054, passthrough:///media-preview-2:50054")
+	c, err = LoadMedia()
+	if err != nil || len(c.PreviewGRPCAddrs) != 2 {
+		t.Fatalf("preview workers: %+v, %v", c, err)
 	}
 	t.Setenv("MEDIA_S3_SECURE", "invalid")
 	if _, err := LoadMedia(); err == nil {

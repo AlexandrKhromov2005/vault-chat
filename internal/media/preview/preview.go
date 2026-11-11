@@ -36,16 +36,43 @@ var (
 // Make returns the JPEG preview of a PNG or JPEG image. The pixel and memory
 // budgets are checked on the header, before anything is decoded.
 func Make(data []byte) ([]byte, error) {
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || (format != "png" && format != "jpeg") || cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, ErrInvalid
+	small, err := decodeImage(data)
+	if err != nil {
+		return nil, err
 	}
-	need, ok := decodedBytes(data, format, cfg.Width, cfg.Height)
-	if !ok {
-		return nil, ErrInvalid
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, small, &jpeg.Options{Quality: Quality}); err != nil {
+		return nil, fmt.Errorf("%w: encode: %v", ErrInvalid, err)
 	}
-	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels || need > MaxDecoded {
-		return nil, ErrSkipped
+	if buf.Len() > MaxOutput {
+		return nil, fmt.Errorf("%w: preview of %d bytes", ErrInvalid, buf.Len())
+	}
+	return buf.Bytes(), nil
+}
+
+// DecodeRGB returns the preview dimensions and packed RGB pixels for the
+// process-worker comparison. It does not encode JPEG or preserve metadata.
+func DecodeRGB(data []byte) (int, int, []byte, error) {
+	img, err := decodeImage(data)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	b := img.Bounds()
+	rgb := make([]byte, b.Dx()*b.Dy()*3)
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			i := y*img.Stride + x*4
+			j := (y*b.Dx() + x) * 3
+			copy(rgb[j:j+3], img.Pix[i:i+3])
+		}
+	}
+	return b.Dx(), b.Dy(), rgb, nil
+}
+
+func decodeImage(data []byte) (*image.RGBA, error) {
+	_, format, err := inspect(data)
+	if err != nil {
+		return nil, err
 	}
 	var img image.Image
 	if format == "png" {
@@ -60,14 +87,7 @@ func Make(data []byte) ([]byte, error) {
 	if format == "jpeg" {
 		small = orient(small, orientation(data))
 	}
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, small, &jpeg.Options{Quality: Quality}); err != nil {
-		return nil, fmt.Errorf("%w: encode: %v", ErrInvalid, err)
-	}
-	if buf.Len() > MaxOutput {
-		return nil, fmt.Errorf("%w: preview of %d bytes", ErrInvalid, buf.Len())
-	}
-	return buf.Bytes(), nil
+	return small, nil
 }
 
 // fit returns the preview size: the longer side becomes MaxSide, and images

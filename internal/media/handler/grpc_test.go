@@ -43,6 +43,9 @@ func (f *testFiles) Get(context.Context, string) (*domain.File, error) {
 func (f *testFiles) Download(context.Context, string) (*domain.File, io.ReadCloser, error) {
 	return nil, nil, domain.ErrNotFound
 }
+func (f *testFiles) DownloadPreview(context.Context, string) (*domain.File, io.ReadCloser, error) {
+	return nil, nil, domain.ErrNotFound
+}
 
 func TestUploadProtocol(t *testing.T) {
 	files := &testFiles{uploaded: make(chan string, 10)}
@@ -110,6 +113,15 @@ func (f *readableFiles) Download(ctx context.Context, id string) (*domain.File, 
 	}
 	return file, io.NopCloser(strings.NewReader("hello")), nil
 }
+func (f *readableFiles) DownloadPreview(ctx context.Context, id string) (*domain.File, io.ReadCloser, error) {
+	file, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	file.ContentType = "image/jpeg"
+	file.Size = 4
+	return file, io.NopCloser(strings.NewReader("jpeg")), nil
+}
 func TestReadRPCsAndErrorMapping(t *testing.T) {
 	files := &readableFiles{}
 	listener := bufconn.Listen(1 << 20)
@@ -143,6 +155,18 @@ func TestReadRPCsAndErrorMapping(t *testing.T) {
 	}
 	if _, err := stream.Recv(); err != io.EOF {
 		t.Fatal(err)
+	}
+	previewStream, err := client.Download(ctx, &mediav1.DownloadRequest{FileId: req.FileId, Preview: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewMetadata, err := previewStream.Recv()
+	if err != nil || previewMetadata.GetFile().GetContentType() != "image/jpeg" {
+		t.Fatalf("preview metadata=%v %v", previewMetadata, err)
+	}
+	previewData, err := previewStream.Recv()
+	if err != nil || string(previewData.GetData()) != "jpeg" {
+		t.Fatalf("preview data=%v %v", previewData, err)
 	}
 	for _, tc := range []struct {
 		err  error

@@ -651,8 +651,12 @@ normal development Compose project or inherited test URLs.
 Commit first, then run `xmake ci` on a clean checkout. It tests a separate checkout
 of that exact commit without copying ignored `.env` or secrets, and writes local
 evidence only when source, tools and checks remain valid. Do not edit during CI.
-Use `xmake test` for uncommitted iterations. Push requires evidence less than 24
-hours old; publish the status with `python3 scripts/dev/verification.py publish`.
+Use `xmake test` for uncommitted iterations. When `vuln.go.dev` cannot be reached,
+`GOVULNDB=file:///absolute/path/to/data/osv` selects a local snapshot of the
+official `github.com/golang/vulndb` database. Its fingerprint is bound to the CI
+receipt; arbitrary mirror URLs are rejected. Keep the setting for publish/push/merge.
+Push requires evidence less than 24 hours old; publish the status with
+`python3 scripts/dev/verification.py publish`.
 The profile excludes the 10 live gateway web tests, Go `-tags compose` tests, a
 full remote backup/restore drill and production setup. Provide separate committed
 acceptance scenarios for changes affecting those boundaries. See

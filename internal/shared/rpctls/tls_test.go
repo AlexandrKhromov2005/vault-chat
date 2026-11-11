@@ -159,7 +159,7 @@ func TestRPCPermissions(t *testing.T) {
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }
 func FuzzIdentity(f *testing.F) {
-	for _, s := range []string{"spiffe://vault-chat/service/auth", "spiffe://evil/service/auth", "", "spiffe://vault-chat/service/auth?admin=1"} {
+	for _, s := range []string{"spiffe://vault-chat/service/auth", "spiffe://vault-chat/service/preview", "spiffe://evil/service/auth", "", "spiffe://vault-chat/service/auth?admin=1"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
@@ -169,7 +169,7 @@ func FuzzIdentity(f *testing.F) {
 		}
 		name := identity(&x509.Certificate{URIs: []*url.URL{u}})
 		if name != "" {
-			require.Contains(t, []string{"auth", "chat", "media", "gateway"}, name)
+			require.Contains(t, []string{"auth", "chat", "media", "gateway", "preview"}, name)
 			require.Equal(t, "spiffe://vault-chat/service/"+name, u.String())
 		}
 	})
@@ -195,6 +195,9 @@ func TestServiceMethodMatrixAndStreams(t *testing.T) {
 		{"auth", "media", "/auth.v1.AuthService/ValidateToken", true},
 		{"auth", "media", "/auth.v1.AuthService/GetUser", false},
 		{"auth", "gateway", "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", false},
+		{"preview", "media", "/preview.v1.PreviewService/Decode", true},
+		{"preview", "gateway", "/preview.v1.PreviewService/Decode", false},
+		{"preview", "media", "/preview.v1.PreviewService/Other", false},
 		{"chat", "chat", "/grpc.health.v1.Health/Check", true},
 	} {
 		t.Run(tt.server+tt.caller+tt.method, func(t *testing.T) {

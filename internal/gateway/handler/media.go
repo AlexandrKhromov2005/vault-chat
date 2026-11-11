@@ -175,11 +175,20 @@ func (h *MediaHandler) File(w http.ResponseWriter, r *http.Request) {
 
 // Download forces attachment handling and never serves active content inline.
 func (h *MediaHandler) Download(w http.ResponseWriter, r *http.Request) {
+	h.download(w, r, false)
+}
+
+// Preview returns the bounded JPEG after Media repeats the membership check.
+func (h *MediaHandler) Preview(w http.ResponseWriter, r *http.Request) {
+	h.download(w, r, true)
+}
+
+func (h *MediaHandler) download(w http.ResponseWriter, r *http.Request, preview bool) {
 	ctx, ok := mediaContext(w, r)
 	if !ok {
 		return
 	}
-	stream, err := h.client.Download(ctx, &mediav1.DownloadRequest{FileId: r.PathValue("file_id")})
+	stream, err := h.client.Download(ctx, &mediav1.DownloadRequest{FileId: r.PathValue("file_id"), Preview: preview})
 	if err != nil {
 		h.backendError(w, r, err)
 		return

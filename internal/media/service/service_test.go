@@ -6,17 +6,20 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/media/domain"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/media/preview"
 )
 
 type memoryRepo struct {
-	files map[string]*domain.File
-	ready map[string]bool
-	fail  bool
+	files    map[string]*domain.File
+	ready    map[string]bool
+	previews map[string]string
+	fail     bool
 }
 
 func (r *memoryRepo) Create(_ context.Context, f *domain.File) error { r.files[f.ID] = f; return nil }
@@ -32,6 +35,13 @@ func (r *memoryRepo) Get(_ context.Context, id string) (*domain.File, error) {
 		return nil, domain.ErrNotFound
 	}
 	return r.files[id], nil
+}
+func (r *memoryRepo) GetPreview(_ context.Context, id string) (string, error) {
+	key := r.previews[id]
+	if key == "" {
+		return "", domain.ErrNotFound
+	}
+	return key, nil
 }
 func (r *memoryRepo) RemovePending(_ context.Context, id string) error {
 	if !r.ready[id] {
@@ -83,7 +93,7 @@ func (g *roomGate) CheckRoom(context.Context, string) error {
 	return nil
 }
 func fixture() (*Service, *memoryRepo, *memoryStore, *roomGate) {
-	r := &memoryRepo{files: map[string]*domain.File{}, ready: map[string]bool{}}
+	r := &memoryRepo{files: map[string]*domain.File{}, ready: map[string]bool{}, previews: map[string]string{}}
 	b := &memoryStore{blobs: map[string]string{}}
 	g := &roomGate{}
 	return New(r, b, g), r, b, g
@@ -158,4 +168,36 @@ func TestExecutableNamesAreSafeForNewAndLegacyFiles(t *testing.T) {
 	defer func() { _ = body.Close() }()
 	require.Equal(t, "legacy.hta.txt", metadata.Name)
 	require.Equal(t, "legacy.hta", repo.files[f.ID].Name)
+}
+
+func TestDownloadPreviewChecksMembershipAndBounds(t *testing.T) {
+	s, repo, blobs, gate := fixture()
+	id := uuid.NewString()
+	file := &domain.File{ID: id, RoomID: uuid.NewString(), OwnerID: uuid.NewString(), Name: "photo.png", ContentType: "image/png", Size: 100, CreatedAt: time.Now()}
+	repo.files[id] = file
+	repo.ready[id] = true
+	repo.previews[id] = "render"
+	blobs.blobs["render"] = "jpeg"
+
+	got, body, err := s.DownloadPreview(context.Background(), id)
+	require.NoError(t, err)
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NoError(t, body.Close())
+	require.Equal(t, "jpeg", string(data))
+	require.Equal(t, "image/jpeg", got.ContentType)
+	require.Equal(t, int64(4), got.Size)
+	require.Equal(t, "preview.jpg", got.Name)
+
+	gate.denied = true
+	_, _, err = s.DownloadPreview(context.Background(), id)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	gate.denied = false
+	delete(repo.previews, id)
+	_, _, err = s.DownloadPreview(context.Background(), id)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	repo.previews[id] = "render"
+	blobs.blobs["render"] = strings.Repeat("x", preview.MaxOutput+1)
+	_, _, err = s.DownloadPreview(context.Background(), id)
+	require.Error(t, err)
 }

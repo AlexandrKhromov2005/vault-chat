@@ -81,3 +81,31 @@ class Security(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class VulnerabilityDatabase(unittest.TestCase):
+    def test_local_snapshot_is_fingerprinted_and_remote_override_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = Path(directory) / 'GO-2026-0001.json'
+            entry.write_text('{"id":"GO-2026-0001"}')
+            url = Path(directory).as_uri()
+            with patch.dict(os.environ, {'GOVULNDB': url}):
+                first = security.vulndb()
+                self.assertEqual(first['url'], url)
+                entry.write_text('{"id":"GO-2026-0001","changed":true}')
+                self.assertNotEqual(first['sha256'], security.vulndb()['sha256'])
+            with patch.dict(os.environ, {'GOVULNDB': 'https://mirror.invalid'}):
+                with self.assertRaisesRegex(ValueError, 'official|file'):
+                    security.vulndb()
+
+
+class VulnerabilityCommand(unittest.TestCase):
+    def test_xmake_forwards_local_database_as_an_explicit_flag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / 'govulncheck'
+            arguments = Path(directory) / 'arguments'
+            binary.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {arguments}\n')
+            binary.chmod(0o755)
+            environment = dict(os.environ, PATH=directory + os.pathsep + os.environ['PATH'], GOVULNDB='file:///tmp/official-vulndb')
+            subprocess.run(['xmake', 'vuln', '-P', '.'], cwd=ROOT, env=environment, check=True)
+            self.assertEqual(arguments.read_text().splitlines(), ['-db', 'file:///tmp/official-vulndb', './...'])

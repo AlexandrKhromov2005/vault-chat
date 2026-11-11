@@ -26,6 +26,8 @@ export class Conversation {
   #draft = newDraft();
   #sending = false;
   #downloadUrl = null; // object URL of the latest download
+  #previewUrls = new Set();
+  #renderVersion = 0;
   // #behind holds timelines that missed a live event or a resynchronization
   // while their first page was loading; they catch up once it is in.
   #behind = new WeakSet();
@@ -81,9 +83,11 @@ export class Conversation {
   }
 
   #clear() {
+    this.#renderVersion++;
     this.#draft = newDraft();
     this.#renderDraft();
     this.#revokeDownload();
+    this.#revokePreviews();
     $('message-list').replaceChildren();
     $('message-text').value = '';
     $('room-error').textContent = '';
@@ -153,6 +157,8 @@ export class Conversation {
     }
     if (!this.#isOpen(scope, roomId)) return;
 
+    this.#renderVersion++;
+    this.#revokePreviews();
     const box = $('messages');
     const fromBottom = box.scrollHeight - box.scrollTop;
     const atBottom = fromBottom - box.clientHeight < STICK_TO_BOTTOM_PX;
@@ -183,12 +189,41 @@ export class Conversation {
     const info = scope.files.info(fileId);
     if (info?.unavailable) return el('span', { class: 'attachment unavailable' }, 'файл недоступен');
     const label = info ? `${info.filename} · ${formatSize(info.size)}` : 'вложение';
-    return el('button', {
+    const button = el('button', {
       type: 'button',
       class: 'attachment',
       title: 'Скачать',
       onclick: () => this.#download(fileId, info?.filename ?? 'attachment'),
     }, `📎 ${label}`);
+    if (!['image/png', 'image/jpeg'].includes(info?.content_type)) return button;
+    const image = el('img', { class: 'attachment-preview', alt: 'Превью изображения', hidden: true, loading: 'lazy' });
+    const placeholder = el('span', { class: 'attachment preview-placeholder' }, 'Превью загружается…');
+    this.#showPreview(scope, fileId, image, placeholder, this.#renderVersion);
+    return el('div', { class: 'image-attachment' }, image, placeholder, button);
+  }
+
+  async #showPreview(scope, fileId, image, placeholder, version) {
+    let blob;
+    try {
+      blob = await scope.previews.get(fileId);
+    } catch {
+      blob = null;
+    }
+    if (!scope.alive || version !== this.#renderVersion) return;
+    if (!blob) {
+      placeholder.textContent = 'Превью пока недоступно';
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    this.#previewUrls.add(url);
+    image.src = url;
+    image.hidden = false;
+    placeholder.hidden = true;
+  }
+
+  #revokePreviews() {
+    for (const url of this.#previewUrls) URL.revokeObjectURL(url);
+    this.#previewUrls.clear();
   }
 
   // #download saves a file. The content is fetched with the access token and
