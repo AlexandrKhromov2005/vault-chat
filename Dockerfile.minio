@@ -1,6 +1,6 @@
 # Development S3 fixture built from pinned official MinIO source.
 # Community MinIO is unmaintained; replace this fixture for production.
-FROM golang:1.27.3-alpine3.24 AS build
+FROM golang:1.27.4-alpine3.24 AS build
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 ARG MC_VERSION=v0.0.0-20251106162529-77f82e18b540
 ARG MINIO_VERSION=v0.0.0-20260212201848-7aac2a2c5b7c
