@@ -270,7 +270,7 @@ test('an upload answered after another room was opened stays with its room', asy
 const imageMessage = { messages: [message(1, ['f-image'])], next_cursor: '' };
 const imageInfo = { ...info('f-image', 'photo.png'), content_type: 'image/png' };
 
-test('an image shows the authorized server preview once', () => downloads(async ({ blobs }) => {
+test('an image shows the authorized server preview only after it loads', () => downloads(async ({ blobs }) => {
   const api = scripted()
     .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
     .on('GET /api/v1/files/f-image', imageInfo)
@@ -278,15 +278,37 @@ test('an image shows the authorized server preview once', () => downloads(async 
   const { $, workspace } = await openTeam(api);
   await settle();
   const image = $('message-list').querySelector('img.attachment-preview');
+  const placeholder = $('message-list').querySelector('.preview-placeholder');
 
-  assert.equal(image.hidden, false);
   assert.equal(image.src, 'blob:1');
-  assert.equal($('message-list').querySelector('.preview-placeholder').hidden, true);
+  assert.equal(image.hidden, true);
+  assert.equal(placeholder.hidden, false);
+  image.dispatchEvent(new Event('load'));
+  assert.equal(image.hidden, false);
+  assert.equal(placeholder.hidden, true);
   assert.equal(await blobs[0].text(), 'jpeg');
 
   await workspace.refresh();
   await settle();
+  $('message-list').querySelector('img.attachment-preview').dispatchEvent(new Event('load'));
   assert.equal(api.calls.filter((call) => call.key === 'GET /api/v1/files/f-image/preview').length, 1);
+}));
+
+test('a rejected image keeps a visible error instead of a blank preview', () => downloads(async () => {
+  const api = scripted()
+    .on('GET /api/v1/rooms/r-team/messages?limit=50', imageMessage)
+    .on('GET /api/v1/files/f-image', imageInfo)
+    .on('GET /api/v1/files/f-image/preview', () => new Blob(['jpeg']));
+  const { $ } = await openTeam(api);
+  await settle();
+  const image = $('message-list').querySelector('img.attachment-preview');
+  const placeholder = $('message-list').querySelector('.preview-placeholder');
+
+  image.dispatchEvent(new Event('error'));
+
+  assert.equal(image.hidden, true);
+  assert.equal(placeholder.hidden, false);
+  assert.equal(placeholder.textContent, 'Не удалось загрузить превью');
 }));
 
 test('a pending preview keeps a placeholder and can be retried', async () => {
