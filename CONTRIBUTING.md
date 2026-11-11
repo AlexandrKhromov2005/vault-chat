@@ -39,15 +39,15 @@ git remote add upstream https://github.com/ORG/PROJECT_NAME.git
 ### 2. Environment Setup
 
 **Requirements:**
-- Go `1.26+` (the `toolchain go1.27.3` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
+- Go `1.26+` (the `toolchain go1.27.4` line in `go.mod` is downloaded automatically with the default `GOTOOLCHAIN=auto`)
 - `xmake` 2.8+ ([installation](https://xmake.io/#/guide/installation); on Ubuntu `apt install xmake`)
 - Docker with Compose v2, for the integration tests in `xmake ci`
 - Python 3.11+, OpenSSL, `age` and `age-keygen`, for mandatory deployment/crypto checks
 - Node.js 22.23.4, for web tests
 - Buf 1.47.2, for protobuf lint
 - Erlang/OTP 28.5.0.8 and rebar3 3.27.3, for the Calls checks (`calls/`)
-- `golangci-lint` v2.14.0 built with Go 1.27.3
-- `govulncheck` v1.9.0 built with Go 1.27.3 (pin the toolchain explicitly)
+- `golangci-lint` v2.14.0 built with Go 1.27.4
+- `govulncheck` v1.9.0 built with Go 1.27.4 (pin the toolchain explicitly)
 - `git` with `user.name` and `user.email` configured
 - Authenticated GitHub CLI (`gh`), required to publish verification evidence and perform guarded merges
 
@@ -55,10 +55,10 @@ Install the pinned Go analyzers into the ignored project tool directory:
 
 ```bash
 mkdir -p .tools/bin
-GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
-GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age@v1.3.1
-GOTOOLCHAIN=go1.27.3 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age-keygen@v1.3.1
+GOTOOLCHAIN=go1.27.4 GOBIN="$PWD/.tools/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOTOOLCHAIN=go1.27.4 GOBIN="$PWD/.tools/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOTOOLCHAIN=go1.27.4 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age@v1.3.1
+GOTOOLCHAIN=go1.27.4 GOBIN="$PWD/.tools/bin" go install filippo.io/age/cmd/age-keygen@v1.3.1
 export PATH="$PWD/.tools/bin:$PATH"
 ```
 
