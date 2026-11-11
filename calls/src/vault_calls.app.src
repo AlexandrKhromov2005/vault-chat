@@ -3,7 +3,7 @@
     {vsn, "0.1.0"},
     {registered, [vault_calls_sup, vault_calls_registry, vault_call_sup]},
     {mod, {vault_calls_app, []}},
-    {applications, [kernel, stdlib]},
+    {applications, [kernel, stdlib, ssl, epgsql]},
     %% Timeouts of docs/adr/0005-call-control.md, in milliseconds.
     {env, [
         {ringing_timeout, 30000},

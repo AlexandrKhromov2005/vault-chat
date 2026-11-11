@@ -5,16 +5,31 @@ Erlang/OTP. This is stage E2: a prototype to measure, not a deployed service.
 
 ## Toolchain
 
-Erlang/OTP 28.5.0.8 and rebar3 3.27.3, pinned by the ADR. This stage uses only
-OTP; there are no dependencies to fetch.
+Erlang/OTP 28.5.0.8 and rebar3 3.27.3, pinned by the ADR. PostgreSQL access uses
+the locked `epgsql` 4.8.0 dependency.
 
 ```sh
 xmake calls          # EUnit, xref and Dialyzer
 cd calls && rebar3 eunit
 ```
 
-`xmake ci` runs `xmake calls`; `xmake doctor` refuses other versions of OTP or
-rebar3.
+The storage tests require a disposable loopback PostgreSQL. They never use an
+inherited development or production database:
+
+```sh
+docker run -d --name vault-calls-dev-postgres \
+  --tmpfs /var/lib/postgresql/data \
+  -e POSTGRES_USER=calls -e POSTGRES_PASSWORD=calls -e POSTGRES_DB=calls_test \
+  -p 127.0.0.1::5432 postgres:16-alpine
+PORT=$(docker port vault-calls-dev-postgres 5432/tcp | sed 's/.*://')
+export VAULT_CHAT_TEST_CALLS_DATABASE_URL="postgres://calls:calls@127.0.0.1:${PORT}/calls_test?sslmode=disable"
+xmake calls
+docker stop vault-calls-dev-postgres
+docker rm vault-calls-dev-postgres
+```
+
+`xmake ci` creates this fixture automatically, runs `xmake calls` and removes the
+owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
 
 ## What exists
 
@@ -24,7 +39,11 @@ rebar3.
   each device within 45 s, at most 2 h active.
 - `vault_call_sup`: the calls' supervisor; a crash ends only that call.
 - `vault_calls_registry`: names calls by id, monitored, in a protected ETS table.
+- `vault_calls_store`: transactional creation with one active call per user,
+  capacity 200, and a command journal with SHA-256 fingerprint replay checks.
+  Database connections use two-second statement and bounded lock timeouts.
 
-Not yet: PostgreSQL state, command and signal logs, admission and restart from
-the database (E2.2); the HTTP prototype interface, Auth and Chat adapters and
-measurements (E2.3). Until then a call lives only in its process.
+Not yet: transactional transitions and signal logs, release of admission on
+`ended`, restart from the database, the HTTP prototype interface, Auth and Chat
+adapters and measurements (E2.3). The state-machine processes still live only in
+memory; `vault_calls_store` is not yet connected to them.
