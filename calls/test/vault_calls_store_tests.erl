@@ -29,7 +29,9 @@ setup() ->
 cleanup(#{store := Store, connection := Connection}) ->
     ok = vault_calls_store:stop(Store),
     ok = epgsql:close(Connection),
-    ok = application:unload(vault_calls).
+    _ = application:stop(vault_calls),
+    _ = application:unload(vault_calls),
+    ok.
 
 create_replays_its_original_response(#{store := Store, connection := Connection}) ->
     Args = args(<<"create-1">>, <<"alice">>, <<"bob">>),

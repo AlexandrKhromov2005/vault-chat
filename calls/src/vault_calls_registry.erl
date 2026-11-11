@@ -45,6 +45,14 @@ init([]) ->
 -spec handle_call(term(), gen_server:from(), #{reference() => term()}) ->
     {reply, yes | no | ok, #{reference() => term()}}.
 handle_call({register, Name, Pid}, _From, Monitors) ->
+    case ets:lookup(?TABLE, Name) of
+        [{Name, OldPid}] ->
+            case is_process_alive(OldPid) of
+                false -> true = ets:delete(?TABLE, Name);
+                true -> ok
+            end;
+        [] -> ok
+    end,
     case ets:insert_new(?TABLE, {Name, Pid}) of
         true -> {reply, yes, Monitors#{monitor(process, Pid) => Name}};
         false -> {reply, no, Monitors}
