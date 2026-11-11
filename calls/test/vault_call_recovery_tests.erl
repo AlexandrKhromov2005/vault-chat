@@ -8,7 +8,9 @@ recovery_test_() ->
         fun creation_is_persistent/1,
         fun ending_releases_participants_and_capacity/1,
         fun a_crashed_process_recovers_active_state/1,
-        fun an_application_restart_recovers_active_state/1
+        fun an_application_restart_recovers_active_state/1,
+        fun an_expired_call_ends_during_startup/1,
+        fun a_database_outage_blocks_the_transition/1
     ]}.
 
 setup() ->
@@ -60,6 +62,25 @@ an_application_restart_recovers_active_state(_) ->
     ok = application:stop(vault_calls),
     {ok, _} = application:ensure_all_started(vault_calls),
     [?_assertEqual({ok, active}, vault_call:state(<<"restart">>))].
+
+an_expired_call_ends_during_startup(#{connection := Connection}) ->
+    _ = new_call(<<"expired">>),
+    ok = application:stop(vault_calls),
+    timer:sleep(450),
+    {ok, _} = application:ensure_all_started(vault_calls),
+    timer:sleep(50),
+    [?_assertEqual({error, not_found}, vault_call:state(<<"expired">>)),
+     ?_assertEqual({<<"ended">>, 1, 0}, database_state(Connection, <<"expired">>)),
+     ?_assertEqual(0, participant_count(Connection))].
+
+a_database_outage_blocks_the_transition(#{connection := Connection}) ->
+    _ = new_call(<<"blocked">>),
+    Database = sys:get_state(vault_calls_store),
+    ok = epgsql:close(Database),
+    Reply = vault_call:command(<<"blocked">>, {accept, <<"bob">>, <<"bob-laptop">>}),
+    [?_assertEqual({error, unavailable}, Reply),
+     ?_assertEqual({ok, ringing}, vault_call:state(<<"blocked">>)),
+     ?_assertEqual({<<"ringing">>, 0, 1}, database_state(Connection, <<"blocked">>))].
 
 new_call(Id) ->
     {ok, Pid} = vault_call_sup:start_call(#{id => Id, room_id => <<"room-", Id/binary>>,
