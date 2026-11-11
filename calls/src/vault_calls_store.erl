@@ -60,7 +60,7 @@ signals_after(Store, Id, After) ->
     request(Store, {signals_after, Id, After}, 2500).
 
 -spec append_signal(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | candidate_limit | badarg | unavailable}.
+    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
 append_signal(Store, Id, Expected, Next) ->
     request(Store, {append_signal, Id, Expected, Next}, 2500).
 
@@ -286,7 +286,7 @@ saved_signal(_Connection, _Id, _Device, _SenderSeq, _Kind, _Payload) ->
     {error, badarg}.
 
 -spec append(epgsql:connection(), binary(), {atom(), non_neg_integer()}, map()) ->
-    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | candidate_limit | badarg}.
+    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg}.
 append(Connection, Id, {ExpectedState, ExpectedVersion}, Next)
   when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128,
        is_atom(ExpectedState), is_integer(ExpectedVersion), ExpectedVersion >= 0, is_map(Next) ->
@@ -337,6 +337,7 @@ append_new_signal(Connection, Id, ExpectedState, ExpectedVersion,
                                 kind := Kind, payload := Payload}} = Next) ->
     {ok, _, [{Count}]} = query(Connection, "SELECT count(*) FROM call_signals WHERE call_id = $1", [Id]),
     Count < 200 orelse abort(signal_limit),
+    check_signal_rate(Connection, Id, Device),
     check_candidate_budget(Connection, Id, Device, Kind),
     NextState = maps:get(state, Next),
     _ = update_signal_row(Connection, Id, ExpectedState, ExpectedVersion, Next),
@@ -366,6 +367,14 @@ update_signal_row(Connection, Id, ExpectedState, ExpectedVersion,
          lists:member(callee, Connected), Offered, nullable_role(Pending), Entered, CallerHeartbeat, CalleeHeartbeat,
          atom_to_binary(ExpectedState), ExpectedVersion]),
     NextStateBinary.
+
+-spec check_signal_rate(epgsql:connection(), binary(), binary()) -> ok.
+check_signal_rate(Connection, Id, Device) ->
+    {ok, _, [{Count}]} = query(Connection,
+        "SELECT count(*) FROM call_signals WHERE call_id = $1 AND sender_device = $2 "
+        "AND created_at > clock_timestamp() - interval '1 second'", [Id, Device]),
+    Count < 20 orelse abort(signal_rate_limited),
+    ok.
 
 -spec check_candidate_budget(epgsql:connection(), binary(), binary(), atom()) -> ok.
 check_candidate_budget(Connection, Id, Device, candidate) ->

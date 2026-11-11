@@ -34,7 +34,7 @@ abnormal exit the supervisor restores the process from the database row.
 -type command() :: {accept | reject | cancel | connected | 'end' | heartbeat, user(), device()}
                  | {signal, user(), device(), signal_kind()}.
 -type reply() :: {ok, state_name() | ended} | {ok, state_name(), pos_integer()}
-               | {error, not_found | conflict | command_id_reused | seq_reused | signal_limit | candidate_limit | badarg | unavailable}.
+               | {error, not_found | conflict | command_id_reused | seq_reused | signal_limit | signal_rate_limited | candidate_limit | badarg | unavailable}.
 -type data() :: #{id := binary(), room_id := binary(), state := state_name() | ended,
                   state_version := non_neg_integer(), caller := user(), caller_device := device(), callee := user(),
                   callee_device := device() | undefined, connected := [role()], offered := boolean(),

@@ -124,16 +124,21 @@ signals_are_ordered_and_idempotent(_) ->
      ?_assertMatch({ok, [#{signal_seq := 1, kind := offer}, #{signal_seq := 2, kind := candidate}]}, After),
      ?_assertMatch({ok, [#{signal_seq := 2, kind := candidate}]}, AfterOne)].
 
-simultaneous_signals_have_unique_server_sequences(_) ->
+simultaneous_signals_have_unique_server_sequences(#{connection := Connection}) ->
     _ = new_call(<<"concurrent-signals">>),
     {ok, connecting} = vault_call:command(<<"concurrent-signals">>, {accept, <<"bob">>, <<"bob-laptop">>}),
     {ok, connecting, 1} = vault_call:signal(
         <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, offer, <<"sdp">>, 1),
-    Results = signals_concurrently(lists:seq(2, 33)),
-    ServerSequences = lists:sort([SignalSeq || {ok, connecting, SignalSeq} <- Results]),
+    First = signals_concurrently(lists:seq(2, 20)),
+    RateLimited = vault_call:signal(
+        <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice-21">>, 21),
+    {ok, _} = epgsql:squery(Connection, "UPDATE call_signals SET created_at = clock_timestamp() - interval '2 seconds'"),
+    Second = signals_concurrently(lists:seq(21, 33)),
+    ServerSequences = lists:sort([SignalSeq || {ok, connecting, SignalSeq} <- First ++ Second]),
     Limit = vault_call:signal(
         <<"concurrent-signals">>, <<"alice">>, <<"alice-phone">>, candidate, <<"ice-34">>, 34),
-    [?_assertEqual(lists:seq(2, 33), ServerSequences),
+    [?_assertEqual({error, signal_rate_limited}, RateLimited),
+     ?_assertEqual(lists:seq(2, 33), ServerSequences),
      ?_assertEqual({error, candidate_limit}, Limit)].
 
 signal_rate_is_bounded_per_device(#{connection := Connection}) ->
