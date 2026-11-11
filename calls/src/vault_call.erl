@@ -33,7 +33,8 @@ persistence comes.
                  | {signal, user(), device(), signal_kind()}.
 -type reply() :: {ok, state_name() | ended} | {error, not_found | conflict | badarg}.
 -type data() :: #{id := binary(), caller := user(), caller_device := device(), callee := user(),
-                  callee_device := device() | undefined, connected := [role()], offered := boolean()}.
+                  callee_device := device() | undefined, connected := [role()], offered := boolean(),
+                  pending_offer := none | role()}.
 
 -spec start_link(start_args()) -> gen_statem:start_ret().
 start_link(#{id := Id} = Args) ->
@@ -63,7 +64,7 @@ callback_mode() ->
 -spec init(start_args()) -> gen_statem:init_result(state_name()).
 init(#{id := Id, caller := Caller, caller_device := Device, callee := Callee}) when Caller =/= Callee ->
     {ok, ringing, #{id => Id, caller => Caller, caller_device => Device, callee => Callee,
-                    callee_device => undefined, connected => [], offered => false}}.
+                    callee_device => undefined, connected => [], offered => false, pending_offer => none}}.
 
 -spec handle_event(gen_statem:event_type(), term(), state_name(), data()) ->
     gen_statem:event_handler_result(state_name()).
@@ -133,16 +134,25 @@ run({signal, _, _, Kind}, Role, State, Data, From) when Role =:= caller; Role =:
 run(_Command, _Role, _State, _Data, From) ->
     {keep_state_and_data, [{reply, From, {error, conflict}}]}.
 
-%% signal/4 is the signal matrix of the ADR. While connecting, the caller
-%% offers first and the callee answers only an offer; nobody signals before
-%% accept, so the caller learns nothing about a callee who did not answer.
+%% signal/4 is the signal matrix of the ADR. An offer stays pending until
+%% the other device answers; candidates do not change that. Nobody signals
+%% before accept, so the caller learns nothing about an unanswered callee.
 -spec signal(state_name(), role(), signal_kind(), data()) -> {ok, data()} | conflict.
-signal(connecting, caller, offer, Data) -> {ok, Data#{offered := true}};
+signal(connecting, caller, offer, #{pending_offer := none} = Data) ->
+    {ok, Data#{offered := true, pending_offer := caller}};
 signal(connecting, caller, Kind, #{offered := true} = Data)
   when Kind =:= candidate; Kind =:= end_of_candidates -> {ok, Data};
+signal(connecting, callee, answer, #{pending_offer := caller} = Data) ->
+    {ok, Data#{pending_offer := none}};
 signal(connecting, callee, Kind, #{offered := true} = Data)
-  when Kind =:= answer; Kind =:= candidate; Kind =:= end_of_candidates -> {ok, Data};
-signal(active, _Role, Kind, Data) when Kind =:= offer; Kind =:= answer; Kind =:= candidate -> {ok, Data};
+  when Kind =:= candidate; Kind =:= end_of_candidates -> {ok, Data};
+signal(active, Role, offer, #{pending_offer := none} = Data) ->
+    {ok, Data#{pending_offer := Role}};
+signal(active, caller, answer, #{pending_offer := callee} = Data) ->
+    {ok, Data#{pending_offer := none}};
+signal(active, callee, answer, #{pending_offer := caller} = Data) ->
+    {ok, Data#{pending_offer := none}};
+signal(active, _Role, candidate, Data) -> {ok, Data};
 signal(_State, _Role, _Kind, _Data) -> conflict.
 
 -spec finish(gen_statem:from()) -> gen_statem:event_handler_result(state_name()).
