@@ -10,7 +10,8 @@ recovery_test_() ->
         fun a_crashed_process_recovers_active_state/1,
         fun an_application_restart_recovers_active_state/1,
         fun an_expired_call_ends_during_startup/1,
-        fun a_database_outage_blocks_the_transition/1
+        fun a_database_outage_blocks_the_transition/1,
+        fun client_commands_replay_their_original_response/1
     ]}.
 
 setup() ->
@@ -81,6 +82,28 @@ a_database_outage_blocks_the_transition(#{connection := Connection}) ->
     [?_assertEqual({error, unavailable}, Reply),
      ?_assertEqual({ok, ringing}, vault_call:state(<<"blocked">>)),
      ?_assertEqual({<<"ringing">>, 0, 1}, database_state(Connection, <<"blocked">>))].
+
+client_commands_replay_their_original_response(_) ->
+    _ = new_call(<<"replay">>),
+    Accept = {accept, <<"bob">>, <<"bob-laptop">>},
+    AcceptMeta = command_meta(<<"replay-accept">>, <<"bob-laptop">>),
+    First = vault_call:command(<<"replay">>, Accept, AcceptMeta),
+    {ok, connecting} = vault_call:command(<<"replay">>, {connected, <<"alice">>, <<"alice-phone">>}),
+    {ok, active} = vault_call:command(<<"replay">>, {connected, <<"bob">>, <<"bob-laptop">>}),
+    Replay = vault_call:command(<<"replay">>, Accept, AcceptMeta),
+    Reused = vault_call:command(<<"replay">>, Accept, AcceptMeta#{fingerprint := <<1:256>>}),
+    EndCommand = {'end', <<"alice">>, <<"alice-phone">>},
+    EndMeta = command_meta(<<"replay-end">>, <<"alice-phone">>),
+    Ended = vault_call:command(<<"replay">>, EndCommand, EndMeta),
+    EndReplay = vault_call:command(<<"replay">>, EndCommand, EndMeta),
+    [?_assertEqual({ok, connecting}, First),
+     ?_assertEqual(First, Replay),
+     ?_assertEqual({error, command_id_reused}, Reused),
+     ?_assertEqual({ok, ended}, Ended),
+     ?_assertEqual(Ended, EndReplay)].
+
+command_meta(Id, Device) ->
+    #{device => Device, command_id => Id, fingerprint => crypto:hash(sha256, Id)}.
 
 new_call(Id) ->
     {ok, Pid} = vault_call_sup:start_call(#{id => Id, room_id => <<"room-", Id/binary>>,

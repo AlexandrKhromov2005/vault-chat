@@ -19,7 +19,7 @@ abnormal exit the supervisor restores the process from the database row.
 """.
 -behaviour(gen_statem).
 
--export([start_link/1, command/2, state/1]).
+-export([start_link/1, command/2, command/3, state/1]).
 -export([callback_mode/0, init/1, handle_event/4]).
 -export_type([start_args/0, command/0, reply/0]).
 
@@ -53,14 +53,20 @@ start_registered(#{id := Id} = Args, Retry) ->
         Result -> Result
     end.
 
--doc "Runs a command; an unknown or ended call is `not_found`.".
+-doc "Runs a command and returns a saved response for a repeated command id.".
 -spec command(binary(), command()) -> reply().
 command(Id, Command) ->
-    try gen_statem:call({via, vault_calls_registry, Id}, {Command, meta(Id, Command, command_device(Command))}, 5000)
+    command(Id, Command, meta(Id, Command, command_device(Command))).
+
+-spec command(binary(), command(), map()) -> reply().
+command(Id, Command, Meta) when is_map(Meta) ->
+    try gen_statem:call({via, vault_calls_registry, Id}, {Command, Meta}, 5000)
     catch
-        exit:{noproc, _} -> {error, not_found};
-        exit:{normal, _} -> {error, not_found}
-    end.
+        exit:{noproc, _} -> vault_calls_store:replay(vault_calls_store, Meta);
+        exit:{normal, _} -> vault_calls_store:replay(vault_calls_store, Meta)
+    end;
+command(_Id, _Command, _Meta) ->
+    {error, badarg}.
 
 -spec state(binary()) -> {ok, state_name()} | {error, not_found}.
 state(Id) ->
@@ -98,9 +104,14 @@ handle_event({timeout, {heartbeat, _Role}}, missed, active, Data) ->
 handle_event({call, From}, get_state, State, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, State}}]};
 handle_event({call, From}, {Command, Meta}, State, Data) when tuple_size(Command) >= 3 ->
-    case role(element(2, Command), element(3, Command), Data) of
-        stranger -> {keep_state_and_data, [{reply, From, {error, not_found}}]};
-        Role -> run(Command, Role, State, Data, From, Meta)
+    case vault_calls_store:replay(vault_calls_store, Meta) of
+        {ok, ReplayState} -> {keep_state_and_data, [{reply, From, {ok, ReplayState}}]};
+        {error, not_found} ->
+            case role(element(2, Command), element(3, Command), Data) of
+                stranger -> {keep_state_and_data, [{reply, From, {error, not_found}}]};
+                Role -> run(Command, Role, State, Data, From, Meta)
+            end;
+        {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
     end;
 handle_event({call, From}, _Malformed, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, badarg}}]};
