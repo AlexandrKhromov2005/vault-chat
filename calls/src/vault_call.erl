@@ -19,7 +19,7 @@ abnormal exit the supervisor restores the process from the database row.
 """.
 -behaviour(gen_statem).
 
--export([start_link/1, command/2, command/3, state/1]).
+-export([start_link/1, command/2, command/3, signal/6, state/1]).
 -export([callback_mode/0, init/1, handle_event/4]).
 -export_type([start_args/0, command/0, reply/0]).
 
@@ -33,7 +33,8 @@ abnormal exit the supervisor restores the process from the database row.
 -type restore_args() :: #{id := binary()}.
 -type command() :: {accept | reject | cancel | connected | 'end' | heartbeat, user(), device()}
                  | {signal, user(), device(), signal_kind()}.
--type reply() :: {ok, state_name() | ended} | {error, not_found | conflict | command_id_reused | badarg | unavailable}.
+-type reply() :: {ok, state_name() | ended} | {ok, state_name(), pos_integer()}
+               | {error, not_found | conflict | command_id_reused | seq_reused | signal_limit | candidate_limit | badarg | unavailable}.
 -type data() :: #{id := binary(), room_id := binary(), state := state_name() | ended,
                   state_version := non_neg_integer(), caller := user(), caller_device := device(), callee := user(),
                   callee_device := device() | undefined, connected := [role()], offered := boolean(),
@@ -67,6 +68,15 @@ command(Id, Command, Meta) when is_map(Meta) ->
     end;
 command(_Id, _Command, _Meta) ->
     {error, badarg}.
+
+-spec signal(binary(), user(), device(), signal_kind(), binary(), pos_integer()) -> reply().
+signal(Id, User, Device, Kind, Payload, SenderSeq) ->
+    try gen_statem:call({via, vault_calls_registry, Id},
+                        {payload_signal, User, Device, Kind, Payload, SenderSeq}, 5000)
+    catch
+        exit:{noproc, _} -> vault_calls_store:replay_signal(vault_calls_store, Id, Device, SenderSeq, Kind, Payload);
+        exit:{normal, _} -> vault_calls_store:replay_signal(vault_calls_store, Id, Device, SenderSeq, Kind, Payload)
+    end.
 
 -spec state(binary()) -> {ok, state_name()} | {error, not_found}.
 state(Id) ->
@@ -103,6 +113,13 @@ handle_event({timeout, {heartbeat, _Role}}, missed, active, Data) ->
     expire(Data);
 handle_event({call, From}, get_state, State, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, State}}]};
+handle_event({call, From}, {payload_signal, User, Device, Kind, Payload, SenderSeq}, State, Data) ->
+    case role(User, Device, Data) of
+        stranger -> {keep_state_and_data, [{reply, From, {error, not_found}}]};
+        Role when Role =:= caller; Role =:= callee ->
+            run_payload_signal(Kind, Payload, SenderSeq, Device, Role, State, Data, From);
+        _ -> {keep_state_and_data, [{reply, From, {error, conflict}}]}
+    end;
 handle_event({call, From}, {Command, Meta}, State, Data) when tuple_size(Command) >= 3 ->
     case vault_calls_store:replay(vault_calls_store, Meta) of
         {ok, ReplayState} -> {keep_state_and_data, [{reply, From, {ok, ReplayState}}]};
@@ -117,6 +134,30 @@ handle_event({call, From}, _Malformed, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, badarg}}]};
 handle_event(info, _Message, _State, _Data) ->
     keep_state_and_data.
+
+-spec run_payload_signal(signal_kind(), binary(), pos_integer(), device(), role(), state_name(), data(), gen_statem:from()) ->
+    gen_statem:event_handler_result(state_name()).
+run_payload_signal(Kind, Payload, SenderSeq, Device, Role, State, Data, From) ->
+    case vault_calls_store:replay_signal(vault_calls_store, maps:get(id, Data), Device, SenderSeq, Kind, Payload) of
+        {ok, State, SignalSeq} -> {keep_state_and_data, [{reply, From, {ok, State, SignalSeq}}]};
+        {error, not_found} ->
+            case signal(State, Role, Kind, Data) of
+                {ok, Next} -> commit_signal(Kind, Payload, SenderSeq, Device, State, Next, Data, From);
+                conflict -> {keep_state_and_data, [{reply, From, {error, conflict}}]}
+            end;
+        {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
+    end.
+
+-spec commit_signal(signal_kind(), binary(), pos_integer(), device(), state_name(), data(), data(), gen_statem:from()) ->
+    gen_statem:event_handler_result(state_name()).
+commit_signal(Kind, Payload, SenderSeq, Device, State, NextData, Data, From) ->
+    Expected = {State, maps:get(state_version, Data)},
+    Signal = #{sender_device => Device, sender_seq => SenderSeq, kind => Kind, payload => Payload},
+    case vault_calls_store:append_signal(vault_calls_store, maps:get(id, Data), Expected,
+                                         NextData#{signal => Signal}) of
+        {ok, State, SignalSeq} -> {keep_state, NextData, [{reply, From, {ok, State, SignalSeq}}]};
+        {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
+    end.
 
 -spec role(user(), device(), data()) -> role() | other_device | stranger.
 role(Caller, Device, #{caller := Caller, caller_device := Device}) -> caller;

@@ -5,7 +5,8 @@
 -include_lib("epgsql/include/epgsql.hrl").
 
 -export([start_link/0, start_link/1, stop/1, connect/1, migrate/1, create_call/2]).
--export([get_call/2, list_active/1, persist/4, replay/2]).
+-export([get_call/2, list_active/1, signals_after/2, signals_after/3, append_signal/4, persist/4, replay/2, replay_signal/6]).
+-export([purge_expired/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -type create_args() :: #{id := binary(), room_id := binary(), caller := binary(),
@@ -44,6 +45,29 @@ get_call(Store, Id) ->
 -spec list_active(gen_server:server_ref()) -> {ok, [binary()]} | {error, unavailable}.
 list_active(Store) ->
     request(Store, list_active, 2500).
+
+-spec purge_expired(gen_server:server_ref()) -> ok | {error, unavailable}.
+purge_expired(Store) ->
+    request(Store, purge_expired, 2500).
+
+-spec signals_after(gen_server:server_ref(), binary()) -> {ok, [map()]} | {error, badarg | unavailable}.
+signals_after(Store, Id) ->
+    signals_after(Store, Id, 0).
+
+-spec signals_after(gen_server:server_ref(), binary(), non_neg_integer()) ->
+    {ok, [map()]} | {error, badarg | unavailable}.
+signals_after(Store, Id, After) ->
+    request(Store, {signals_after, Id, After}, 2500).
+
+-spec append_signal(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) ->
+    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | candidate_limit | badarg | unavailable}.
+append_signal(Store, Id, Expected, Next) ->
+    request(Store, {append_signal, Id, Expected, Next}, 2500).
+
+-spec replay_signal(gen_server:server_ref(), binary(), binary(), pos_integer(), atom(), binary()) ->
+    {ok, atom(), pos_integer()} | {error, not_found | seq_reused | badarg | unavailable}.
+replay_signal(Store, Id, Device, SenderSeq, Kind, Payload) ->
+    request(Store, {replay_signal, Id, Device, SenderSeq, Kind, Payload}, 2500).
 
 -spec persist(gen_server:server_ref(), binary(), {atom(), non_neg_integer()}, map()) -> persist_reply().
 persist(Store, Id, Expected, Next) ->
@@ -85,8 +109,16 @@ handle_call({get_call, Id}, _From, Connection) ->
     {reply, safe(fun() -> get(Connection, Id) end), Connection};
 handle_call(list_active, _From, Connection) ->
     {reply, safe(fun() -> active(Connection) end), Connection};
+handle_call(purge_expired, _From, Connection) ->
+    {reply, safe(fun() -> purge(Connection) end), Connection};
 handle_call({persist, Id, Expected, Next}, _From, Connection) ->
     {reply, safe(fun() -> save(Connection, Id, Expected, Next) end), Connection};
+handle_call({append_signal, Id, Expected, Next}, _From, Connection) ->
+    {reply, safe(fun() -> append(Connection, Id, Expected, Next) end), Connection};
+handle_call({signals_after, Id, After}, _From, Connection) ->
+    {reply, safe(fun() -> signal_page(Connection, Id, After) end), Connection};
+handle_call({replay_signal, Id, Device, SenderSeq, Kind, Payload}, _From, Connection) ->
+    {reply, safe(fun() -> saved_signal(Connection, Id, Device, SenderSeq, Kind, Payload) end), Connection};
 handle_call({replay, Meta}, _From, Connection) ->
     {reply, safe(fun() -> replay_saved(Connection, Meta) end), Connection};
 handle_call(_Request, _From, Connection) ->
@@ -176,6 +208,14 @@ active(Connection) ->
         "SELECT id FROM calls WHERE state <> 'ended' ORDER BY created_at LIMIT 200", []),
     {ok, [Id || {Id} <- Rows]}.
 
+-spec purge(epgsql:connection()) -> ok.
+purge(Connection) ->
+    {ok, _} = query(Connection, "DELETE FROM call_commands WHERE created_at < clock_timestamp() - interval '24 hours'", []),
+    {ok, _} = query(Connection,
+        "DELETE FROM call_signals WHERE call_id IN "
+        "(SELECT id FROM calls WHERE state = 'ended' AND ended_at < clock_timestamp() - interval '1 hour')", []),
+    ok.
+
 -spec save(epgsql:connection(), binary(), {atom(), non_neg_integer()}, map()) -> persist_reply().
 save(Connection, Id, {ExpectedState, ExpectedVersion},
      #{command := #{device := Device, command_id := CommandId, fingerprint := Fingerprint},
@@ -222,6 +262,171 @@ save_transaction(Connection, {Id, ExpectedState, ExpectedVersion, Device, Comman
                 {ok, _, []} -> {error, not_found}
             end
     end.
+
+-spec saved_signal(epgsql:connection(), binary(), binary(), pos_integer(), atom(), binary()) ->
+    {ok, atom(), pos_integer()} | {error, not_found | seq_reused | badarg}.
+saved_signal(Connection, Id, Device, SenderSeq, Kind, Payload)
+  when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128,
+       is_binary(Device), byte_size(Device) > 0, byte_size(Device) =< 256,
+       is_integer(SenderSeq), SenderSeq > 0, is_atom(Kind), is_binary(Payload) ->
+    case valid_payload(Kind, Payload) of
+        false -> {error, badarg};
+        true ->
+            KindBinary = signal_kind(Kind),
+            case query(Connection,
+                "SELECT s.kind, s.payload, s.signal_seq, c.state FROM call_signals s "
+                "JOIN calls c ON c.id = s.call_id WHERE s.call_id = $1 AND s.sender_device = $2 AND s.sender_seq = $3",
+                [Id, Device, SenderSeq]) of
+                {ok, _, [{KindBinary, Payload, SignalSeq, State}]} -> {ok, state_from_binary(State), SignalSeq};
+                {ok, _, [{_, _, _, _}]} -> {error, seq_reused};
+                {ok, _, []} -> {error, not_found}
+            end
+    end;
+saved_signal(_Connection, _Id, _Device, _SenderSeq, _Kind, _Payload) ->
+    {error, badarg}.
+
+-spec append(epgsql:connection(), binary(), {atom(), non_neg_integer()}, map()) ->
+    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused | signal_limit | candidate_limit | badarg}.
+append(Connection, Id, {ExpectedState, ExpectedVersion}, Next)
+  when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128,
+       is_atom(ExpectedState), is_integer(ExpectedVersion), ExpectedVersion >= 0, is_map(Next) ->
+    case valid_signal_next(Next) of
+        true ->
+            Args = {Id, ExpectedState, ExpectedVersion, Next},
+            case epgsql:with_transaction(Connection, fun(C) -> append_transaction(C, Args) end,
+                                         #{ensure_committed => true, reraise => false}) of
+                {rollback, {abort, Reason}} -> {error, Reason};
+                {rollback, _} -> {error, unavailable};
+                Reply -> Reply
+            end;
+        false -> {error, badarg}
+    end;
+append(_Connection, _Id, _Expected, _Next) ->
+    {error, badarg}.
+
+-spec append_transaction(epgsql:connection(), tuple()) ->
+    {ok, atom(), pos_integer()} | {error, not_found | conflict | seq_reused}.
+append_transaction(Connection, {Id, ExpectedState, ExpectedVersion,
+                                #{signal := #{sender_device := Device, sender_seq := SenderSeq,
+                                              kind := Kind, payload := Payload}} = Next}) ->
+    KindBinary = signal_kind(Kind),
+    case query(Connection, "SELECT state, state_version FROM calls WHERE id = $1 FOR UPDATE", [Id]) of
+        {ok, _, []} -> {error, not_found};
+        {ok, _, [{State, Version}]} ->
+            case query(Connection,
+                "SELECT kind, payload, signal_seq FROM call_signals "
+                "WHERE call_id = $1 AND sender_device = $2 AND sender_seq = $3", [Id, Device, SenderSeq]) of
+                {ok, _, [{ExistingKind, ExistingPayload, ExistingSeq}]} ->
+                    case {ExistingKind, ExistingPayload} of
+                        {KindBinary, Payload} -> {ok, state_from_binary(State), ExistingSeq};
+                        _ -> {error, seq_reused}
+                    end;
+                {ok, _, []} ->
+                    case {state_from_binary(State), Version} of
+                        {ExpectedState, ExpectedVersion} ->
+                            append_new_signal(Connection, Id, ExpectedState, ExpectedVersion, Next);
+                        _ -> {error, conflict}
+                    end
+            end
+    end.
+
+-spec append_new_signal(epgsql:connection(), binary(), atom(), non_neg_integer(), map()) ->
+    {ok, atom(), pos_integer()}.
+append_new_signal(Connection, Id, ExpectedState, ExpectedVersion,
+                  #{signal := #{sender_device := Device, sender_seq := SenderSeq,
+                                kind := Kind, payload := Payload}} = Next) ->
+    {ok, _, [{Count}]} = query(Connection, "SELECT count(*) FROM call_signals WHERE call_id = $1", [Id]),
+    Count < 200 orelse abort(signal_limit),
+    check_candidate_budget(Connection, Id, Device, Kind),
+    NextState = maps:get(state, Next),
+    _ = update_signal_row(Connection, Id, ExpectedState, ExpectedVersion, Next),
+    {ok, _, [{SignalSeq}]} = query(Connection,
+        "SELECT coalesce(max(signal_seq), 0) + 1 FROM call_signals WHERE call_id = $1", [Id]),
+    {ok, 1} = query(Connection,
+        "INSERT INTO call_signals (call_id, sender_device, sender_seq, signal_seq, kind, payload) "
+        "VALUES ($1, $2, $3, $4, $5, $6)",
+        [Id, Device, SenderSeq, SignalSeq, signal_kind(Kind), Payload]),
+    {ok, NextState, SignalSeq}.
+
+-spec update_signal_row(epgsql:connection(), binary(), atom(), non_neg_integer(), map()) -> binary().
+update_signal_row(Connection, Id, ExpectedState, ExpectedVersion,
+                  #{state := NextState, state_version := NextVersion, callee_device := CalleeDevice,
+                    connected := Connected, offered := Offered, pending_offer := Pending,
+                    state_entered_at := Entered, caller_heartbeat_at := CallerHeartbeat,
+                    callee_heartbeat_at := CalleeHeartbeat}) ->
+    NextStateBinary = atom_to_binary(NextState),
+    {ok, 1} = query(Connection,
+        "UPDATE calls SET state = $2, state_version = $3, callee_device = $4, "
+        "connected_caller = $5, connected_callee = $6, offered = $7, pending_offer = $8, "
+        "state_entered_at = to_timestamp($9 / 1000.0), "
+        "caller_heartbeat_at = case when $10::bigint = 0 then null else to_timestamp($10 / 1000.0) end, "
+        "callee_heartbeat_at = case when $11::bigint = 0 then null else to_timestamp($11 / 1000.0) end, "
+        "ended_at = null WHERE id = $1 AND state = $12 AND state_version = $13",
+        [Id, NextStateBinary, NextVersion, CalleeDevice, lists:member(caller, Connected),
+         lists:member(callee, Connected), Offered, nullable_role(Pending), Entered, CallerHeartbeat, CalleeHeartbeat,
+         atom_to_binary(ExpectedState), ExpectedVersion]),
+    NextStateBinary.
+
+-spec check_candidate_budget(epgsql:connection(), binary(), binary(), atom()) -> ok.
+check_candidate_budget(Connection, Id, Device, candidate) ->
+    {ok, _, [{Count}]} = query(Connection,
+        "SELECT count(*) FROM call_signals WHERE call_id = $1 AND sender_device = $2 AND kind = 'candidate'",
+        [Id, Device]),
+    Count < 32 orelse abort(candidate_limit),
+    ok;
+check_candidate_budget(_Connection, _Id, _Device, _Kind) ->
+    ok.
+
+-spec valid_signal_next(map()) -> boolean().
+valid_signal_next(#{state := NextState, state_version := NextVersion, callee_device := CalleeDevice,
+                    connected := Connected, offered := Offered, pending_offer := Pending,
+                    state_entered_at := Entered, caller_heartbeat_at := CallerHeartbeat,
+                    callee_heartbeat_at := CalleeHeartbeat,
+                    signal := #{sender_device := Device, sender_seq := SenderSeq, kind := Kind, payload := Payload}}) ->
+    lists:member(NextState, [ringing, connecting, active]) andalso is_integer(NextVersion) andalso NextVersion >= 0 andalso
+    (is_binary(CalleeDevice) orelse CalleeDevice =:= undefined) andalso is_list(Connected) andalso
+    is_boolean(Offered) andalso lists:member(Pending, [none, caller, callee]) andalso
+    is_integer(Entered) andalso Entered > 0 andalso is_integer(CallerHeartbeat) andalso CallerHeartbeat >= 0 andalso
+    is_integer(CalleeHeartbeat) andalso CalleeHeartbeat >= 0 andalso is_binary(Device) andalso
+    byte_size(Device) > 0 andalso byte_size(Device) =< 256 andalso is_integer(SenderSeq) andalso SenderSeq > 0 andalso
+    valid_payload(Kind, Payload);
+valid_signal_next(_Next) ->
+    false.
+
+-spec valid_payload(atom(), binary()) -> boolean().
+valid_payload(offer, Payload) -> valid_text(Payload, 8192);
+valid_payload(answer, Payload) -> valid_text(Payload, 8192);
+valid_payload(candidate, Payload) -> valid_text(Payload, 512);
+valid_payload(end_of_candidates, Payload) -> Payload =:= <<>>;
+valid_payload(_Kind, _Payload) -> false.
+
+-spec valid_text(binary(), non_neg_integer()) -> boolean().
+valid_text(Payload, Limit) when is_binary(Payload), byte_size(Payload) =< Limit ->
+    is_list(unicode:characters_to_list(Payload));
+valid_text(_Payload, _Limit) ->
+    false.
+
+-spec signal_page(epgsql:connection(), binary(), non_neg_integer()) -> {ok, [map()]} | {error, badarg}.
+signal_page(Connection, Id, After)
+  when is_binary(Id), byte_size(Id) > 0, byte_size(Id) =< 128, is_integer(After), After >= 0 ->
+    {ok, _, Rows} = query(Connection,
+        "SELECT signal_seq, sender_device, sender_seq, kind, payload FROM call_signals "
+        "WHERE call_id = $1 AND signal_seq > $2 ORDER BY signal_seq LIMIT 200", [Id, After]),
+    {ok, [#{signal_seq => SignalSeq, sender_device => Device, sender_seq => SenderSeq,
+            kind => signal_kind_from_binary(Kind), payload => Payload}
+          || {SignalSeq, Device, SenderSeq, Kind, Payload} <- Rows]};
+signal_page(_Connection, _Id, _After) ->
+    {error, badarg}.
+
+-spec signal_kind(atom()) -> binary().
+signal_kind(end_of_candidates) -> <<"end-of-candidates">>;
+signal_kind(Kind) -> atom_to_binary(Kind).
+
+-spec signal_kind_from_binary(binary()) -> atom().
+signal_kind_from_binary(<<"offer">>) -> offer;
+signal_kind_from_binary(<<"answer">>) -> answer;
+signal_kind_from_binary(<<"candidate">>) -> candidate;
+signal_kind_from_binary(<<"end-of-candidates">>) -> end_of_candidates.
 
 -spec persist_row(epgsql:connection(), binary(), atom(), non_neg_integer(), binary(), binary(), binary(), map()) ->
     {ok, atom()}.
