@@ -57,4 +57,23 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   `vault_calls_chat_stub` provide synthetic sessions and direct rooms with
   configurable delays and outage switches; they are not production adapters.
 
-Not yet: measurements (E2.3) and production adapters.
+## Load acceptance
+
+`VAULT_CALLS_LOADGEN_COUNT` defaults to 200. With the disposable database URL
+above, `scripts/dev/calls-load` starts the HTTP prototype and runs full call
+lifecycles in batches of eight concurrent clients. It measures command p95/p99,
+throughput, scheduler utilization and RSS sampled every 20 ms. One process is
+killed and recovered, then the whole VM is killed with `kill -9` and a second VM
+verifies all 200 calls. Latency or RSS-growth failure is reported only after the
+restart check. The metrics JSON includes `baseline_rss_bytes`, `rss_delta_bytes`
+and `gate_status`; a high baseline is reported as `baseline_rss_exceeded` rather
+than a passed absolute RSS gate. `xmake ci` runs this scenario after the Calls
+checks.
+
+The 2026-11-11 local run completed 200 calls and 1600 commands with zero errors,
+225.3 commands/s, p95 63.01 ms and p99 95.74 ms; crash and restart recovery both
+passed. The host BEAM baseline was 2.06 GiB and the sampled peak delta was about
+21.1 MiB, so the 256-MiB absolute RSS gate remains explicitly unmet on this host
+(`baseline_rss_exceeded`). This is prototype evidence, not production acceptance.
+
+Not yet: production adapters.

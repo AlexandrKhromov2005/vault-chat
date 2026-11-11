@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+: "${VAULT_CHAT_TEST_CALLS_DATABASE_URL:?disposable Calls database required}"
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/vault-calls-load.XXXXXX")
+chmod 700 "$WORK"
+cleanup() {
+    rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+cd "$ROOT"
+export ERL_LIBS=calls/_build/default/lib
+set +e
+escript calls/loadgen.escript setup "$WORK"
+CODE=$?
+set -e
+if [ "$CODE" -ne 137 ]; then
+    echo "Calls load setup failed with exit code $CODE" >&2
+    exit "$CODE"
+fi
+escript calls/loadgen.escript verify "$WORK"

@@ -8,6 +8,7 @@ recovery_test_() ->
         fun creation_is_persistent/1,
         fun ending_releases_participants_and_capacity/1,
         fun a_crashed_process_recovers_active_state/1,
+        fun a_replayed_creation_does_not_reset_a_crashed_call/1,
         fun an_application_restart_recovers_active_state/1,
         fun an_expired_call_ends_during_startup/1,
         fun a_database_outage_blocks_the_transition/1,
@@ -62,6 +63,20 @@ a_crashed_process_recovers_active_state(_) ->
     receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
     timer:sleep(50),
     [?_assertEqual({ok, active}, vault_call:state(<<"crash">>))].
+
+a_replayed_creation_does_not_reset_a_crashed_call(_) ->
+    Id = <<"replay-crash">>,
+    Args = #{id => Id, room_id => <<"room-", Id/binary>>, caller => <<"alice">>,
+             caller_device => <<"alice-phone">>, callee => <<"bob">>,
+             command_id => <<"create-", Id/binary>>, fingerprint => crypto:hash(sha256, Id)},
+    {ok, Pid} = vault_call_sup:start_call(Args),
+    ok = connect(Id),
+    {ok, Pid} = vault_call_sup:start_call(Args),
+    Ref = monitor(process, Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
+    timer:sleep(50),
+    [?_assertEqual({ok, active}, vault_call:state(Id))].
 
 an_application_restart_recovers_active_state(_) ->
     _ = new_call(<<"restart">>),

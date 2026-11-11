@@ -14,7 +14,7 @@ start_link() ->
 
 -spec port() -> non_neg_integer().
 port() ->
-    gen_server:call(?MODULE, port, 5000).
+    persistent_term:get({?MODULE, port}).
 
 -spec init([]) -> {ok, state()} | ignore | {error, term()}.
 init([]) ->
@@ -69,6 +69,7 @@ start_server() ->
     case gen_tcp:listen(0, Options) of
         {ok, Listener} ->
             {ok, Port} = inet:port(Listener),
+            persistent_term:put({?MODULE, port}, Port),
             self() ! accept,
             {ok, #{listener => Listener, port => Port, connections => #{}}};
         {error, _} = Error -> Error
