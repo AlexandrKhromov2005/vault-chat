@@ -8,16 +8,6 @@
   <script type="module" src="/app/app.mjs"></script>
 </head>
 <body>
-  <header class="topbar">
-    <h1>Vault Chat</h1>
-    <div id="account" class="account" hidden>
-      <span id="connection" class="connection" role="status"></span>
-      <span id="account-name" class="account-name"></span>
-      <button id="account-settings-toggle" type="button" aria-expanded="false" aria-controls="account-settings">Аккаунт</button>
-      <button id="logout" type="button">Выйти</button>
-    </div>
-  </header>
-
   <section id="email-action" class="security-panel stack" aria-labelledby="email-action-title" hidden>
     <h2 id="email-action-title"></h2>
     <p id="email-action-description" class="hint"></p>
@@ -45,7 +35,7 @@
       <button type="submit">Отправить подтверждение email</button>
     </form>
     <form id="email-change-form" class="stack" hidden>
-      <h3>Сменить email</h3>
+      <h3>Смена email</h3>
       <label>Новый email
         <input name="new_email" type="email" autocomplete="email" maxlength="254" required>
       </label>
@@ -60,6 +50,7 @@
 
   <main>
     <section id="auth" class="auth" hidden>
+      <h1 class="auth-title">vault-chat</h1>
       <div class="tabs" role="tablist">
         <button id="show-login" type="button" role="tab" aria-selected="true">Вход</button>
         <button id="show-register" type="button" role="tab" aria-selected="false">Регистрация</button>
@@ -124,13 +115,18 @@
 
     <section id="workspace" class="workspace" hidden>
       <aside class="sidebar">
-        <label class="search">Найти пользователя
-          <input id="user-search" type="search" autocomplete="off" placeholder="Начало имени, от 2 символов">
+        <div class="brand">
+          <h1>vault-chat</h1>
+          <span>web</span>
+        </div>
+        <label class="search">
+          <span class="sr-only">Найти пользователя</span>
+          <input id="user-search" type="search" autocomplete="off" placeholder="> search_">
         </label>
         <ul id="user-results" class="list"></ul>
 
         <details class="new-channel">
-          <summary>Новый канал</summary>
+          <summary>[+] new channel</summary>
           <form id="channel-form" class="stack">
             <label>Название
               <input name="name" maxlength="80" required>
@@ -142,44 +138,52 @@
           </form>
         </details>
 
-        <div class="section-header">
-          <h2>Комнаты</h2>
-          <button id="refresh" type="button" title="Обновить комнаты и сообщения">Обновить</button>
-        </div>
-        <ul id="room-list" class="list rooms"></ul>
+        <button id="refresh" class="refresh" type="button" title="Обновить комнаты и сообщения">[refresh]</button>
+        <div id="room-list" class="rooms"></div>
         <p id="sidebar-error" class="error" role="alert"></p>
+
+        <footer id="account" class="account" hidden>
+          <span id="account-name" class="account-name"></span>
+          <button id="account-settings-toggle" type="button" aria-expanded="false" aria-controls="account-settings">[settings]</button>
+          <button id="logout" type="button">[exit]</button>
+        </footer>
       </aside>
 
-      <p id="no-room" class="placeholder">Выберите комнату или найдите пользователя, чтобы начать диалог.</p>
+      <p id="no-room" class="placeholder">select a channel or direct dialog_</p>
 
       <section id="room" class="room" hidden>
         <header class="room-header">
+          <button id="close-room" class="close-room" type="button" title="Вернуться к списку комнат">&lt; rooms</button>
           <h2 id="room-title"></h2>
           <span id="room-kind" class="hint"></span>
-          <button id="toggle-members" type="button" aria-pressed="false">Участники</button>
+          <div class="room-actions">
+            <button id="toggle-members" type="button" aria-pressed="false">[members]</button>
+            <span id="connection" class="connection" role="status"></span>
+          </div>
         </header>
         <div id="messages" class="messages">
-          <button id="load-older" type="button" hidden>Показать более ранние</button>
+          <button id="load-older" type="button" hidden>← earlier messages</button>
           <ol id="message-list" class="message-list"></ol>
         </div>
         <p id="room-error" class="error" role="alert"></p>
         <form id="composer" class="composer">
           <ul id="pending-files" class="pending-files"></ul>
           <div class="composer-row">
-            <button id="attach" type="button" title="Прикрепить файлы: до 5 штук по 10 МиБ — PNG, JPEG, PDF или текст">Файл</button>
+            <span class="prompt" aria-hidden="true">&gt;</span>
+            <button id="attach" type="button" title="Прикрепить файлы: до 5 штук по 10 МиБ — PNG, JPEG, PDF или текст">[attach]</button>
             <input id="file-input" type="file" multiple accept="image/png,image/jpeg,application/pdf,text/plain" hidden>
-            <textarea id="message-text" rows="2" placeholder="Сообщение (Enter — отправить, Shift+Enter — новая строка)"></textarea>
-            <button type="submit">Отправить</button>
+            <textarea id="message-text" rows="1" placeholder="message…"></textarea>
+            <button type="submit">[send]</button>
           </div>
         </form>
       </section>
 
       <aside id="members" class="members" hidden>
-        <h3>Участники</h3>
+        <h3>members</h3>
         <ul id="member-list" class="list"></ul>
         <div id="add-member" class="stack" hidden>
           <label>Добавить участника
-            <input id="add-member-search" type="search" autocomplete="off" placeholder="Начало имени">
+            <input id="add-member-search" type="search" autocomplete="off" placeholder="> username_">
           </label>
           <ul id="add-member-results" class="list"></ul>
         </div>

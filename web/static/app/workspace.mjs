@@ -62,6 +62,7 @@ export class Workspace {
       this.#createChannel(event.currentTarget);
     });
     $('refresh').addEventListener('click', () => this.refresh());
+    $('close-room').addEventListener('click', () => this.#closeRoom());
   }
 
   get #me() {
@@ -167,21 +168,35 @@ export class Workspace {
 
   #renderRooms() {
     const { profiles, unread } = this.#scope;
-    $('room-list').replaceChildren(...this.#rooms.map((room) =>
-      el('li', {},
-        el('button', {
-          type: 'button',
-          class: ['room-item', room.room_id === this.#current && 'active', unread.has(room.room_id) && 'unread']
-            .filter(Boolean).join(' '),
-          onclick: () => this.#openRoom(room.room_id),
-        },
-        el('span', { class: 'room-name' },
-          roomTitle(room, this.#me, profiles),
-          unread.has(room.room_id) ? el('span', { class: 'unread-dot', title: 'Новые сообщения' }) : null),
-        el('span', { class: 'hint' }, kindName(room), room.last_message_at ? ` · ${formatTime(room.last_message_at)}` : ''),
-        ),
+    const renderRoom = (room) => el('li', {},
+      el('button', {
+        type: 'button',
+        class: ['room-item', room.room_id === this.#current && 'active', unread.has(room.room_id) && 'unread']
+          .filter(Boolean).join(' '),
+        onclick: () => this.#openRoom(room.room_id),
+      },
+      el('span', { class: `room-name ${room.kind}` },
+        roomTitle(room, this.#me, profiles),
+        unread.has(room.room_id) ? el('span', { class: 'unread-dot', title: 'Новые сообщения' }) : null),
+      el('span', { class: 'hint' }, kindName(room), room.last_message_at ? ` · ${formatTime(room.last_message_at)}` : ''),
       ),
-    ));
+    );
+    const renderGroup = (title, rooms) => el('section', { class: 'room-group' },
+      el('h2', {}, title),
+      el('ul', { class: 'list' }, rooms.map(renderRoom)),
+    );
+    $('room-list').replaceChildren(
+      renderGroup('CHANNELS', this.#rooms.filter((room) => room.kind !== 'direct')),
+      renderGroup('DIRECT', this.#rooms.filter((room) => room.kind === 'direct')),
+    );
+  }
+
+  #closeRoom() {
+    this.#current = null;
+    this.#conversation.close();
+    this.#members.close();
+    this.#showRoom(false);
+    this.#renderRooms();
   }
 
   // #lostRoom drops a room the user can no longer access: it was left, the
@@ -250,6 +265,7 @@ export class Workspace {
     this.#current = roomId;
     this.#scope.unread.delete(roomId);
     $('room-title').textContent = roomTitle(room, this.#me, this.#scope.profiles);
+    $('room-title').dataset.kind = room.kind === 'direct' ? 'direct' : 'channel';
     $('room-kind').textContent = kindName(room);
     this.#showRoom(true);
     this.#renderRooms();
@@ -258,6 +274,7 @@ export class Workspace {
   }
 
   #showRoom(visible) {
+    $('workspace').className = visible ? 'workspace room-open' : 'workspace';
     $('room').hidden = !visible;
     $('no-room').hidden = visible;
   }

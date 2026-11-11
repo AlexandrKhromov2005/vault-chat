@@ -1,7 +1,7 @@
 // The open room: its messages with their attachments, and the composer.
 
 import { Outbox, catchUp, loadLatest, loadOlder, sendMessage } from './chat.mjs';
-import { el, formatTime } from './dom.mjs';
+import { el, formatClock } from './dom.mjs';
 import { describeError } from './errors.mjs';
 import { Attachments, downloadFile, fileProblem, formatSize, uploadFile } from './files.mjs';
 import { ApiError } from './http.mjs';
@@ -175,8 +175,8 @@ export class Conversation {
     const author = own ? 'вы' : scope.profiles.name(message.sender_id) ?? 'удалённый пользователь';
     return el('li', { class: own ? 'message own' : 'message', 'data-sequence': message.sequence },
       el('div', { class: 'message-meta' },
-        el('span', { class: 'message-author' }, author),
-        el('time', { datetime: message.created_at }, formatTime(message.created_at)),
+        el('span', { class: 'message-author', title: author }, author),
+        el('time', { datetime: message.created_at }, formatClock(message.created_at)),
       ),
       message.text ? el('p', { class: 'message-text' }, message.text) : null,
       message.attachment_ids?.length

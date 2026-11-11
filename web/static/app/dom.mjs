@@ -34,3 +34,7 @@ const timeFormat = new Intl.DateTimeFormat('ru-RU', {
 });
 
 export const formatTime = (iso) => timeFormat.format(new Date(iso));
+
+const clockFormat = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+export const formatClock = (iso) => clockFormat.format(new Date(iso));
