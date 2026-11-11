@@ -19,7 +19,7 @@ abnormal exit the supervisor restores the process from the database row.
 """.
 -behaviour(gen_statem).
 
--export([start_link/1, command/2, state/1]).
+-export([start_link/1, command/2, command/3, state/1]).
 -export([callback_mode/0, init/1, handle_event/4]).
 -export_type([start_args/0, command/0, reply/0]).
 
@@ -61,6 +61,10 @@ command(Id, Command) ->
         exit:{noproc, _} -> {error, not_found};
         exit:{normal, _} -> {error, not_found}
     end.
+
+-spec command(binary(), command(), map()) -> reply().
+command(_Id, _Command, _Meta) ->
+    {error, unavailable}.
 
 -spec state(binary()) -> {ok, state_name()} | {error, not_found}.
 state(Id) ->
