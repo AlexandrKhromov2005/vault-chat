@@ -19,10 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,6 +63,7 @@ import io.github.alexandrkhromov2005.vaultchat.R
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSession
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ConnectionStatus
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.OutgoingEntity
+import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomEntity
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -124,15 +125,21 @@ fun RoomsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { TitleWithStatus(stringResource(R.string.rooms_title), connectionText(connection)) },
+                title = { TitleWithStatus("vault-chat", connectionText(connection) ?: "ws:ok") },
                 actions = {
                     AccountMenu(username, server, onLogout = { if (unsent > 0) confirmLogout = true else model.logout() })
                 },
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = newChat) {
-                Icon(painterResource(R.drawable.ic_edit), contentDescription = stringResource(R.string.new_chat))
+        bottomBar = {
+            BottomAppBar {
+                Text(
+                    "chats",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = newChat) { Text("[+] new chat") }
             }
         },
     ) { padding ->
@@ -272,7 +279,8 @@ private fun EmptyRooms() {
 
 @Composable
 private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
-    val title = roomTitle(item.room, item.peerName)
+    val name = roomTitle(item.room, item.peerName)
+    val title = if (item.room.kind == RoomEntity.CHANNEL) "# $name" else name
     // A queued message is newer than any stored one.
     val time = item.pendingCreatedAt ?: item.lastCreatedAt ?: item.room.lastMessageAt
     val preview = preview(item, me)
@@ -280,12 +288,10 @@ private fun RoomRow(item: RoomListItem, me: String, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .heightIn(min = 72.dp)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Avatar(title)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -382,15 +388,10 @@ private fun UnreadBadge(count: Int, more: Boolean) {
         else -> count.toString()
     }
     val description = stringResource(R.string.unread_description, count)
-    Box(
-        Modifier
-            .heightIn(min = 22.dp)
-            .widthIn(min = 22.dp)
-            .background(MaterialTheme.colorScheme.primary, CircleShape)
-            .padding(horizontal = 6.dp)
-            .clearAndSetSemantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
-    }
+    Text(
+        "[$label]",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.clearAndSetSemantics { contentDescription = description },
+    )
 }

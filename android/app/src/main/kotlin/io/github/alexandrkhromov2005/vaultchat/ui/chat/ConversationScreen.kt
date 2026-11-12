@@ -3,7 +3,6 @@ package io.github.alexandrkhromov2005.vaultchat.ui.chat
 import android.content.ClipData
 import android.net.Uri
 import android.os.SystemClock
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +54,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -74,6 +72,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -131,7 +130,7 @@ sealed interface ChatRow {
 
     /**
      * A stored message with the metadata of its files read with its page,
-     * so that its bubble has its size from the first frame: one growing
+     * so that its message has its size from the first frame: one growing
      * after it is shown pushes the older messages, animated.
      */
     data class Message(val item: MessageItem, val files: Map<String, FileEntity> = emptyMap()) : ChatRow {
@@ -540,12 +539,12 @@ private fun ComposerRow(
                 onValueChange = { onText(it.replace("\r\n", "\n").replace('\r', '\n')) },
                 placeholder = { Text(stringResource(R.string.composer_hint)) },
                 maxLines = COMPOSER_LINES,
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(0.dp),
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
@@ -663,9 +662,9 @@ internal fun Messages(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Bubbles leave a margin on the other side, as in other messengers.
-        val bubbleWidth = maxWidth * BUBBLE_WIDTH
-        MessageList(rows, snapshot, shown, claims, listState, me, channel, bubbleWidth, onRetry, onDelete, outgoingFiles, uploads, onCancel)
+        // Console messages use the full row; attachments retain the same bound.
+        val contentWidth = maxWidth * CONTENT_WIDTH
+        MessageList(rows, snapshot, shown, claims, listState, me, channel, contentWidth, onRetry, onDelete, outgoingFiles, uploads, onCancel)
     }
 }
 
@@ -680,7 +679,7 @@ private fun MessageList(
     listState: LazyListState,
     me: String,
     channel: Boolean,
-    bubbleWidth: Dp,
+    contentWidth: Dp,
     onRetry: (String) -> Unit,
     onDelete: (String) -> Unit,
     outgoingFiles: Map<String, List<OutgoingFileEntity>>,
@@ -698,11 +697,11 @@ private fun MessageList(
         // layout is reversed, so the last of them is the first item. A
         // message keeps its key from the queue into the history (Handoff).
         items(outgoing.asReversed(), key = { Handoff.key(it, claims) }) { row ->
-            OutgoingBubble(
+            OutgoingConsoleMessage(
                 row,
                 outgoingFiles[row.clientMessageId].orEmpty(),
                 uploads[row.clientMessageId],
-                bubbleWidth,
+                contentWidth,
                 onRetry,
                 onDelete,
                 onCancel,
@@ -716,17 +715,12 @@ private fun MessageList(
             if (index < rows.itemCount) rows[index]
             when (val row = snapshot[index]) {
                 is ChatRow.Message -> {
-                    val older = snapshot.getOrNull(index + 1)
                     val message = row.item.message
-                    // A sender's name heads each run of their messages in channels.
-                    val continues = older is ChatRow.Message && older.item.message.senderId == message.senderId &&
-                        message.createdAt - older.item.message.createdAt < GROUP_WINDOW_MICROS
-                    Bubble(
+                    ConsoleMessage(
                         row.item,
                         row.files,
                         own = message.senderId == me,
-                        showSender = channel && !continues && message.senderId != me,
-                        maxWidth = bubbleWidth,
+                        maxWidth = contentWidth,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -745,8 +739,6 @@ private fun MessageList(
         }
     }
 }
-
-private const val GROUP_WINDOW_MICROS = 5 * 60 * 1_000_000L
 
 @Composable
 private fun Centered(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
@@ -784,27 +776,18 @@ private fun DayHeading(epochDay: Long, modifier: Modifier = Modifier) {
  */
 @Composable
 private fun MessageFrame(
-    own: Boolean,
     maxWidth: Dp,
     modifier: Modifier = Modifier,
-    bubble: Modifier = Modifier,
-    // Anchored to the whole bubble, such as its menu.
+    message: Modifier = Modifier,
+    // Anchored to the whole message, such as its menu.
     beside: @Composable () -> Unit = {},
     below: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalAlignment = if (own) Alignment.End else Alignment.Start,
-    ) {
+    Column(modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Box {
             Column(
-                Modifier
-                    .widthIn(max = maxWidth)
-                    .clip(BubbleShape)
-                    .background(if (own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .then(bubble)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.widthIn(max = maxWidth).then(message),
                 content = content,
             )
             beside()
@@ -813,10 +796,8 @@ private fun MessageFrame(
     }
 }
 
-private val BubbleShape = RoundedCornerShape(18.dp)
-
 @Composable
-private fun Bubble(item: MessageItem, stored: Map<String, FileEntity>, own: Boolean, showSender: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
+private fun ConsoleMessage(item: MessageItem, stored: Map<String, FileEntity>, own: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
     val message = item.message
     val sender = when {
         own -> stringResource(R.string.sender_you)
@@ -827,29 +808,33 @@ private fun Bubble(item: MessageItem, stored: Map<String, FileEntity>, own: Bool
     val time = formatTime(message.createdAt, LocalLocale.current.platformLocale)
     val attachments = message.attachmentCount
     val attachmentText = if (attachments > 0) pluralStringResource(R.plurals.attachments, attachments, attachments) else null
-    val description = listOfNotNull(sender, message.text.takeIf { it.isNotEmpty() }, attachmentText, time).joinToString(", ")
+    val description = listOfNotNull("<$sender>", message.text.takeIf { it.isNotEmpty() }, attachmentText, time).joinToString(", ")
     val files = rememberMessageFiles(message.roomId, message.attachmentIds, stored)
-    // The bubble speaks as one; its files are opened through its actions.
+    // The message speaks as one; its files are opened through its actions.
     val fileActions = fileAccessibilityActions(files)
 
     MessageFrame(
-        own,
         maxWidth,
         modifier,
-        bubble = Modifier.clearAndSetSemantics {
+        message = Modifier.clearAndSetSemantics {
             contentDescription = description
             if (fileActions.isNotEmpty()) customActions = fileActions
         },
     ) {
-        val content = if (own) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-        if (showSender) {
-            Text(sender, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Footer(time, own, if (own) Delivery.SENT else null)
+            Text(
+                "<$sender>",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         MessageFiles(files, maxWidth)
         if (message.text.isNotEmpty()) {
-            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
         }
-        Footer(time, own, if (own) Delivery.SENT else null, Modifier.align(Alignment.End))
     }
 }
 
@@ -879,7 +864,7 @@ private fun Footer(time: String, own: Boolean, delivery: Delivery?, modifier: Mo
 
 private val STATUS_ICON_SIZE = 14.dp
 
-// Decorative: the bubble's description already names the state.
+// Decorative: the message's description already names the state.
 @Composable
 private fun StatusIcon(icon: Int, tint: Color) {
     Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(STATUS_ICON_SIZE))
@@ -890,7 +875,7 @@ private fun StatusIcon(icon: Int, tint: Color) {
  * failed one also to send it again or delete it.
  */
 @Composable
-private fun OutgoingBubble(
+private fun OutgoingConsoleMessage(
     row: OutgoingRow,
     files: List<OutgoingFileEntity>,
     upload: UploadProgress?,
@@ -932,7 +917,7 @@ private fun OutgoingBubble(
     val state = failure ?: stringResource(if (delivery == Delivery.SENT) R.string.message_sent else R.string.message_queued)
     val time = formatTime(entity.createdAt, LocalLocale.current.platformLocale)
     val attachmentText = if (files.isNotEmpty()) pluralStringResource(R.plurals.attachments, files.size, files.size) else null
-    val description = listOfNotNull(stringResource(R.string.sender_you), entity.text.takeIf { it.isNotEmpty() }, attachmentText, time, state)
+    val description = listOfNotNull("<${stringResource(R.string.sender_you)}>", entity.text.takeIf { it.isNotEmpty() }, attachmentText, time, state)
         .joinToString(", ")
     var menu by remember { mutableStateOf(false) }
     val actions = stringResource(R.string.message_actions)
@@ -940,10 +925,9 @@ private fun OutgoingBubble(
     val scope = rememberCoroutineScope()
 
     MessageFrame(
-        own = true,
         maxWidth = maxWidth,
         modifier = modifier,
-        bubble = Modifier
+        message = Modifier
             .clickable(onClickLabel = actions) { menu = true }
             .clearAndSetSemantics { contentDescription = description },
         beside = {
@@ -990,18 +974,25 @@ private fun OutgoingBubble(
                     failure,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
-                    // The bubble's description already says it.
+                    // The message's description already says it.
                     modifier = Modifier.padding(top = 2.dp, end = 4.dp).clearAndSetSemantics { },
                 )
             }
         },
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Footer(time, own = true, if (delivery == Delivery.QUEUED && !slow) null else delivery)
+            Text(
+                "<${stringResource(R.string.sender_you)}>",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         MessageFiles(shownFiles, maxWidth)
         if (entity.text.isNotEmpty()) {
-            Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            Text(entity.text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
         }
-        Footer(time, own = true, if (delivery == Delivery.QUEUED && !slow) null else delivery, Modifier.align(Alignment.End))
     }
 }
 
-private const val BUBBLE_WIDTH = 0.8f
+private const val CONTENT_WIDTH = 1f
