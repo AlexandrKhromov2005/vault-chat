@@ -47,14 +47,37 @@ export class FakePeerConnection extends EventTarget {
     this.offerSdp = 'v=0 offer';
     this.answerSdp = 'v=0 answer';
     this.remoteDescriptions = [];
+    this.offers = []; // the options of each createOffer
+    this.configurations = []; // each setConfiguration
+    this.stats = new Map();
   }
 
   addTrack(track) {
     this.tracks.push(track);
   }
 
-  async createOffer() {
-    return { type: 'offer', sdp: this.offerSdp };
+  async createOffer(options = {}) {
+    this.offers.push(options);
+    return { type: 'offer', sdp: this.offers.length === 1 ? this.offerSdp : `${this.offerSdp} ${this.offers.length}` };
+  }
+
+  setConfiguration(config) {
+    this.config = config;
+    this.configurations.push(config);
+  }
+
+  async getStats() {
+    return this.stats;
+  }
+
+  // relay makes the selected candidate pair go through a TURN relay.
+  relay(side = 'local') {
+    this.stats = new Map([
+      ['t', { id: 't', type: 'transport', selectedCandidatePairId: 'p' }],
+      ['p', { id: 'p', type: 'candidate-pair', localCandidateId: 'l', remoteCandidateId: 'r' }],
+      ['l', { id: 'l', type: 'local-candidate', candidateType: side === 'local' ? 'relay' : 'host' }],
+      ['r', { id: 'r', type: 'remote-candidate', candidateType: side === 'remote' ? 'relay' : 'srflx' }],
+    ]);
   }
 
   async createAnswer() {
@@ -64,6 +87,12 @@ export class FakePeerConnection extends EventTarget {
   // With gatherOnLocal set, a candidate is gathered within
   // setLocalDescription, earlier than browsers do.
   async setLocalDescription(description) {
+    if (description.type === 'rollback') {
+      if (this.signalingState !== 'have-local-offer') throw new Error('nothing to roll back');
+      this.rolledBack = (this.rolledBack ?? 0) + 1;
+      this.signalingState = 'stable';
+      return;
+    }
     this.local = description;
     this.signalingState = description.type === 'offer' ? 'have-local-offer' : 'stable';
     if (this.gatherOnLocal) this.gather(this.gatherOnLocal);
@@ -95,6 +124,17 @@ export class FakePeerConnection extends EventTarget {
 
   failIce() {
     this.connectionState = 'failed';
+    this.dispatchEvent(new Event('connectionstatechange'));
+  }
+
+  disconnect() {
+    this.connectionState = 'disconnected';
+    this.dispatchEvent(new Event('connectionstatechange'));
+  }
+
+  // checking is the state of a connection while an ICE restart runs.
+  checking() {
+    this.connectionState = 'connecting';
     this.dispatchEvent(new Event('connectionstatechange'));
   }
 
