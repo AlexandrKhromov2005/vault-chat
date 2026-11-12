@@ -3,6 +3,8 @@
 
 import { Api } from './api.mjs';
 import { AccountSecurity } from './account-security.mjs';
+import { bindCallPanel } from './call-panel.mjs';
+import { Calls } from './calls.mjs';
 import { Realtime } from './realtime.mjs';
 import { Session } from './session.mjs';
 import { Workspace } from './workspace.mjs';
@@ -11,7 +13,9 @@ const fetchFn = window.fetch.bind(window);
 const session = new Session({ fetchFn, storage: window.sessionStorage });
 const api = new Api({ fetchFn, session });
 new AccountSecurity({ api, session, fetchFn });
-const workspace = new Workspace({ api, session });
+const calls = new Calls({ api, session });
+const workspace = new Workspace({ api, session, calls });
+bindCallPanel({ calls, peerName: (view) => workspace.peerName(view) });
 // Same origin as the page, which the Gateway's WebSocket origin check allows.
 const realtime = new Realtime({
   session,
@@ -34,8 +38,15 @@ realtime.addEventListener('state', (event) => {
   $('connection').textContent = CONNECTION_TEXT[state] ?? '';
 });
 // Every (re)connection resynchronizes: events are not replayed.
-realtime.addEventListener('ready', () => workspace.refresh());
-realtime.addEventListener('event', (event) => workspace.handleEvent(event.detail));
+realtime.addEventListener('ready', () => {
+  workspace.refresh();
+  calls.reconcile();
+});
+realtime.addEventListener('event', (event) => {
+  const frame = event.detail;
+  if (typeof frame.type === 'string' && frame.type.startsWith('call.')) calls.handleEvent(frame);
+  else workspace.handleEvent(frame);
+});
 
 function render() {
   const user = session.user;
@@ -45,7 +56,15 @@ function render() {
   $('account-name').textContent = user ? user.username : '';
 }
 
-$('logout').addEventListener('click', () => session.logout());
+// A call ends before the session that is its device does.
+$('logout').addEventListener('click', async () => {
+  await calls.hangUp();
+  session.logout();
+});
+// Closing or leaving the page releases the microphone and tells the server,
+// as far as the browser lets the request finish; otherwise the server ends
+// the call by its heartbeat timeout.
+window.addEventListener('pagehide', () => calls.hangUp());
 
 session.addEventListener('signedin', () => {
   render();
@@ -54,6 +73,7 @@ session.addEventListener('signedin', () => {
 });
 session.addEventListener('signedout', (event) => {
   realtime.stop();
+  calls.reset();
   workspace.reset();
   render();
   if (event.detail.reason === 'expired') {

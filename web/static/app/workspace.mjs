@@ -1,5 +1,6 @@
 // The signed-in part of the client: the room list with user search and
-// channel creation, and the open room with its members.
+// channel creation, and the open room with its members. A direct dialog can
+// be called when calls are given.
 
 import { createChannel, getRoom, listAllRooms, openDirect, roomTitle } from './chat.mjs';
 import { Conversation } from './conversation.mjs';
@@ -23,10 +24,12 @@ export class Workspace {
   #listed = false; // whether the room list was loaded since sign-in
   #conversation;
   #members;
+  #calls;
 
-  constructor({ api, session, searchDelayMs = 300 }) {
+  constructor({ api, session, calls = null, searchDelayMs = 300 }) {
     this.#api = api;
     this.#session = session;
+    this.#calls = calls;
     this.#scope = new Scope(api);
     this.#conversation = new Conversation({
       api,
@@ -63,6 +66,17 @@ export class Workspace {
     });
     $('refresh').addEventListener('click', () => this.refresh());
     $('close-room').addEventListener('click', () => this.#closeRoom());
+    $('call-start').addEventListener('click', () => {
+      if (this.#current && this.#room(this.#current)?.kind === 'direct') this.#calls?.start(this.#current);
+    });
+    this.#calls?.addEventListener('change', () => this.#renderCallStart());
+  }
+
+  // peerName names the other participant of a call for the call bar.
+  peerName(view) {
+    const room = view.roomId ? this.#room(view.roomId) : null;
+    if (room?.kind === 'direct') return roomTitle(room, this.#me, this.#scope.profiles);
+    return (view.peerId && this.#scope.profiles.name(view.peerId)) || '';
   }
 
   get #me() {
@@ -120,6 +134,16 @@ export class Workspace {
     $('sidebar-error').textContent = '';
     $('user-search').value = '';
     this.#showRoom(false);
+    this.#renderCallStart();
+  }
+
+  // #renderCallStart offers a call in an open direct dialog when the server
+  // has calls and no other call is under way.
+  #renderCallStart() {
+    const room = this.#current ? this.#room(this.#current) : null;
+    const view = this.#calls?.view;
+    $('call-start').hidden = this.#calls?.available !== true || room?.kind !== 'direct';
+    $('call-start').disabled = Boolean(view && view.state !== 'ended');
   }
 
   // #loadPeers loads the profiles of the other participants of dialogs; the
@@ -150,6 +174,7 @@ export class Workspace {
       return;
     }
     this.#renderRooms();
+    this.#renderCallStart();
   }
 
   #room(roomId) {
@@ -213,6 +238,7 @@ export class Workspace {
       $('sidebar-error').textContent = notice;
     }
     this.#renderRooms();
+    this.#renderCallStart();
   }
 
   // #touch moves a room with a new message to the top of the list.
@@ -269,6 +295,7 @@ export class Workspace {
     $('room-kind').textContent = kindName(room);
     this.#showRoom(true);
     this.#renderRooms();
+    this.#renderCallStart();
     this.#members.open(room);
     await this.#conversation.open(room);
   }

@@ -157,10 +157,26 @@
           <h2 id="room-title"></h2>
           <span id="room-kind" class="hint"></span>
           <div class="room-actions">
+            <button id="call-start" type="button" title="Аудиозвонок собеседнику" hidden>[call]</button>
             <button id="toggle-members" type="button" aria-pressed="false">[members]</button>
             <span id="connection" class="connection" role="status"></span>
           </div>
         </header>
+        <section id="call" class="call-panel" aria-labelledby="call-title" hidden>
+          <div class="call-info">
+            <h2 id="call-title"></h2>
+            <p id="call-status" role="status"></p>
+            <p id="call-error" class="error" role="alert"></p>
+          </div>
+          <div class="call-actions">
+            <button id="call-accept" type="button" class="primary" hidden>[accept]</button>
+            <button id="call-reject" type="button" hidden>[reject]</button>
+            <button id="call-cancel" type="button" hidden>[cancel]</button>
+            <button id="call-end" type="button" class="danger" hidden>[end]</button>
+            <button id="call-dismiss" type="button" hidden>[dismiss]</button>
+          </div>
+          <audio id="call-audio" autoplay hidden></audio>
+        </section>
         <div id="messages" class="messages">
           <button id="load-older" type="button" hidden>← earlier messages</button>
           <ol id="message-list" class="message-list"></ol>

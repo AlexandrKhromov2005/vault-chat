@@ -629,6 +629,47 @@ label {
   display: none;
 }
 
+.call-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.call-panel[data-state="ringing"][data-role="callee"] {
+  background: var(--active);
+  border-left: 2px solid var(--accent);
+}
+
+.call-panel h2 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.call-panel p {
+  margin: 0;
+}
+
+.call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button.danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: var(--bg);
+}
+
 .members {
   width: 280px;
   min-height: 0;
