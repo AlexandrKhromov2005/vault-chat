@@ -25,11 +25,11 @@ const realtime = new Realtime({
 const $ = (id) => document.getElementById(id);
 
 const CONNECTION_TEXT = {
-  connecting: 'подключение…',
-  live: 'в сети',
-  reconnecting: 'переподключение…',
-  failed: 'нет связи с событиями, обновите страницу',
-  stopped: 'нет связи с событиями',
+  connecting: 'connecting…',
+  live: 'connected',
+  reconnecting: 'reconnecting…',
+  failed: 'disconnected; refresh required',
+  stopped: 'offline',
 };
 
 realtime.addEventListener('state', (event) => {

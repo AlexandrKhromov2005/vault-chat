@@ -102,6 +102,14 @@ class ConversationListTest {
     private fun listBounds(): Rect = compose.onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
 
     @Test
+    fun everyStoredMessageHasAConsoleSender() {
+        pages.value = PagingData.from(listOf(stored(4, bob, "cid-4", "earlier")))
+        show()
+
+        compose.onNode(hasContentDescription("<bob>", substring = true)).assertExists()
+    }
+
+    @Test
     fun messageThatLeavesTheQueueBeforeTheHistoryShowsItStaysOnScreen() {
         show()
         assertEquals(1, shown("handoff"))
