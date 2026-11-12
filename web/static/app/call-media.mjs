@@ -131,14 +131,18 @@ export class PeerLink {
   // starts gathering, so that no candidate overtakes it.
   async start() {
     if (this.#role !== 'caller' || this.#closed) return;
-    const offer = await this.#pc.createOffer();
-    if (this.#closed) return;
-    if (!validSdp(offer.sdp)) {
+    try {
+      const offer = await this.#pc.createOffer();
+      if (this.#closed) return;
+      if (!validSdp(offer.sdp)) {
+        this.#fail('sdp');
+        return;
+      }
+      this.#send('offer', offer.sdp);
+      await this.#pc.setLocalDescription(offer);
+    } catch {
       this.#fail('sdp');
-      return;
     }
-    this.#send('offer', offer.sdp);
-    await this.#pc.setLocalDescription(offer);
   }
 
   // receive applies one of the peer's signals. The caller orders them by

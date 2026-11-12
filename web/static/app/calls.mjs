@@ -525,6 +525,7 @@ export class Calls extends EventTarget {
   // signal also after 429, a few times.
   async #retrying(run, send, { rateLimited = false } = {}) {
     for (let attempt = 0; ; attempt++) {
+      if (run !== this.#run) throw new ApiError(401, 'unauthenticated', 'Сессия уже завершена');
       try {
         return await send();
       } catch (err) {
