@@ -65,6 +65,8 @@ $('logout').addEventListener('click', async () => {
 // as far as the browser lets the request finish; otherwise the server ends
 // the call by its heartbeat timeout.
 window.addEventListener('pagehide', () => calls.hangUp());
+// Back on the network, a dropped call connection is restored at once.
+window.addEventListener('online', () => calls.online());
 
 session.addEventListener('signedin', () => {
   render();
