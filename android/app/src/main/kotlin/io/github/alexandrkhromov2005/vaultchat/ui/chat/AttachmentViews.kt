@@ -55,7 +55,7 @@ import java.io.File
  * A file of a message and what is known of it. A file of a queued message
  * that is not uploaded yet has no ID; it is shown from its [local] copy.
  * An uploaded one has the [kind] it was picked as while its metadata loads,
- * so that it keeps its place in the bubble.
+ * so that it keeps its place in the message.
  */
 internal data class MessageFile(val fileId: String, val state: FileState, val local: LocalFile? = null, val kind: FileKind? = null) {
     val isImage: Boolean
@@ -113,7 +113,7 @@ internal fun rememberOutgoingFiles(
 }
 
 /**
- * Accessibility actions of a bubble whose own semantics are replaced: open
+ * Accessibility actions of a message whose own semantics are replaced: open
  * each known file, load again those that failed or were unavailable.
  */
 @Composable
@@ -136,15 +136,15 @@ internal fun fileAccessibilityActions(files: List<MessageFile>): List<CustomAcce
 
 /**
  * A message's files: pictures in a grid of fixed size, so that their content
- * arriving never changes the bubble's size, then other files as rows.
+ * arriving never changes the message's size, then other files as rows.
  */
 @Composable
 internal fun MessageFiles(files: List<MessageFile>, maxWidth: Dp) {
     if (files.isEmpty()) return
     val images = files.filter { it.isImage }
     val others = files.filterNot { it.isImage }
-    // The bubble's padding is inside its width.
-    val width = min(maxWidth - 24.dp, IMAGE_WIDTH)
+    // Console rows have no bubble padding to subtract.
+    val width = min(maxWidth, IMAGE_WIDTH)
     Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(GAP)) {
         if (images.size == 1) {
             Thumbnail(images.single(), Modifier.size(width, IMAGE_HEIGHT))
@@ -274,7 +274,7 @@ private fun Progress(state: ContentState.Loading) {
     }
 }
 
-// Decorative: the bubble's description names the files.
+// Decorative: the message's description names the files.
 @Composable
 private fun FileIcon(icon: Int) {
     Icon(painterResource(icon), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
