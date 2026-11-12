@@ -14,6 +14,11 @@
 // with). Other tabs of the same users see the call but do not touch the
 // microphone.
 //
+// A connection that drops during an active call is recovered within
+// RECOVERY_MS: the caller restarts ICE with fresh TURN credentials, and both
+// devices poll the signals meanwhile. The caller also restarts ICE before
+// the TURN credentials of a relayed connection expire.
+//
 // Calls are offered only once the server has listed the user's calls: a
 // Gateway without the Calls API answers 404, and the client then hides them.
 //
@@ -30,6 +35,22 @@ export const HEARTBEAT_MS = 15_000; // ADR 0005: every 15 s, the call ends after
 export const RINGING_POLL_MS = 3_000;
 export const SIGNAL_POLL_MS = 1_000;
 export const HANGUP_TIMEOUT_MS = 2_000;
+// Recovery of a dropped connection: the browser gets DISCONNECT_GRACE_MS to
+// repair a disconnection itself, the caller then restarts ICE, at most
+// MAX_RESTART_ATTEMPTS times RESTART_RETRY_MS apart, and the call ends when
+// the connection is not back within RECOVERY_MS, before the server's 45 s
+// heartbeat timeout.
+export const RECOVERY_MS = 30_000;
+export const DISCONNECT_GRACE_MS = 2_000;
+export const RESTART_RETRY_MS = 8_000;
+export const MAX_RESTART_ATTEMPTS = 3;
+// ICE restarts per call. Each takes an offer, an answer and fresh candidates
+// out of the server's budget of 200 signals and 32 candidates per device.
+export const MAX_ICE_RESTARTS = 12;
+// TURN credentials live 10 minutes (ADR 0005) unless the answer says
+// otherwise; a relayed connection is restarted a minute before they expire.
+export const TURN_TTL_MS = 600_000;
+export const TURN_REFRESH_LEAD_MS = 60_000;
 const RETRY_DELAYS_MS = [500, 1_500];
 const MAX_SIGNAL_PAGES = 20;
 const MAX_REMEMBERED_ENDED = 64;
@@ -61,6 +82,14 @@ export function parseSignal(raw) {
   return signal;
 }
 
+// parseTurn reads a POST .../turn answer: its servers and how long the
+// credentials last, from an optional ttl in seconds.
+export function parseTurn(raw) {
+  const ttl = raw?.ttl;
+  const ttlMs = Number.isSafeInteger(ttl) && ttl >= 120 && ttl <= 86_400 ? ttl * 1000 : TURN_TTL_MS;
+  return { iceServers: parseIceServers(raw), ttlMs };
+}
+
 // parseIceServers keeps the STUN and TURN servers of a POST .../turn answer.
 export function parseIceServers(raw) {
   const list = Array.isArray(raw?.ice_servers) ? raw.ice_servers : [];
@@ -90,6 +119,7 @@ const FAILURE_TEXT = {
   sdp: 'Браузер не смог подготовить звонок.',
   protocol: 'Собеседник прислал некорректные данные звонка.',
   signal: 'Не удалось передать данные звонка.',
+  lost: 'Связь с собеседником потеряна.',
 };
 
 function describeCallError(err) {
@@ -124,6 +154,7 @@ export class Calls extends EventTarget {
   #createPeerConnection;
   #timers;
   #newId;
+  #isOnline;
   #call = null;
   #ended = []; // ids of calls that ended here, so that a stale answer cannot revive them
   #available = null; // whether the server has the Calls API; null until known
@@ -138,6 +169,7 @@ export class Calls extends EventTarget {
     createPeerConnection = (config) => new RTCPeerConnection(config),
     timers = browserTimers,
     newId = () => crypto.randomUUID(),
+    isOnline = () => globalThis.navigator?.onLine !== false,
   }) {
     super();
     this.#api = api;
@@ -146,6 +178,7 @@ export class Calls extends EventTarget {
     this.#createPeerConnection = createPeerConnection;
     this.#timers = timers;
     this.#newId = newId;
+    this.#isOnline = isOnline;
   }
 
   // available is true once the server listed the user's calls, false when
@@ -162,6 +195,7 @@ export class Calls extends EventTarget {
   //   pending  the command under way, or null
   //   error    what went wrong, as text for the user
   //   remote   the peer's MediaStream once it arrived
+  //   recovering  the connection dropped and is being restored
   get view() {
     const call = this.#call;
     if (!call) return null;
@@ -175,6 +209,7 @@ export class Calls extends EventTarget {
       pending: call.pending,
       error: call.error,
       remote: call.remote,
+      recovering: call.recovering !== null,
     };
   }
 
@@ -342,6 +377,16 @@ export class Calls extends EventTarget {
     this.reconcile();
   }
 
+  // online tells that the browser is back on the network: a dropped
+  // connection is restored at once rather than at the next attempt.
+  online() {
+    const call = this.#call;
+    if (!call?.recovering || !call.link) return;
+    const run = this.#run;
+    this.#planAttempt(call, run, 0);
+    this.#enqueue(call, () => this.#catchUp(call), run);
+  }
+
   // reconcile reads the user's unfinished calls, after every (re)connection
   // of the event stream and whenever an event names an unknown call.
   async reconcile() {
@@ -426,6 +471,11 @@ export class Calls extends EventTarget {
       unsure: new Set(), // kind and payload of signals whose answer was lost
       poll: null,
       beat: null,
+      recovering: null, // { deadline, timer, attempts, running } while the connection is down
+      restarts: 0,
+      unsent: null, // a description whose POST was lost, sent again with its sender_seq
+      turnTtlMs: null,
+      turnTimer: null,
       ...fields,
     };
   }
@@ -543,12 +593,7 @@ export class Calls extends EventTarget {
       this.#fail(call, 'sdp');
       return;
     }
-    let iceServers = [];
-    try {
-      iceServers = parseIceServers(await this.#api.call('POST', callPath(call.id, 'turn'), { body: {} }));
-    } catch {
-      // Without TURN only direct connections work (ADR 0005, coturn outage).
-    }
+    const iceServers = (await this.#turn(call, run)) ?? [];
     if (!this.#is(call, run) || call.state === 'ended') return;
     try {
       call.link = new PeerLink({
@@ -558,6 +603,8 @@ export class Calls extends EventTarget {
         iceServers,
         send: (kind, payload) => this.#sendSignal(call, run, kind, payload),
         onConnected: () => this.#connected(call, run),
+        onLost: (failed) => this.#lost(call, run, failed),
+        onRestored: () => this.#restored(call, run),
         onRemoteStream: (stream) => {
           if (!this.#is(call, run)) return;
           call.remote = stream;
@@ -572,7 +619,116 @@ export class Calls extends EventTarget {
     this.#enqueue(call, () => call.link?.start(), run);
     // Signals sent before the connection existed, such as the caller's offer.
     this.#enqueue(call, () => this.#catchUp(call), run);
+    this.#scheduleTurnRefresh(call, run);
     this.#schedule(call);
+  }
+
+  // #turn asks for TURN credentials. Without them only direct connections
+  // work (ADR 0005, coturn outage), so a failure yields null.
+  async #turn(call, run) {
+    let turn;
+    try {
+      turn = parseTurn(await this.#api.call('POST', callPath(call.id, 'turn'), { body: {} }));
+    } catch {
+      return null;
+    }
+    if (!this.#is(call, run)) return null;
+    call.turnTtlMs = turn.iceServers.some((server) => server.credential !== undefined) ? turn.ttlMs : null;
+    return turn.iceServers;
+  }
+
+  // #scheduleTurnRefresh restarts a relayed connection of the caller before
+  // its credentials expire, since a relay is not refreshed with expired
+  // ones. A direct connection needs none, and a later restart fetches fresh
+  // ones. The caller sees the relays of both sides in its selected pair.
+  #scheduleTurnRefresh(call, run) {
+    this.#timers.clear(call.turnTimer);
+    call.turnTimer = null;
+    if (call.role !== 'caller' || !call.turnTtlMs) return;
+    call.turnTimer = this.#timers.set(() => {
+      call.turnTimer = null;
+      this.#enqueue(call, async () => {
+        if (call.recovering || call.state !== 'active' || !call.link) return;
+        if (!(await call.link.usesRelay()) || !this.#is(call, run)) return;
+        await this.#restartIce(call, run);
+      }, run);
+    }, call.turnTtlMs - TURN_REFRESH_LEAD_MS);
+  }
+
+  // #restartIce sends an ICE restart offer with fresh TURN credentials.
+  async #restartIce(call, run) {
+    if (!call.link || call.restarts >= MAX_ICE_RESTARTS) return;
+    const iceServers = await this.#turn(call, run);
+    if (!this.#is(call, run) || !call.link) return;
+    if (await call.link.restart(iceServers)) {
+      call.restarts++;
+      this.#scheduleTurnRefresh(call, run);
+    }
+  }
+
+  // #lost starts recovery of a connection that went down; the call ends if
+  // it is not back within RECOVERY_MS.
+  #lost(call, run, failed) {
+    if (!this.#is(call, run) || call.state === 'ended') return;
+    if (!call.recovering) {
+      call.recovering = {
+        deadline: this.#timers.set(() => {
+          if (this.#is(call, run) && call.recovering) this.#fail(call, 'lost');
+        }, RECOVERY_MS),
+        timer: null,
+        attempts: 0,
+        running: false,
+      };
+      this.#planAttempt(call, run, failed ? 0 : DISCONNECT_GRACE_MS);
+      this.#schedule(call);
+      this.#changed();
+    } else if (failed && call.recovering.attempts === 0) {
+      // The browser gave up within the grace period.
+      this.#planAttempt(call, run, 0);
+    }
+  }
+
+  #restored(call, run) {
+    if (!this.#is(call, run) || !call.recovering) return;
+    this.#clearRecovery(call);
+    this.#schedule(call);
+    this.#changed();
+  }
+
+  #planAttempt(call, run, delay) {
+    const recovery = call.recovering;
+    if (!recovery || recovery.running || recovery.attempts >= MAX_RESTART_ATTEMPTS) return;
+    this.#timers.clear(recovery.timer);
+    recovery.timer = this.#timers.set(() => {
+      recovery.timer = null;
+      recovery.running = true;
+      this.#enqueue(call, () => this.#attempt(call, run, recovery), run);
+    }, delay);
+  }
+
+  // #attempt is one step of recovery: a description whose POST was lost
+  // goes out again first; otherwise the caller restarts ICE. An offline
+  // browser waits for online().
+  async #attempt(call, run, recovery) {
+    try {
+      if (call.recovering !== recovery || !call.link || !this.#isOnline()) return;
+      recovery.attempts++;
+      if (call.unsent) await this.#post(call, run, call.unsent);
+      else if (call.role === 'caller' && call.state === 'active') await this.#restartIce(call, run);
+    } finally {
+      recovery.running = false;
+    }
+    if (this.#is(call, run) && call.recovering === recovery && this.#isOnline()) {
+      this.#planAttempt(call, run, RESTART_RETRY_MS);
+    }
+  }
+
+  #clearRecovery(call) {
+    const recovery = call.recovering;
+    if (!recovery) return;
+    this.#timers.clear(recovery.deadline);
+    this.#timers.clear(recovery.timer);
+    call.recovering = null;
   }
 
   // #enqueue runs fn after the call's earlier signal work. Sending and
@@ -586,34 +742,55 @@ export class Calls extends EventTarget {
   }
 
   #sendSignal(call, run, kind, payload) {
-    const senderSeq = ++call.senderSeq;
-    this.#enqueue(call, async () => {
-      // ADR 0005 allows end-of-candidates only while connecting.
-      if (kind === 'end-of-candidates' && call.state === 'active') return;
-      let result;
-      try {
-        result = await this.#retrying(run, () => this.#api.call('POST', callPath(call.id, 'signal'), {
-          body: { kind, payload, sender_seq: senderSeq },
-        }), { rateLimited: true });
-      } catch (err) {
-        if (!this.#is(call, run)) return;
-        // The signal may have been stored all the same; it must not come
-        // back as the peer's.
-        if (err instanceof ApiError && err.status === 0) call.unsure.add(`${kind}
+    const signal = { kind, payload, senderSeq: ++call.senderSeq };
+    this.#enqueue(call, () => this.#post(call, run, signal), run);
+  }
+
+  // #post sends one signal from within the call's queue. A description lost
+  // to the network after the connection was up stays in call.unsent and is
+  // sent again with the same sender_seq by recovery or the heartbeat: the
+  // server either stored it and answers with its signal_seq, or stores it
+  // then. Before the connection was up the call ends instead.
+  async #post(call, run, signal) {
+    const { kind, payload, senderSeq } = signal;
+    // ADR 0005 allows end-of-candidates only while connecting.
+    if (kind === 'end-of-candidates' && call.state === 'active') return;
+    let result;
+    try {
+      result = await this.#retrying(run, () => this.#api.call('POST', callPath(call.id, 'signal'), {
+        body: { kind, payload, sender_seq: senderSeq },
+      }), { rateLimited: true });
+    } catch (err) {
+      if (!this.#is(call, run)) return;
+      const lost = err instanceof ApiError && err.status === 0;
+      // The signal may have been stored all the same; it must not come
+      // back as the peer's.
+      if (lost) call.unsure.add(`${kind}
 ${payload}`);
-        // A lost candidate is tolerable; a lost description is not.
-        if (kind === 'candidate' || kind === 'end-of-candidates') return;
-        if (err instanceof ApiError && (err.status === 404 || err.status === 409)) this.#refresh(call);
-        else this.#fail(call, 'signal');
+      // A lost candidate is tolerable; a lost description is not.
+      if (kind === 'candidate' || kind === 'end-of-candidates') return;
+      if (lost && call.iceUp) {
+        call.unsent = signal;
         return;
       }
-      if (!this.#is(call, run)) return;
-      const seq = result?.signal_seq;
-      if (Number.isSafeInteger(seq) && seq > 0) {
-        call.own.add(seq);
-        this.#advance(call);
+      if (call.unsent === signal) call.unsent = null;
+      if (err instanceof ApiError && (err.status === 404 || err.status === 409)) {
+        // A refused restart offer, such as one that crossed the peer's,
+        // is withdrawn.
+        if (kind === 'offer' && call.iceUp) await call.link?.rollback();
+        this.#refresh(call);
+      } else {
+        this.#fail(call, 'signal');
       }
-    }, run);
+      return;
+    }
+    if (!this.#is(call, run)) return;
+    if (call.unsent === signal) call.unsent = null;
+    const seq = result?.signal_seq;
+    if (Number.isSafeInteger(seq) && seq > 0) {
+      call.own.add(seq);
+      this.#advance(call);
+    }
   }
 
   #advance(call) {
@@ -639,6 +816,12 @@ ${signal.payload}`);
       if (this.#ownSignal(call, signal)) {
         call.own.add(signal.seq);
       } else {
+        if (signal.kind === 'offer' && call.iceUp) {
+          // The peer restarts ICE: the answer gathers with fresh TURN credentials.
+          const iceServers = await this.#turn(call, run);
+          if (!this.#is(call, run) || !call.link) return true;
+          if (iceServers) call.link.setIceServers(iceServers);
+        }
         await call.link.receive(signal.kind, signal.payload);
         // The signal may have failed the call.
         if (!this.#is(call, run) || !call.link) return true;
@@ -693,13 +876,14 @@ ${signal.payload}`);
       else if (err instanceof ApiError && err.status === 409) this.#refresh(call);
     }
     if (!this.#is(call, run) || call.state === 'ended') return;
+    if (!call.recovering) this.#enqueue(call, () => call.unsent && this.#post(call, run, call.unsent), run);
     this.#enqueue(call, () => this.#catchUp(call), run);
     this.#schedule(call);
     this.#changed();
   }
 
   // #schedule keeps the call's timers: polling while ringing or while the
-  // connection is not up yet, and the heartbeat of the call's device.
+  // connection is not up, and the heartbeat of the call's device.
   #schedule(call) {
     this.#timers.clear(call.poll);
     call.poll = null;
@@ -710,7 +894,7 @@ ${signal.payload}`);
     if (call.state === 'ringing') {
       delay = RINGING_POLL_MS;
       work = () => this.#refresh(call);
-    } else if (call.state === 'connecting' && call.link && !call.iceUp) {
+    } else if (call.link && (call.recovering || (call.state === 'connecting' && !call.iceUp))) {
       delay = SIGNAL_POLL_MS;
       work = () => this.#enqueue(call, () => this.#catchUp(call), run);
     } else if (!call.owned) {
@@ -753,8 +937,11 @@ ${signal.payload}`);
     if (!call) return;
     this.#timers.clear(call.poll);
     this.#timers.clear(call.beat);
+    this.#timers.clear(call.turnTimer);
     call.poll = null;
     call.beat = null;
+    call.turnTimer = null;
+    this.#clearRecovery(call);
   }
 
   #finish(call, error = '') {

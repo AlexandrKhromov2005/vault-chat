@@ -92,24 +92,37 @@ const validSdp = (payload) => typeof payload === 'string' && payload !== '' && b
 //   role          'caller' sends the first offer; 'callee' answers it.
 //   send(kind, payload)  queues an outgoing signal; must not block.
 //   onConnected() ICE connected for the first time.
+//   onLost(failed)  a connection that was up went down: disconnected, which
+//                 the browser may still repair, or failed, which only an ICE
+//                 restart repairs.
+//   onRestored()  the connection is up again after onLost.
 //   onRemoteStream(stream)  the peer's audio arrived.
 //   onFailed(reason)  the connection cannot work: 'ice', 'sdp', 'protocol'.
+//
+// The candidate budget covers the whole call, ICE restarts included, as the
+// server counts it.
 export class PeerLink {
   #pc;
+  #config;
   #role;
   #send;
   #handlers;
   #closed = false;
   #connected = false;
+  #lost = null; // null, 'disconnected' or 'failed' after the connection was up
   #remoteSet = false;
   #pendingCandidates = []; // the peer's candidates before its description
   #sentCandidates = 0;
 
-  constructor({ role, stream, createPeerConnection, iceServers = [], send, onConnected, onRemoteStream, onFailed }) {
+  constructor({
+    role, stream, createPeerConnection, iceServers = [], send,
+    onConnected, onLost = () => {}, onRestored = () => {}, onRemoteStream, onFailed,
+  }) {
     this.#role = role;
     this.#send = send;
-    this.#handlers = { onConnected, onRemoteStream, onFailed };
-    this.#pc = createPeerConnection({ iceServers, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
+    this.#handlers = { onConnected, onLost, onRestored, onRemoteStream, onFailed };
+    this.#config = { iceServers, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' };
+    this.#pc = createPeerConnection(this.#config);
     for (const track of stream.getTracks()) this.#pc.addTrack(track, stream);
 
     this.#pc.addEventListener('icecandidate', (event) => this.#localCandidate(event.candidate));
@@ -143,6 +156,74 @@ export class PeerLink {
     } catch {
       this.#fail('sdp');
     }
+  }
+
+  // restart starts an ICE restart with a new offer, using iceServers when
+  // given. It reports whether an offer went out: an offer of either side
+  // still waiting for its answer comes first.
+  async restart(iceServers = null) {
+    if (this.#closed || this.#pc.signalingState !== 'stable') return false;
+    try {
+      if (iceServers) this.setIceServers(iceServers);
+      const offer = await this.#pc.createOffer({ iceRestart: true });
+      if (this.#closed || this.#pc.signalingState !== 'stable') return false;
+      if (!validSdp(offer.sdp)) {
+        this.#fail('sdp');
+        return false;
+      }
+      this.#send('offer', offer.sdp);
+      await this.#pc.setLocalDescription(offer);
+      return true;
+    } catch {
+      this.#fail('sdp');
+      return false;
+    }
+  }
+
+  // setIceServers takes new TURN credentials for the next gathering.
+  setIceServers(iceServers) {
+    if (this.#closed) return;
+    this.#config = { ...this.#config, iceServers };
+    try {
+      this.#pc.setConfiguration(this.#config);
+    } catch {
+      // The engine keeps the servers it has.
+    }
+  }
+
+  // rollback withdraws a local offer that the server refused, so that the
+  // peer's offer, or the next restart, can follow.
+  async rollback() {
+    if (this.#closed || this.#pc.signalingState !== 'have-local-offer') return;
+    try {
+      await this.#pc.setLocalDescription({ type: 'rollback' });
+    } catch {
+      this.#fail('sdp');
+    }
+  }
+
+  // usesRelay reports whether the selected candidate pair goes through a
+  // TURN relay of either side.
+  async usesRelay() {
+    if (this.#closed) return false;
+    let report;
+    try {
+      report = await this.#pc.getStats();
+    } catch {
+      return false;
+    }
+    const stats = new Map();
+    report?.forEach?.((entry) => stats.set(entry.id, entry));
+    let pair = null;
+    for (const entry of stats.values()) {
+      if (entry.type === 'transport' && entry.selectedCandidatePairId) pair = stats.get(entry.selectedCandidatePairId) ?? pair;
+    }
+    if (!pair) {
+      pair = [...stats.values()].find((entry) => entry.type === 'candidate-pair'
+        && (entry.selected || (entry.nominated && entry.state === 'succeeded'))) ?? null;
+    }
+    if (!pair) return false;
+    return [pair.localCandidateId, pair.remoteCandidateId].some((id) => stats.get(id)?.candidateType === 'relay');
   }
 
   // receive applies one of the peer's signals. The caller orders them by
@@ -254,15 +335,25 @@ export class PeerLink {
   #stateChanged() {
     if (this.#closed) return;
     const { connectionState, iceConnectionState } = this.#pc;
-    if (connectionState === 'failed' || iceConnectionState === 'failed') {
-      this.#fail('ice');
+    const failed = connectionState === 'failed' || iceConnectionState === 'failed';
+    const up = connectionState === 'connected' || iceConnectionState === 'connected' || iceConnectionState === 'completed';
+    const disconnected = connectionState === 'disconnected' || iceConnectionState === 'disconnected';
+    if (!this.#connected) {
+      // Before the first connection only the server's timeout helps.
+      if (failed) {
+        this.#fail('ice');
+      } else if (up) {
+        this.#connected = true;
+        this.#handlers.onConnected();
+      }
       return;
     }
-    const up = connectionState === 'connected' || iceConnectionState === 'connected' || iceConnectionState === 'completed';
-    if (up && !this.#connected) {
-      this.#connected = true;
-      this.#handlers.onConnected();
-    }
+    const lost = failed ? 'failed' : up ? null : disconnected ? 'disconnected' : this.#lost;
+    if (lost === this.#lost) return;
+    const was = this.#lost;
+    this.#lost = lost;
+    if (lost) this.#handlers.onLost(lost === 'failed');
+    else if (was) this.#handlers.onRestored();
   }
 
   #fail(reason) {

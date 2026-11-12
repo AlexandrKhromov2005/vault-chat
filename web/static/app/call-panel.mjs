@@ -13,6 +13,7 @@ function statusText(view, name) {
     return view.owned ? `Вызываем ${name}…` : 'Исходящий вызов с другого устройства';
   }
   if (!view.owned) return 'Звонок идёт на другом устройстве';
+  if (view.recovering) return 'Связь прервалась, восстанавливаем…';
   if (view.state === 'connecting') return 'Соединение…';
   return view.remote ? 'Идёт разговор' : 'Идёт разговор, ждём звук собеседника…';
 }

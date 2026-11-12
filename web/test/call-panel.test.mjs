@@ -66,6 +66,10 @@ test('the call bar offers what the call state allows', async () => {
   calls.show({ state: 'active', owned: true });
   assert.deepEqual(visible(), ['call-end']);
 
+  calls.show({ state: 'active', owned: true, recovering: true });
+  assert.equal($('call-status').textContent, 'Связь прервалась, восстанавливаем…');
+  assert.deepEqual(visible(), ['call-end'], 'the user can still hang up');
+
   calls.show({ state: 'ended', error: 'Микрофон не найден.' });
   assert.deepEqual(visible(), ['call-dismiss']);
   assert.equal($('call-status').textContent, 'Звонок завершён');
