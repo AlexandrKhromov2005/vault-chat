@@ -317,6 +317,22 @@ test('a network failure repeats a command with the same command_id', async () =>
   assert.equal(t.calls.view.state, 'connecting');
 });
 
+test('a delayed retry is abandoned when its call session is reset', async () => {
+  const t = await ringingCallee();
+  let failures = 1;
+  t.server.overrides['POST /api/v1/calls/c-1/accept'] = () => {
+    if (failures-- > 0) throw apiError(0, 'network');
+    return undefined;
+  };
+  const accepting = t.calls.accept();
+  await flush();
+  t.calls.reset();
+  await t.timers.advance(500);
+  await accepting;
+  assert.equal(t.api.sent('POST', '/api/v1/calls/c-1/accept').length, 1, 'no request escapes into a later session');
+  assert.equal(t.calls.view, null);
+});
+
 test('an accept refused because another device answered leaves this tab out of the call', async () => {
   const t = await ringingCallee();
   t.server.overrides['POST /api/v1/calls/c-1/accept'] = () => {

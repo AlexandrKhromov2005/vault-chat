@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decodeCandidate, encodeCandidate, openMicrophone } from '../static/app/call-media.mjs';
-import { candidate } from './callfakes.mjs';
+import { PeerLink, decodeCandidate, encodeCandidate, openMicrophone } from '../static/app/call-media.mjs';
+import { FakePeerConnection, candidate } from './callfakes.mjs';
 
 test('candidates round-trip and malformed ones are refused', () => {
   const payload = encodeCandidate(candidate(1));
@@ -29,4 +29,25 @@ test('microphone failures are told apart', async () => {
   assert.equal(await reason(failing('NotFoundError')), 'missing');
   assert.equal(await reason(failing('NotReadableError')), 'busy');
   assert.equal(await reason(failing('TypeError')), 'failed');
+});
+
+test('local offer failures are reported instead of being swallowed', async () => {
+  for (const method of ['createOffer', 'setLocalDescription']) {
+    const pc = new FakePeerConnection({});
+    pc[method] = async () => { throw new Error('browser rejected the local description'); };
+    let failure = '';
+    const link = new PeerLink({
+      role: 'caller',
+      stream: { getTracks: () => [] },
+      createPeerConnection: () => pc,
+      send: () => {},
+      onConnected: () => {},
+      onRemoteStream: () => {},
+      onFailed: (reason) => { failure = reason; },
+    });
+
+    await link.start();
+
+    assert.equal(failure, 'sdp', method);
+  }
 });
