@@ -1,7 +1,18 @@
 -module(vault_call_recovery_tests).
--moduledoc "Database-backed lifecycle and recovery acceptance tests.".
+-moduledoc """
+Database-backed lifecycle and recovery acceptance tests.
+
+Recovery is asynchronous: the supervisor restarts a killed call, and a call
+recovered at startup expires after `application:ensure_all_started/1` has
+returned. The tests wait for that state with bounded waits (`vault_calls_wait`)
+instead of fixed delays. No test here exercises a call timer, so the timers are
+set far beyond any test run: a stalled test runner cannot end a call under test.
+An expired call is made by moving its state change into the past.
+""".
 
 -include_lib("eunit/include/eunit.hrl").
+
+-define(UNREACHED, 600000).
 
 recovery_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
@@ -11,6 +22,7 @@ recovery_test_() ->
         fun a_replayed_creation_does_not_reset_a_crashed_call/1,
         fun an_application_restart_recovers_active_state/1,
         fun an_expired_call_ends_during_startup/1,
+        fun a_failed_expiry_at_startup_is_retried/1,
         fun a_database_outage_blocks_the_transition/1,
         fun client_commands_replay_their_original_response/1,
         fun replayed_heartbeat_does_not_refresh_the_deadline/1,
@@ -36,10 +48,10 @@ setup() ->
         "TRUNCATE call_commands, call_signals, call_participants, calls; UPDATE call_capacity SET active_calls = 0"),
     ok = vault_calls_store:stop(Store),
     [ok = application:set_env(vault_calls, Key, Value) || {Key, Value} <-
-        [{database_url, Url}, {ringing_timeout, 300}, {connecting_timeout, 2000},
-         {heartbeat_timeout, 150}, {max_call_duration, 5000}]],
+        [{database_url, Url}, {ringing_timeout, ?UNREACHED}, {connecting_timeout, ?UNREACHED},
+         {heartbeat_timeout, ?UNREACHED}, {max_call_duration, ?UNREACHED}]],
     {ok, _} = application:ensure_all_started(vault_calls),
-    #{connection => Connection}.
+    #{connection => Connection, url => Url}.
 
 cleanup(#{connection := Connection}) ->
     ok = application:stop(vault_calls),
@@ -60,10 +72,8 @@ ending_releases_participants_and_capacity(#{connection := Connection}) ->
 a_crashed_process_recovers_active_state(_) ->
     Pid = new_call(<<"crash">>),
     ok = connect(<<"crash">>),
-    Ref = monitor(process, Pid),
-    exit(Pid, kill),
-    receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
-    timer:sleep(50),
+    ok = kill(Pid),
+    _ = vault_calls_wait:restarted(<<"crash">>, Pid),
     [?_assertEqual({ok, active}, vault_call:state(<<"crash">>))].
 
 a_replayed_creation_does_not_reset_a_crashed_call(_) ->
@@ -74,10 +84,8 @@ a_replayed_creation_does_not_reset_a_crashed_call(_) ->
     {ok, Pid} = vault_call_sup:start_call(Args),
     ok = connect(Id),
     {ok, Pid} = vault_call_sup:start_call(Args),
-    Ref = monitor(process, Pid),
-    exit(Pid, kill),
-    receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end,
-    timer:sleep(50),
+    ok = kill(Pid),
+    _ = vault_calls_wait:restarted(Id, Pid),
     [?_assertEqual({ok, active}, vault_call:state(Id))].
 
 an_application_restart_recovers_active_state(_) ->
@@ -90,13 +98,35 @@ an_application_restart_recovers_active_state(_) ->
 an_expired_call_ends_during_startup(#{connection := Connection}) ->
     _ = new_call(<<"expired">>),
     ok = application:stop(vault_calls),
-    timer:sleep(450),
+    ok = expire_while_stopped(Connection, <<"expired">>),
     {ok, _} = application:ensure_all_started(vault_calls),
-    timer:sleep(50),
+    ok = vault_calls_wait:ended(<<"expired">>),
     [?_assertEqual({error, not_found}, vault_call:state(<<"expired">>)),
      ?_assertEqual({<<"ended">>, 1, 0}, database_state(Connection, <<"expired">>)),
      ?_assertEqual(0, participant_count(Connection))].
 
+%% The first commit of the expiry waits for a row lock longer than the store's
+%% lock_timeout and fails, as under a slow database in CI. The call stays
+%% ringing and ends on its retry, so a test must wait for the end.
+a_failed_expiry_at_startup_is_retried(#{connection := Connection, url := Url}) ->
+    Id = <<"retried-expiry">>,
+    _ = new_call(Id),
+    ok = application:stop(vault_calls),
+    ok = expire_while_stopped(Connection, Id),
+    {ok, Locker} = vault_calls_store:connect(Url),
+    {ok, [], []} = epgsql:squery(Locker, "BEGIN"),
+    {ok, _, [{Id}]} = epgsql:equery(Locker, "SELECT id FROM calls WHERE id = $1 FOR UPDATE", [Id]),
+    {ok, _} = application:ensure_all_started(vault_calls),
+    Blocked = vault_call:state(Id),
+    BlockedRow = database_state(Connection, Id),
+    {ok, [], []} = epgsql:squery(Locker, "COMMIT"),
+    ok = epgsql:close(Locker),
+    ok = vault_calls_wait:ended(Id),
+    [?_assertEqual({ok, ringing}, Blocked),
+     ?_assertEqual({<<"ringing">>, 0, 1}, BlockedRow),
+     ?_assertEqual({error, not_found}, vault_call:state(Id)),
+     ?_assertEqual({<<"ended">>, 1, 0}, database_state(Connection, Id)),
+     ?_assertEqual(0, participant_count(Connection))].
 a_database_outage_blocks_the_transition(#{connection := Connection}) ->
     _ = new_call(<<"blocked">>),
     Database = sys:get_state(vault_calls_store),
@@ -276,3 +306,15 @@ database_state(Connection, Id) ->
 participant_count(Connection) ->
     {ok, _, [{Count}]} = epgsql:squery(Connection, "SELECT count(*) FROM call_participants"),
     binary_to_integer(Count).
+
+kill(Pid) ->
+    Ref = monitor(process, Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, killed} -> ok after 1000 -> error(not_killed) end.
+
+%% Moves the last state change of a call, while the application is stopped,
+%% further into the past than any call timeout.
+expire_while_stopped(Connection, Id) ->
+    {ok, 1} = epgsql:equery(Connection,
+        "UPDATE calls SET state_entered_at = clock_timestamp() - interval '1 day' WHERE id = $1", [Id]),
+    ok.

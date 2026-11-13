@@ -96,7 +96,8 @@ ringing_and_connecting_time_out(_) ->
     call(<<"c5">>),
     call(<<"c6">>, <<"carol">>, <<"dave">>),
     {ok, connecting} = cmd(<<"c6">>, accept, <<"dave">>, <<"bob-laptop">>),
-    timer:sleep(450),
+    ok = vault_calls_wait:ended(<<"c5">>),
+    ok = vault_calls_wait:ended(<<"c6">>),
     [?_assertEqual({error, not_found}, vault_call:state(<<"c5">>)),
      ?_assertEqual({error, not_found}, vault_call:state(<<"c6">>))].
 
@@ -172,7 +173,7 @@ a_crash_ends_only_its_own_call(_) ->
     Ref = monitor(process, Crashed),
     exit(Crashed, kill),
     receive {'DOWN', Ref, process, Crashed, killed} -> ok after 1000 -> error(not_killed) end,
-    timer:sleep(20),
+    _ = vault_calls_wait:restarted(<<"c10">>, Crashed),
     [?_assertEqual({ok, ringing}, vault_call:state(<<"c10">>)),
      ?_assertEqual({ok, active}, vault_call:state(<<"c11">>)),
      ?_assertEqual({ok, active}, cmd(<<"c11">>, heartbeat, <<"carol">>, <<"carol-phone">>))].
