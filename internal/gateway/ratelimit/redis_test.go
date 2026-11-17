@@ -115,6 +115,25 @@ func TestRedisLimiter_Allow(t *testing.T) {
 		// A full refill of 30 tokens at 1/s takes 30s; the bucket must not
 		// outlive that by much.
 		require.LessOrEqual(t, ttl, 31*time.Second)
+
+		server.FastForward(32 * time.Second)
+		require.False(t, server.Exists("rate:user:u-1"))
+	})
+
+	t.Run("activity renews the bucket lifetime", func(t *testing.T) {
+		limiter, server, _ := newTestLimiter(t, 2)
+		const key = "rate:ip:10.0.0.1"
+
+		_, err := limiter.Allow(ctx, "ip:10.0.0.1")
+		require.NoError(t, err)
+		server.FastForward(2 * time.Second)
+		_, err = limiter.Allow(ctx, "ip:10.0.0.1")
+		require.NoError(t, err)
+
+		server.FastForward(2 * time.Second)
+		require.True(t, server.Exists(key))
+		server.FastForward(2 * time.Second)
+		require.False(t, server.Exists(key))
 	})
 
 	t.Run("redis failure is reported", func(t *testing.T) {

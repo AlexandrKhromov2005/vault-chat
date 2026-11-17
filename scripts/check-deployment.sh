@@ -11,7 +11,7 @@ AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RU
 REDIS_PASSWORD=validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml config --format json | python3 -c '
-import json,sys
+import json,sys,shlex
 c=json.load(sys.stdin); services=c["services"]
 assert len(services)==13
 for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-postgres")]:
@@ -23,6 +23,13 @@ for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-pos
             assert not own.intersection(services[other]["networks"])
 assert services["minio"]["environment"]["MINIO_ROOT_USER"] != services["media"]["environment"]["MEDIA_S3_ACCESS_KEY"]
 assert set(services["minio"]["networks"])=={"objects"}
+redis_command=" ".join(services["redis"]["command"])
+assert "--maxmemory 64mb" in redis_command
+assert "--maxmemory-policy allkeys-lru" in redis_command
+assert "--appendonly no" in redis_command
+assert shlex.split(redis_command)[-2:]==["--save",""]
+assert not services["redis"].get("volumes")
+assert services["redis"].get("tmpfs")==["/data"]
 for name,s in services.items():
     assert "build" not in s
     assert s["restart"]==("no" if name.endswith("-migrate") or name=="s3-init" else "unless-stopped")

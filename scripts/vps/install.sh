@@ -29,6 +29,9 @@ rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/vault-chat /etc/nginx/sites-enabled/vault-chat
 nginx -t
 systemctl reload nginx
+ufw default deny incoming
+ufw default allow outgoing
+ufw default deny routed
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp

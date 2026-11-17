@@ -165,18 +165,35 @@ for managing mTLS, retries and circuit breakers.
 
 **Rule:** No service queries another service's database directly. All data access via API.
 
-### 4.2 Caching Strategy (Redis)
+### 4.2 Redis Object Lifecycle
 
-| Key Pattern | TTL | Purpose |
+The current implementation stores only rate-limit buckets in Redis. Sessions,
+revocations, messages and file metadata are authoritative in PostgreSQL, not in
+Redis. Application-data caches are not implemented.
+
+| Key pattern | TTL | Purpose |
 |-------------|-----|---------|
-| `token:blacklist:<jti>` | until expiry | Revoked JWT tokens |
-| `session:<id>` | 24h | Active sessions |
-| `room:recent:<room_id>` | 1h | Last 50 messages (pagination cache) |
-| `unread:<user_id>` | 5m | Unread message counters |
-| `presence:<user_id>` | 2m | Online/away/last seen |
-| `rate:<ip>` | 1m | Rate limit buckets |
+| `rate:ip:<address>` | Full bucket refill time + 1s | Anonymous and per-IP request limits |
+| `rate:user:<uuid>` | Full bucket refill time + 1s | Authenticated request limits |
+| `rate:auth:ip:<address>` | Full bucket refill time + 1s | Credential endpoint limits |
 
-### 4.3 Blob Storage (MinIO)
+Refill time is `burst / rate-per-minute`; therefore the defaults produce a
+16-second TTL for ordinary buckets (30 burst, 120/minute) and 61 seconds for
+credential buckets (5 burst, 5/minute). Each Lua invocation updates the hash and
+its `PEXPIRE` atomically, so activity renews the TTL and an idle bucket expires
+once a missing bucket would be fully replenished. The regression suite advances
+the Redis clock and checks both renewal and actual deletion.
+
+Redis Pub/Sub carries session-invalidation hints and chat events but creates no
+persistent keys and provides no retained message history. Clients recover missed
+chat messages from PostgreSQL. On the VPS, both AOF and RDB snapshots are
+disabled and `/data` is a tmpfs rather than a named or anonymous volume; the
+64 MiB bound and all-keys LRU policy apply only to this ephemeral state.
+
+### 4.3 Target Blob Storage Layout
+
+The current implementation has one private `vault-chat-media` bucket for message
+attachments; avatars, exports and automatic retention are not implemented.
 
 | Bucket | Content | Lifecycle |
 |--------|---------|-----------|
@@ -222,7 +239,7 @@ for managing mTLS, retries and circuit breakers.
 | Transport | TLS 1.3 | Client ↔ Gateway, Gateway ↔ Services |
 | Service mesh | mTLS | Service ↔ Service |
 | Database | At-rest encryption (planned) | Select and verify a storage-level or database-supported mechanism; not implemented |
-| Backup | AES-256-GCM | Encrypted before upload to backup storage |
+| Backup | age | Encrypted while streaming, before writing the backup to disk or uploading it |
 | End-to-end (DMs) | Signal Protocol / Double Ratchet | Optional; server sees only ciphertext |
 
 ### 5.4 Audit & Compliance
@@ -269,8 +286,8 @@ for managing mTLS, retries and circuit breakers.
 
 | Pattern | Implementation | Purpose |
 |---------|---------------|---------|
-| Circuit Breaker | `github.com/sony/gobreaker` | Fail fast when downstream is unhealthy |
-| Retry + Backoff | gRPC interceptor with exponential backoff | Transient network failures |
+| Circuit Breaker | Planned; no implementation or dependency currently | Fail fast when downstream is unhealthy |
+| Retry + Backoff | Planned for selected idempotent RPCs; no generic gRPC retry interceptor | Transient network failures |
 | Timeout | Context deadlines per request | Prevent cascading hangs |
 | Health Checks | `/health` and `/ready` probes | Kubernetes / orchestrator decisions |
 | Graceful Degradation | Chat works without Media (attachments show as placeholders) | Partial outages |
@@ -353,7 +370,7 @@ PR → independent approval of latest push → guarded merge to main
 | Cache | Redis 7+ |
 | Blob Storage | MinIO (S3-compatible) |
 | Auth | JWT (RS256), Argon2id, TOTP |
-| Encryption | TLS 1.3, mTLS, AES-256 |
+| Encryption | TLS 1.3, mTLS, age-encrypted backups |
 | Container | Docker, Docker Compose (local), Kubernetes (future) |
 | Observability | slog, Prometheus, Grafana, Jaeger |
 | Build | xmake |

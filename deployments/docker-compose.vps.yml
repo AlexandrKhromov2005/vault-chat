@@ -62,8 +62,7 @@ services:
   redis:
     networks: [events]
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
-    volumes:
-    - redisdata:/data
+    tmpfs: [/data]
     healthcheck:
       test:
       - CMD-SHELL
@@ -84,7 +83,7 @@ services:
     - sh
     - -c
     - exec redis-server --requirepass "$$REDIS_PASSWORD" --maxmemory 64mb --maxmemory-policy
-      allkeys-lru --appendonly no
+      allkeys-lru --appendonly no --save ""
   minio:
     networks: [objects]
     command:
@@ -501,7 +500,6 @@ volumes:
   pgdata: null
   chat_pgdata: null
   media_pgdata: null
-  redisdata: null
   miniodata: null
 
 networks:
