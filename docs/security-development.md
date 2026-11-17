@@ -8,7 +8,7 @@ also exposed process failures. Passing the existing pipeline was insufficient.
 | --- | --- | --- |
 | Password hashing and uploads had per-request limits without a global/per-user budget. | Define memory, concurrency, time and rate budgets before implementation; test simultaneous requests and exhaustion. | Behavioral regression tests required in the PR; coverage percentage alone cannot establish safety. |
 | Auth, file names, roles, logout lifetime and dependency outages lacked explicit invariants. | Review identity normalization, session lifetime, detected file type/extension, least privilege and outage behavior. | Each changed boundary needs negative tests, not only a successful request. |
-| A 110-file security PR mixed application and operations fixes and was merged by its author without independent approval. | Focused PRs; one other participant approves the latest push; stale approvals dismissed; administrators covered. | GitHub protection; no automatic admin override. The existing owner-only update ruleset remains. |
+| A 110-file security PR mixed application and operations fixes and was merged by its author without independent approval. | Focused PRs; one other participant approves the latest push; stale approvals dismissed; administrators covered. | GitHub branch protection and ruleset; no admin or user-specific review bypass. |
 | Hooks were documented but not configured; GitHub required zero approvals. | `xmake setup` installs commit and push hooks; branch policy is stored in `.github/branch-protection.json`. | Check `git config --get core.hooksPath`; GitHub enforces review independently of local hooks. |
 | Code could change while CI was running and an earlier green result could be mistaken for verification of the new code. | Run committed source in a separate detached checkout; check both checkouts and tool fingerprints afterward. | Receipt binds commit, tree, tools, log hash and time; new SHA, dirty source, changed tools/log or failed rerun invalidates it. Concurrent runs are rejected. |
 | Old Go analyzer builds and Node 20 failed partway through validation; tool updates were improvised. | Preflight compatible pinned analyzers, Node 22.23.4, protobuf tooling and required crypto tools before starting fixtures. | `xmake doctor`; no `@latest` installation instructions. Receipts expire locally after 24 hours. |
@@ -91,8 +91,9 @@ only that owned project. Do not run global Docker cleanup.
 
 The branch policy can be reapplied by a repository administrator with
 `gh api --method PUT repos/AlexandrKhromov2005/vault-chat/branches/main/protection --input .github/branch-protection.json`.
-This does not modify the separate owner-only ruleset. Private vulnerability
-reporting is enabled separately in repository settings.
+This does not modify the separate `main: independent review` ruleset, which also
+requires approval and has no bypass actors. Private vulnerability reporting is
+enabled separately in repository settings.
 
 References: [NIST SSDF 1.1](https://csrc.nist.gov/pubs/sp/800/218/final) on integrating
 security and root-cause prevention into development, and
