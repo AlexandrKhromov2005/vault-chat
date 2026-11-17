@@ -63,7 +63,7 @@ def check_environment(tools=None):
         if not endpoint.startswith('unix:///'):
             raise ValueError('validated local Docker endpoint required before creating fixtures')
         env['DOCKER_HOST'] = endpoint
-    env.update({'GOENV': 'off', 'GOWORK': 'off', 'GOTOOLCHAIN': 'go1.27.3', 'VAULT_CI_BUILD_NETWORK': build_network()})
+    env.update({'GOENV': 'off', 'GOWORK': 'off', 'GOTOOLCHAIN': 'go1.27.4', 'VAULT_CI_BUILD_NETWORK': build_network()})
     return env
 
 
