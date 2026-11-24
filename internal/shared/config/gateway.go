@@ -16,6 +16,7 @@ type GatewayConfig struct {
 	AuthGRPCAddr       string
 	ChatGRPCAddr       string
 	MediaGRPCAddr      string
+	CallsGRPCAddr      string
 	RedisAddr          string
 	RedisPassword      string
 	TLSCertPath        string
@@ -28,14 +29,18 @@ type GatewayConfig struct {
 	// AuthRateLimit* bound credential requests per client IP and subject,
 	// AuthIPRateLimit* per client IP, RefreshRateLimit* refreshes per
 	// client IP; see docs/gateway/rate-limits.md.
-	AuthRateLimitPerMinute    uint32
-	AuthRateLimitBurst        uint32
-	AuthIPRateLimitPerMinute  uint32
-	AuthIPRateLimitBurst      uint32
-	RefreshRateLimitPerMinute uint32
-	RefreshRateLimitBurst     uint32
-	LogLevel                  string
-	WebSocket                 WebSocketConfig
+	AuthRateLimitPerMinute        uint32
+	AuthRateLimitBurst            uint32
+	AuthIPRateLimitPerMinute      uint32
+	AuthIPRateLimitBurst          uint32
+	RefreshRateLimitPerMinute     uint32
+	RefreshRateLimitBurst         uint32
+	CallsRateLimitPerMinute       uint32
+	CallsRateLimitBurst           uint32
+	CallsCreateRateLimitPerMinute uint32
+	CallsCreateRateLimitBurst     uint32
+	LogLevel                      string
+	WebSocket                     WebSocketConfig
 	// ProfileCacheAddr is the Redis instance of the public profile cache
 	// (docs/adr/0004-public-profile-cache.md); empty disables the cache. It
 	// must differ from RedisAddr, whose rate limits must not be evicted.
@@ -68,6 +73,7 @@ type WebSocketConfig struct {
 func LoadGateway() (*GatewayConfig, error) {
 	cfg := &GatewayConfig{
 		MediaGRPCAddr: os.Getenv("GATEWAY_MEDIA_GRPC_ADDR"),
+		CallsGRPCAddr: os.Getenv("GATEWAY_CALLS_GRPC_ADDR"),
 		HTTPAddr:      envOr("GATEWAY_HTTP_ADDR", ":8080"),
 		AuthGRPCAddr:  envOr("GATEWAY_AUTH_GRPC_ADDR", "localhost:50051"),
 		ChatGRPCAddr:  envOr("GATEWAY_CHAT_GRPC_ADDR", "localhost:50052"),
@@ -121,6 +127,18 @@ func LoadGateway() (*GatewayConfig, error) {
 		return nil, err
 	}
 	if cfg.RefreshRateLimitBurst, err = uintEnv("GATEWAY_REFRESH_RATE_LIMIT_BURST", 30, 16); err != nil {
+		return nil, err
+	}
+	if cfg.CallsRateLimitPerMinute, err = uintEnv("GATEWAY_CALLS_RATE_LIMIT_PER_MINUTE", 1200, 16); err != nil {
+		return nil, err
+	}
+	if cfg.CallsRateLimitBurst, err = uintEnv("GATEWAY_CALLS_RATE_LIMIT_BURST", 256, 16); err != nil {
+		return nil, err
+	}
+	if cfg.CallsCreateRateLimitPerMinute, err = uintEnv("GATEWAY_CALLS_CREATE_RATE_LIMIT_PER_MINUTE", 10, 16); err != nil {
+		return nil, err
+	}
+	if cfg.CallsCreateRateLimitBurst, err = uintEnv("GATEWAY_CALLS_CREATE_RATE_LIMIT_BURST", 3, 16); err != nil {
 		return nil, err
 	}
 	if cfg.WebSocket, err = loadWebSocket(); err != nil {

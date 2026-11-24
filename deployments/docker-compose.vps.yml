@@ -30,6 +30,27 @@ services:
     - shared_buffers=64MB
     - -c
     - max_connections=40
+  calls-postgres:
+    networks: [calls-data]
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: calls
+      POSTGRES_PASSWORD: ${CALLS_DB_PASSWORD:?required}
+      POSTGRES_DB: calls_db
+    volumes:
+      - calls_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calls -d calls_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+    mem_limit: 384m
+    command: [postgres, -c, shared_buffers=64MB, -c, max_connections=40]
+
   chat-postgres:
     networks: [chat-data]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -385,6 +406,97 @@ services:
       read_only: true
       bind:
         create_host_path: false
+  coturn:
+    network_mode: host
+    user: "65532:65532"
+    image: coturn/coturn:4.19.2-alpine3.24@sha256:974824bdefa8759b7aa4508daf5066fdd9f5411e925055b6132fb2904aecca01
+    entrypoint: ["/usr/local/bin/turn-entrypoint"]
+    environment:
+      TURN_PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP}
+      TURN_ALLOW_PRIVATE: "false"
+    volumes:
+      - type: bind
+        source: ./turnserver-entrypoint.sh
+        target: /usr/local/bin/turn-entrypoint
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../secrets/turn_secret
+        target: /run/secrets/turn_secret
+        read_only: true
+        bind: {create_host_path: false}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3478"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  calls:
+    networks: [rpc, calls-data, events]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: *id001
+    security_opt: *id002
+    environment:
+      RPC_TLS_MODE: mtls
+      RPC_TLS_SERVICE: calls
+      RPC_TLS_DIR: /run/secrets/rpc
+      CALLS_PRODUCTION: "true"
+      CALLS_GRPC_ENABLED: "true"
+      CALLS_MONITOR_ENABLED: "true"
+      CALLS_GRPC_PORT: "50054"
+      CALLS_DATABASE_URL: postgres://calls_app:${CALLS_RUNTIME_DB_PASSWORD:?required}@calls-postgres:5432/calls_db?sslmode=disable
+      CALLS_AUTH_GRPC_ADDR: auth:50051
+      CALLS_CHAT_GRPC_ADDR: chat:50052
+      CALLS_REDIS_ADDR: redis:6379
+      CALLS_REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+      CALLS_TURN_SECRET_FILE: /run/secrets/turn_secret
+      CALLS_TURN_URIS: turn:${PUBLIC_IP}:3478?transport=udp,turn:${PUBLIC_IP}:3478?transport=tcp
+    volumes:
+      - type: bind
+        source: ../secrets/rpc/calls
+        target: /run/secrets/rpc
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../secrets/turn_secret
+        target: /run/secrets/turn_secret
+        read_only: true
+        bind: {create_host_path: false}
+    depends_on:
+      calls-migrate:
+        condition: service_completed_successfully
+      calls-postgres:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      coturn:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/calls-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 15s
+    image: vault-chat/calls:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+    mem_limit: 256m
+
   gateway:
     networks: [rpc, events, edge, profile-cache]
     restart: unless-stopped
@@ -399,6 +511,7 @@ services:
       GATEWAY_AUTH_GRPC_ADDR: passthrough:///auth:50051
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
       GATEWAY_CHAT_GRPC_ADDR: passthrough:///chat:50052
+      GATEWAY_CALLS_GRPC_ADDR: passthrough:///calls:50054
       GATEWAY_REDIS_ADDR: redis:6379
       GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-5}
       GATEWAY_AUTH_RATE_LIMIT_BURST: ${GATEWAY_AUTH_RATE_LIMIT_BURST:-5}
@@ -421,6 +534,8 @@ services:
       auth:
         condition: service_healthy
       chat:
+        condition: service_healthy
+      calls:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -459,6 +574,25 @@ services:
       read_only: true
       bind:
         create_host_path: false
+  calls-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [calls-data]
+    entrypoint: ["/usr/local/bin/calls-migrate"]
+    environment:
+      CALLS_DATABASE_URL: postgres://calls:${CALLS_DB_PASSWORD:?required}@calls-postgres:5432/calls_db?sslmode=disable
+      CALLS_RUNTIME_DB_PASSWORD: ${CALLS_RUNTIME_DB_PASSWORD:?required}
+    depends_on:
+      calls-postgres:
+        condition: service_healthy
+    image: vault-chat/calls:${VAULT_IMAGE_TAG:?set VAULT_IMAGE_TAG}
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
   auth-migrate:
     restart: 'no'
     read_only: true
@@ -569,6 +703,7 @@ volumes:
   pgdata: null
   chat_pgdata: null
   media_pgdata: null
+  calls_pgdata: null
   redisdata: null
   profile_cache_data: null
   miniodata: null
@@ -580,5 +715,6 @@ networks:
   auth-data: {internal: true}
   chat-data: {internal: true}
   media-data: {internal: true}
+  calls-data: {internal: true}
   edge: {}
   profile-cache: {internal: true}

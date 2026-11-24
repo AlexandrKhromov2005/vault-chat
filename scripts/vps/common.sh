@@ -84,4 +84,8 @@ check_rpc_images() {
             --mount "type=bind,src=$VAULT_ROOT/secrets/rpc/$rpc_service,dst=/run/secrets/rpc,readonly" \
             "vault-chat/$rpc_service:$rpc_tag" -check-rpc-tls
     done
+    docker run --rm --network none --entrypoint /usr/local/bin/calls-check-rpc-tls \
+        -e RPC_TLS_MODE=mtls -e RPC_TLS_DIR=/run/secrets/rpc \
+        --mount "type=bind,src=$VAULT_ROOT/secrets/rpc/calls,dst=/run/secrets/rpc,readonly" \
+        "vault-chat/calls:$rpc_tag"
 }

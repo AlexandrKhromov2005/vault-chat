@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+exec erl -noshell -pa /app/lib/*/ebin -eval '
+ok = vault_calls_config:load(),
+{ok, _} = application:ensure_all_started(grpcbox),
+Endpoint = {http, "127.0.0.1", 50055, []},
+{ok, _} = grpcbox_channel:start_link(calls_health, [Endpoint], #{}),
+Ctx = ctx:with_deadline_after(ctx:new(), 2000, millisecond),
+case grpcbox_health_client:check(Ctx, #{service => <<>>}, #{channel => calls_health}) of
+    {ok, #{status := '\''SERVING'\''}, _} -> halt(0);
+    _ -> halt(1)
+end.'

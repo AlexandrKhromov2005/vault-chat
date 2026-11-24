@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- New messages while the app is not on screen. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Audio calls own the microphone only while the call is active. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Tokens and, later, message history must not leave the device through
          cloud backup or device-to-device transfer. -->
@@ -41,6 +45,11 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".CallForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Hands downloaded attachments to the app the user opens them in,
              one URI at a time with a temporary read grant. -->

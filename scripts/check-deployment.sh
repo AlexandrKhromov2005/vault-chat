@@ -6,14 +6,14 @@ export PYTHONDONTWRITEBYTECODE=1
 for script in scripts/vps.sh scripts/vps/*.sh; do sh -n "$script"; done
 python3 -m unittest discover -s tests/ops -v
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
-AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
-AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation CALLS_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation CALLS_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin); services=c["services"]
-assert len(services)==15
+assert len(services)==19
 for name in ["redis","profile-cache"]:
     service=services[name]
     assert service["user"]=="redis"
@@ -37,11 +37,11 @@ assert all(a in cache["command"][-1] for a in ["--maxmemory 16mb","allkeys-lru",
 gw=services["gateway"]["environment"]
 assert gw["GATEWAY_PROFILE_CACHE_ADDR"]=="profile-cache:6379"!=gw["GATEWAY_REDIS_ADDR"]
 assert gw["GATEWAY_PROFILE_CACHE_PASSWORD"]!=gw["GATEWAY_REDIS_PASSWORD"]
-for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-postgres")]:
+for name,db in [("auth","postgres"),("chat","chat-postgres"),("media","media-postgres"),("calls","calls-postgres")]:
     assert name+"_app:" in services[name]["environment"][name.upper()+"_DATABASE_URL"]
     assert services[name]["depends_on"][name+"-migrate"]["condition"]=="service_completed_successfully"
     own=set(services[db]["networks"])
-    for other in ["auth","chat","media","gateway"]:
+    for other in ["auth","chat","media","calls","gateway"]:
         if other!=name:
             assert not own.intersection(services[other]["networks"])
 assert services["minio"]["environment"]["MINIO_ROOT_USER"] != services["media"]["environment"]["MEDIA_S3_ACCESS_KEY"]
@@ -60,14 +60,14 @@ for name,s in services.items():
 print("VPS Compose: TLS, private data services, limits and image-only deployment verified")'
 
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
-AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
-AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation CALLS_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation CALLS_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.mtls.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin)
-for name in ["auth","chat","media","gateway"]:
+for name in ["auth","chat","media","gateway","calls"]:
     s=c["services"][name]
     assert s["environment"]["RPC_TLS_MODE"]=="mtls"
     assert s["environment"]["RPC_TLS_SERVICE"]==name
@@ -76,8 +76,8 @@ for name in ["auth","chat","media","gateway"]:
     assert v[0]["read_only"] and not v[0]["bind"].get("create_host_path",False)
     assert all("rpc-ca" not in v["source"] for v in s["volumes"])
 print("mTLS overlay: isolated service keys, no CA signing key mounts")'
-AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
-AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation CALLS_DB_PASSWORD=validation \
+AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation CALLS_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
@@ -106,7 +106,7 @@ assert binds["/run/secrets/nats"]["source"].endswith("/secrets/rpc/nats") and al
 assert all("rpc-ca" not in v["source"] for v in nats["volumes"])
 assert c["services"]["nats-permissions"]["network_mode"]=="none"
 print("Push overlay: key and egress for Auth only, broker on an internal network of Chat and Auth, read-only mounts, no new ports")'
-AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation AUTH_PUSH_FCM_CREDENTIALS_FILE= VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation CALLS_DB_PASSWORD=validation AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation CALLS_RUNTIME_DB_PASSWORD=validation REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation AUTH_PUSH_FCM_CREDENTIALS_FILE= VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin)
 assert c["services"]["auth"]["environment"]["AUTH_PUSH_FCM_CREDENTIALS_FILE"]==""

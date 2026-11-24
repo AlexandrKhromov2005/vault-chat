@@ -37,6 +37,16 @@ services:
       profile-cache:
       metrics-gateway:
         ipv4_address: '${GATEWAY_METRICS_IPV4_ADDRESS:-172.31.240.26}'
+  calls:
+    environment:
+      CALLS_METRICS_ENABLED: 'true'
+      CALLS_METRICS_ADDR: '${CALLS_METRICS_IPV4_ADDRESS:-172.31.240.74}:50056'
+    networks:
+      rpc:
+      calls-data:
+      events:
+      metrics-calls:
+        ipv4_address: '${CALLS_METRICS_IPV4_ADDRESS:-172.31.240.74}'
   postgres:
     networks:
       auth-data:
@@ -79,6 +89,11 @@ networks:
     ipam:
       config:
         - subnet: '${GATEWAY_METRICS_SUBNET:-172.31.240.24/29}'
+  metrics-calls:
+    internal: true
+    ipam:
+      config:
+        - subnet: '${CALLS_METRICS_SUBNET:-172.31.240.72/29}'
   auth-data:
     internal: true
     ipam:

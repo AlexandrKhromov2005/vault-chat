@@ -83,6 +83,30 @@ func TestEventFrame(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCallEventFrame(t *testing.T) {
+	for _, tc := range []struct {
+		payload string
+		want    string
+	}{
+		{`{"type":"call.accepted","call_id":"c","room_id":"r","state":"connecting","state_version":1}`, `{"type":"call.accepted","call_id":"c","room_id":"r","state":"connecting","state_version":1}`},
+		{`{"type":"call.signal","call_id":"c","room_id":"r","signal":{"signal_seq":2,"sender_seq":1,"kind":"offer","payload":"sdp"}}`, `{"type":"call.signal","call_id":"c","room_id":"r","signal":{"signal_seq":2,"sender_seq":1,"kind":"offer","payload":"sdp"}}`},
+	} {
+		frame, known, err := eventFrame([]byte(tc.payload))
+		require.NoError(t, err)
+		require.True(t, known)
+		require.JSONEq(t, tc.want, string(frame))
+	}
+	for _, payload := range []string{
+		`{"type":"call.unknown","call_id":"c","room_id":"r","state":"active"}`,
+		`{"type":"call.ended","call_id":"","room_id":"r","state":"ended"}`,
+		`{"type":"call.signal","call_id":"c","room_id":"r","signal":{"signal_seq":2,"sender_seq":1,"kind":"offer","payload":"sdp"},"extra":true}`,
+	} {
+		_, known, err := eventFrame([]byte(payload))
+		require.False(t, known)
+		require.Error(t, err)
+	}
+}
+
 func FuzzEventFrame(f *testing.F) {
 	for _, event := range []*chatv1.Event{
 		{Kind: &chatv1.Event_MessageCreated{MessageCreated: &chatv1.Message{Id: "m", Text: "hi", Sequence: 1}}},

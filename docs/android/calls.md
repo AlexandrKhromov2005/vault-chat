@@ -1,0 +1,67 @@
+# Звонки на Android
+
+Клиентская часть [ADR 0005](../adr/0005-call-control.md). Код:
+`core/calls/Calls.kt`, `WebRtcCallMedia.kt`, `CallForegroundService.kt` и
+`ui/chat/CallPanel.kt`.
+
+## Архитектура и границы
+
+- `Calls` живёт в `ChatSession` и использует её authorized REST и ordered
+  WebSocket reconnect. `Frame.CallEvent` не доверяет содержимому события:
+  состояние и сигналы перечитываются через API. Push также только запускает
+  sync/reconcile; Calls публикует для callee signal с room id, без call id/SDP.
+- Создание и accept сначала получают RECORD_AUDIO и готовят microphone. Отказ
+  разрешения не создаёт HTTP command. Только вкладка/сессия, создавшая или
+  принявшая звонок, владеет peer; другие устройства видят state без microphone.
+- Команды и сигналы имеют UUID `command_id` и монотонный `sender_seq`; сетевые
+  повторы сохраняют их. REST active/signals восстанавливает потери realtime.
+- WebRTC закреплён как `io.github.webrtc-sdk:android:150.7871.08` в version
+  catalog. AAR загружается из Maven Central; никаких незакреплённых версий или
+  сторонних TURN/SFU нет.
+- `WebRtcCallMedia` передаёт только audio, использует DTLS-SRTP стека WebRTC,
+  не пишет SDP/candidates в логи. Caller делает bounded ICE restart, callee
+  отвечает на новый offer. TURN credentials обновляются перед expiry и при
+  восстановлении.
+- Во время owned connecting/active работает `CallForegroundService` с типом
+  `microphone`. End/reject/cancel/logout и server-ended освобождают peer, track,
+  audio source/factory и останавливают service. Процессная смерть не оставляет
+  приложению скрытого microphone: Android завершает его ресурсы.
+
+## Проверки
+
+```sh
+./gradlew :app:testDebugUnitTest --tests 'io.github.alexandrkhromov2005.vaultchat.core.calls.CallsTest'
+./gradlew :app:assembleDebug
+```
+
+JVM tests используют fake media и MockWebServer: caller/callee lifecycle,
+prepare-before-command, сигналы, connected, end cleanup, permission failure и
+повтор command id. Они не заменяют device acceptance.
+
+Для device acceptance использовать отдельный Compose stack и synthetic users.
+`tests/ops/calls_browser_acceptance.mjs` с `STATE_FILE` создаёт и сохраняет пару
+пользователей/комнату (при повторном запуске обновляет Alice access token).
+После установки debug и androidTest APK запускаются:
+
+```sh
+adb shell am instrument -w -e email 'bob<suffix>@example.test' \
+  -e password SyntheticPassword123 \
+  io.github.alexandrkhromov2005.vaultchat.debug.test/androidx.test.runner.AndroidJUnitRunner
+
+GATEWAY_URL=http://127.0.0.1:8080 PROJECT=<local-project> \
+  STATE_FILE=<private>/browser-state.json SKIP_CALLEE=1 CALL_WAIT_MS=120000 \
+  node tests/ops/calls_browser_acceptance.mjs
+```
+
+В режиме `SKIP_CALLEE` browser проверяет RTP и ждёт, пока Android сам проверит
+свои RTP counters и завершит звонок. Для медленного emulator без KVM тестовые
+ringing/connecting/heartbeat timeouts можно увеличить через `ERL_FLAGS`
+(`-vault_calls ...`) только в disposable stack, не меняя production defaults.
+
+24 ноября 2026 на API 26 emulator без KVM отдельные Android ↔ browser запуски
+достигли active и двунаправленного RTP. При этом повторы также дали ICE без
+Android `connected` и `getStats()` timeouts; единого стабильного финального
+acceptance нет. Поэтому #163 остаётся открытым. Background, реальный network
+handover и forced TURN не проверены; forced TURN относится также к #162.
+API 26 foreground-service crash и вложенный offer/answer mutex deadlock
+воспроизведены и исправлены, но это не заменяет стабильный device matrix.

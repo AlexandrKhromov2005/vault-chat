@@ -3,6 +3,8 @@ package io.github.alexandrkhromov2005.vaultchat
 import android.content.Context
 import android.os.SystemClock
 import androidx.core.content.edit
+import io.github.alexandrkhromov2005.vaultchat.core.calls.CallMedia
+import io.github.alexandrkhromov2005.vaultchat.core.calls.WebRtcCallMedia
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessionDeps
 import io.github.alexandrkhromov2005.vaultchat.core.chat.ChatSessions
 import io.github.alexandrkhromov2005.vaultchat.core.chat.NoticeBoard
@@ -89,6 +91,12 @@ class AppContainer(
 
         override fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket =
             gateway.webSocket(session.server, listener)
+
+        override fun newCallMedia(): CallMedia = WebRtcCallMedia(context)
+
+        override fun callForeground(active: Boolean) {
+            if (active) CallForegroundService.start(context) else CallForegroundService.stop(context)
+        }
 
         override fun scheduleBackgroundSend() {
             OutboxWorker.schedule(context)

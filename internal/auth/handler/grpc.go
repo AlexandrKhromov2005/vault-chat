@@ -24,6 +24,7 @@ type AuthService interface {
 	RegisterInvited(ctx context.Context, email, username, password, invitationToken string) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*service.TokenPair, error)
 	ValidateToken(ctx context.Context, token string) (*service.Access, error)
+	ValidateSession(ctx context.Context, userID, sessionID string) (bool, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
 	RevokeAllSessions(ctx context.Context, accessToken string) (int64, error)
@@ -100,6 +101,15 @@ func (h *AuthGRPCHandler) ValidateToken(ctx context.Context, req *authv1.Validat
 		ExpiresAt: timestamppb.New(claims.ExpiresAt),
 		SessionId: claims.LoginID,
 	}, nil
+}
+
+// ValidateSession checks a live session family for Calls without an access token.
+func (h *AuthGRPCHandler) ValidateSession(ctx context.Context, req *authv1.ValidateSessionRequest) (*authv1.ValidateSessionResponse, error) {
+	active, err := h.svc.ValidateSession(ctx, req.GetUserId(), req.GetSessionId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &authv1.ValidateSessionResponse{Active: active}, nil
 }
 
 // RefreshToken exchanges a refresh token for a new access/refresh token pair.

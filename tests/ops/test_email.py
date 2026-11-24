@@ -163,6 +163,7 @@ sys.exit(0)
         calls = self.calls()
         self.assertIn('-check-account-email', calls[0])
         self.assertEqual(sum('-check-rpc-tls' in args for args in calls), 4)
+        self.assertTrue(any('calls-check-rpc-tls' in ' '.join(args) for args in calls))
         composed = next(args for args in calls if args[0] == 'compose')
         self.assertIn(str(self.root / '.env.email'), composed)
         self.assertIn(str(self.root / 'deployments/docker-compose.email.yml'), composed)
@@ -182,7 +183,7 @@ sys.exit(0)
             'PUBLIC_IP': '198.51.100.10', 'VAULT_IMAGE_TAG': 'synthetic',
             'AUTH_DB_PASSWORD': 'fixture', 'CHAT_DB_PASSWORD': 'fixture', 'MEDIA_DB_PASSWORD': 'fixture',
             'AUTH_RUNTIME_DB_PASSWORD': 'fixture', 'CHAT_RUNTIME_DB_PASSWORD': 'fixture',
-            'MEDIA_RUNTIME_DB_PASSWORD': 'fixture', 'REDIS_PASSWORD': 'fixture', 'PROFILE_CACHE_PASSWORD': 'fixture-cache',
+            'MEDIA_RUNTIME_DB_PASSWORD': 'fixture', 'CALLS_DB_PASSWORD': 'fixture', 'CALLS_RUNTIME_DB_PASSWORD': 'fixture', 'REDIS_PASSWORD': 'fixture', 'PROFILE_CACHE_PASSWORD': 'fixture-cache',
             'S3_ACCESS_KEY': 'fixture', 'S3_SECRET_KEY': 'fixture',
             'S3_ROOT_ACCESS_KEY': 'fixture-root', 'S3_ROOT_SECRET_KEY': 'fixture',
             'AUTH_PUBLIC_URL': 'https://vault.example.invalid', 'AUTH_SMTP_ADDRESS': 'smtp.example.invalid:587',

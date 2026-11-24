@@ -1,7 +1,7 @@
 -module(vault_calls_auth_stub).
 -moduledoc "Configurable synthetic Auth adapter for the loopback prototype.".
 
--export([validate/1]).
+-export([validate/1, validate_session/2]).
 
 -spec validate(binary()) -> {ok, {binary(), binary()}} | {error, unauthorized | unavailable}.
 validate(Token) ->
@@ -18,6 +18,18 @@ validate_token(Token) ->
                                               byte_size(Session) > 0, byte_size(Session) =< 256 ->
             {ok, {User, Session}};
         _ -> {error, unauthorized}
+    end.
+
+-spec validate_session(binary(), binary()) -> ok | {error, revoked | unavailable}.
+validate_session(User, Session) ->
+    case application:get_env(vault_calls, auth_available, true) of
+        false -> {error, unavailable};
+        true ->
+            Revoked = application:get_env(vault_calls, revoked_sessions, []),
+            case lists:member({User, Session}, Revoked) of
+                true -> {error, revoked};
+                false -> ok
+            end
     end.
 
 -spec delay(atom()) -> ok.

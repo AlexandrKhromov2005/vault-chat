@@ -329,6 +329,7 @@ class ChatSync(
                 }
             }
             is Frame.Ready -> Unit
+            is Frame.CallEvent -> Unit
         }
     }
 

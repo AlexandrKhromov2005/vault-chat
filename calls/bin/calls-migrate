@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+exec erl -noshell -pa /app/lib/*/ebin -eval '
+ok = vault_calls_config:load(),
+{ok, Store} = vault_calls_store:start_link(),
+ok = vault_calls_store:migrate(Store),
+ok = vault_calls_store:stop(Store),
+halt().'

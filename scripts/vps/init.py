@@ -31,14 +31,14 @@ if env.exists():
 else:
     values = {'PUBLIC_IP': ip, 'VAULT_IMAGE_TAG': tag}
     values.update({key: secrets.token_hex(24) for key in (
-        'AUTH_DB_PASSWORD', 'CHAT_DB_PASSWORD', 'MEDIA_DB_PASSWORD', 'REDIS_PASSWORD', 'S3_SECRET_KEY')})
+        'AUTH_DB_PASSWORD', 'CHAT_DB_PASSWORD', 'MEDIA_DB_PASSWORD', 'CALLS_DB_PASSWORD', 'REDIS_PASSWORD', 'S3_SECRET_KEY')})
     values['S3_ACCESS_KEY'] = 'vault' + secrets.token_hex(8)
     fd = os.open(env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         stream.write(''.join(f'{key}={val}\n' for key, val in values.items()))
 # Append new least-privilege credentials on upgrade without replacing live keys.
 missing_secrets = [key for key in ('AUTH_RUNTIME_DB_PASSWORD', 'CHAT_RUNTIME_DB_PASSWORD',
-                                  'MEDIA_RUNTIME_DB_PASSWORD', 'S3_ROOT_ACCESS_KEY', 'S3_ROOT_SECRET_KEY',
+                                  'MEDIA_RUNTIME_DB_PASSWORD', 'CALLS_RUNTIME_DB_PASSWORD', 'S3_ROOT_ACCESS_KEY', 'S3_ROOT_SECRET_KEY',
                                   'PROFILE_CACHE_PASSWORD')
                    if key not in values]
 if missing_secrets:
@@ -50,6 +50,11 @@ if missing_secrets:
 env.chmod(0o600)
 subprocess.run(['sh', str(root / 'scripts/gen-jwt-keys.sh'), str(root / 'secrets')], check=True)
 subprocess.run(['python3', str(root / 'scripts/gen-rpc-certs.py'), str(root / 'secrets')], check=True)
+turn_secret = root / 'secrets' / 'turn_secret'
+if not turn_secret.exists():
+    fd = os.open(turn_secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(secrets.token_hex(32) + '\n')
 rpc_env = root / '.env.rpc'
 if not rpc_env.exists():
     fd = os.open(rpc_env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

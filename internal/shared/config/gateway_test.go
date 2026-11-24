@@ -22,6 +22,8 @@ func clearGatewayEnv(t *testing.T) {
 		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE", "GATEWAY_AUTH_RATE_LIMIT_BURST",
 		"GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE", "GATEWAY_AUTH_IP_RATE_LIMIT_BURST",
 		"GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", "GATEWAY_REFRESH_RATE_LIMIT_BURST",
+		"GATEWAY_CALLS_RATE_LIMIT_PER_MINUTE", "GATEWAY_CALLS_RATE_LIMIT_BURST",
+		"GATEWAY_CALLS_CREATE_RATE_LIMIT_PER_MINUTE", "GATEWAY_CALLS_CREATE_RATE_LIMIT_BURST",
 	} {
 		t.Setenv(key, "")
 	}
@@ -51,6 +53,10 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(10), cfg.AuthIPRateLimitBurst)
 		require.Equal(t, uint32(30), cfg.RefreshRateLimitPerMinute)
 		require.Equal(t, uint32(30), cfg.RefreshRateLimitBurst)
+		require.Equal(t, uint32(1200), cfg.CallsRateLimitPerMinute)
+		require.Equal(t, uint32(256), cfg.CallsRateLimitBurst)
+		require.Equal(t, uint32(10), cfg.CallsCreateRateLimitPerMinute)
+		require.Equal(t, uint32(3), cfg.CallsCreateRateLimitBurst)
 		require.Equal(t, "info", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 5, SendBuffer: 64, AuthTimeout: 5 * time.Second, PingInterval: 30 * time.Second, WriteTimeout: 10 * time.Second,
@@ -78,6 +84,10 @@ func TestLoadGateway(t *testing.T) {
 		t.Setenv("GATEWAY_AUTH_IP_RATE_LIMIT_BURST", "20")
 		t.Setenv("GATEWAY_REFRESH_RATE_LIMIT_PER_MINUTE", "90")
 		t.Setenv("GATEWAY_REFRESH_RATE_LIMIT_BURST", "45")
+		t.Setenv("GATEWAY_CALLS_RATE_LIMIT_PER_MINUTE", "1800")
+		t.Setenv("GATEWAY_CALLS_RATE_LIMIT_BURST", "96")
+		t.Setenv("GATEWAY_CALLS_CREATE_RATE_LIMIT_PER_MINUTE", "20")
+		t.Setenv("GATEWAY_CALLS_CREATE_RATE_LIMIT_BURST", "6")
 		t.Setenv("GATEWAY_LOG_LEVEL", "debug")
 		t.Setenv("GATEWAY_WS_MAX_CONNECTIONS_PER_USER", "2")
 		t.Setenv("GATEWAY_WS_SEND_BUFFER", "16")
@@ -107,6 +117,10 @@ func TestLoadGateway(t *testing.T) {
 		require.Equal(t, uint32(20), cfg.AuthIPRateLimitBurst)
 		require.Equal(t, uint32(90), cfg.RefreshRateLimitPerMinute)
 		require.Equal(t, uint32(45), cfg.RefreshRateLimitBurst)
+		require.Equal(t, uint32(1800), cfg.CallsRateLimitPerMinute)
+		require.Equal(t, uint32(96), cfg.CallsRateLimitBurst)
+		require.Equal(t, uint32(20), cfg.CallsCreateRateLimitPerMinute)
+		require.Equal(t, uint32(6), cfg.CallsCreateRateLimitBurst)
 		require.Equal(t, "debug", cfg.LogLevel)
 		require.Equal(t, config.WebSocketConfig{
 			MaxConnectionsPerUser: 2, SendBuffer: 16, AuthTimeout: 2 * time.Second, PingInterval: 15 * time.Second, WriteTimeout: 4 * time.Second,
@@ -168,12 +182,14 @@ func TestLoadGateway_ProfileCache(t *testing.T) {
 
 func TestLoadGateway_InvalidValues(t *testing.T) {
 	cases := map[string][]string{
-		"GATEWAY_MAX_BODY_BYTES":             {"0", "-1", "invalid", "4294967296"},
-		"GATEWAY_REQUEST_TIMEOUT":            {"0s", "-1s", "soon"},
-		"GATEWAY_RATE_LIMIT_PER_MINUTE":      {"0", "-1", "many"},
-		"GATEWAY_RATE_LIMIT_BURST":           {"0", "-1", "many"},
-		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE": {"0", "-1", "many", "65536"},
-		"GATEWAY_AUTH_RATE_LIMIT_BURST":      {"0", "-1", "many", "65536"},
+		"GATEWAY_MAX_BODY_BYTES":              {"0", "-1", "invalid", "4294967296"},
+		"GATEWAY_REQUEST_TIMEOUT":             {"0s", "-1s", "soon"},
+		"GATEWAY_RATE_LIMIT_PER_MINUTE":       {"0", "-1", "many"},
+		"GATEWAY_RATE_LIMIT_BURST":            {"0", "-1", "many"},
+		"GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE":  {"0", "-1", "many", "65536"},
+		"GATEWAY_AUTH_RATE_LIMIT_BURST":       {"0", "-1", "many", "65536"},
+		"GATEWAY_CALLS_RATE_LIMIT_PER_MINUTE": {"0", "-1", "many", "65536"},
+		"GATEWAY_CALLS_RATE_LIMIT_BURST":      {"0", "-1", "many", "65536"},
 		// Per-connection queues are allocated upfront, so they are bounded.
 		"GATEWAY_WS_MAX_CONNECTIONS_PER_USER": {"0", "-1", "65536"},
 		"GATEWAY_WS_SEND_BUFFER":              {"0", "many", "65536"},

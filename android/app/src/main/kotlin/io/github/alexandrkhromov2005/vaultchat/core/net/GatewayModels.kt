@@ -129,3 +129,66 @@ data class FileDto(
     val size: Long,
     @SerialName("created_at") val createdAt: String,
 )
+
+@Serializable
+data class CallCommand(@SerialName("command_id") val commandId: String)
+
+@Serializable
+data class CreateCallRequest(
+    @SerialName("room_id") val roomId: String,
+    @SerialName("command_id") val commandId: String,
+)
+
+@Serializable
+data class CallDto(
+    @SerialName("call_id") val callId: String,
+    @SerialName("room_id") val roomId: String,
+    val state: String,
+    @SerialName("state_version") val stateVersion: Long = 0,
+    @SerialName("caller_id") val callerId: String,
+    @SerialName("callee_id") val calleeId: String,
+)
+
+@Serializable
+data class CallPage(val calls: List<CallDto> = emptyList())
+
+@Serializable
+data class CallSignalRequest(
+    val kind: String,
+    val payload: String,
+    @SerialName("sender_seq") val senderSeq: Long,
+)
+
+@Serializable
+data class CallSignalDto(
+    @SerialName("signal_seq") val signalSeq: Long,
+    @SerialName("sender_device") val senderDevice: String = "",
+    @SerialName("sender_seq") val senderSeq: Long,
+    val kind: String,
+    val payload: String,
+)
+
+@Serializable
+data class CallSignalPage(val signals: List<CallSignalDto> = emptyList())
+
+@Serializable
+data class CallSignalResult(
+    val state: String,
+    @SerialName("signal_seq") val signalSeq: Long,
+)
+
+@Serializable
+data class TurnResponse(
+    @SerialName("ice_servers") val iceServers: List<IceServerDto>,
+    val ttl: Long = 600,
+)
+
+@Serializable
+data class IceServerDto(
+    val urls: List<String>,
+    val username: String? = null,
+    val credential: String? = null,
+)
+
+@Serializable
+data class EmptyCallBody(val marker: Boolean? = null)

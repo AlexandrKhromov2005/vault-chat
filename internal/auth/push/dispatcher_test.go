@@ -213,6 +213,19 @@ func (h *harness) advance(d time.Duration) {
 	h.drain()
 }
 
+func TestBestEffortDeliveryDoesNotWritePersistentMarks(t *testing.T) {
+	h := newHarness(t, Config{})
+	alice, room := uuid.NewString(), uuid.NewString()
+	h.devices.tokens[alice] = []string{"alice-phone"}
+	done := false
+	h.d.Submit(&Delivery{RoomID: room, UserIDs: []string{alice}, Expires: h.now.Add(time.Hour), Done: func(bool) { done = true }})
+	h.drain()
+
+	require.True(t, done)
+	require.Equal(t, []Message{{Token: "alice-phone", RoomID: room}}, h.provider.pushes())
+	require.False(t, h.marks.has("", alice), "a best-effort Calls hint has no persistent signal id")
+}
+
 func TestDispatcherCollapsesSignalsPerUserAndRoom(t *testing.T) {
 	h := newHarness(t, Config{Window: 10 * time.Second})
 	alice, bob, room, other := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()

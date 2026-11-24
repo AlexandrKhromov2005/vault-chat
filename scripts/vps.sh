@@ -11,7 +11,7 @@ case "$command" in
         [ $# = 1 ] || { echo 'Usage: scripts/vps.sh build IMAGE_TAG' >&2; exit 1; }
         tag=$1
         case "$tag" in ''|*[!a-zA-Z0-9_.-]*) echo 'Invalid image tag' >&2; exit 1;; esac
-        for service in auth chat media gateway minio; do
+        for service in auth chat media gateway minio calls; do
             image="vault-chat/$service:$tag"
             if docker image inspect "$image" >/dev/null 2>&1; then
                 echo "Refusing to overwrite existing image $image" >&2; exit 1
@@ -24,7 +24,10 @@ case "$command" in
                 -t "vault-chat/$service:$tag" "$script_dir/.."
         done
         docker build --network "${VAULT_BUILD_NETWORK:-default}" -f "$script_dir/../Dockerfile.minio" \
-            -t "vault-chat/minio:$tag" "$script_dir/..";;
+            -t "vault-chat/minio:$tag" "$script_dir/.."
+        docker build --network "${VAULT_BUILD_NETWORK:-default}" -f "$script_dir/../Dockerfile.calls" \
+            -t "vault-chat/calls:$tag" "$script_dir/.."
+        docker pull coturn/coturn:4.19.2-alpine3.24@sha256:974824bdefa8759b7aa4508daf5066fdd9f5411e925055b6132fb2904aecca01;;
     up)
         root_only
         check_rpc_images

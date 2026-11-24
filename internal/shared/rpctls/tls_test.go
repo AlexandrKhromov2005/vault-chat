@@ -169,7 +169,7 @@ func FuzzIdentity(f *testing.F) {
 		}
 		name := identity(&x509.Certificate{URIs: []*url.URL{u}})
 		if name != "" {
-			require.Contains(t, []string{"auth", "chat", "media", "gateway", "preview"}, name)
+			require.Contains(t, []string{"auth", "chat", "media", "gateway", "calls", "preview"}, name)
 			require.Equal(t, "spiffe://vault-chat/service/"+name, u.String())
 		}
 	})
@@ -194,10 +194,19 @@ func TestServiceMethodMatrixAndStreams(t *testing.T) {
 		{"chat", "media", "/chat.v1.ChatService/SendMessage", false},
 		{"auth", "media", "/auth.v1.AuthService/ValidateToken", true},
 		{"auth", "media", "/auth.v1.AuthService/GetUser", false},
+		{"auth", "calls", "/auth.v1.AuthService/ValidateToken", true},
+		{"auth", "calls", "/auth.v1.AuthService/ValidateSession", true},
+		{"auth", "calls", "/auth.v1.AuthService/GetUser", false},
+		{"chat", "calls", "/chat.v1.ChatService/GetRoom", true},
+		{"chat", "calls", "/chat.v1.ChatService/CheckMembership", true},
+		{"chat", "media", "/chat.v1.ChatService/CheckMembership", false},
+		{"chat", "calls", "/chat.v1.ChatService/SendMessage", false},
 		{"auth", "gateway", "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", false},
 		{"preview", "media", "/preview.v1.PreviewService/Decode", true},
 		{"preview", "gateway", "/preview.v1.PreviewService/Decode", false},
 		{"preview", "media", "/preview.v1.PreviewService/Other", false},
+		{"calls", "gateway", "/calls.v1.CallsService/Create", true},
+		{"calls", "chat", "/calls.v1.CallsService/Create", false},
 		{"chat", "chat", "/grpc.health.v1.Health/Check", true},
 	} {
 		t.Run(tt.server+tt.caller+tt.method, func(t *testing.T) {

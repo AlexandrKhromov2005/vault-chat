@@ -74,13 +74,13 @@ func (c *Config) Enabled() bool { return c.tls != nil }
 // CertificateExpiry is the loaded certificate expiry, or zero in plaintext mode.
 func (c *Config) CertificateExpiry() float64 { return c.expiry }
 func known(s string) bool {
-	return s == "auth" || s == "chat" || s == "media" || s == "gateway" || s == "preview"
+	return s == "auth" || s == "chat" || s == "media" || s == "gateway" || s == "calls" || s == "preview"
 }
 func identity(cert *x509.Certificate) string {
 	if len(cert.URIs) != 1 {
 		return ""
 	}
-	for _, s := range []string{"auth", "chat", "media", "gateway", "preview"} {
+	for _, s := range []string{"auth", "chat", "media", "gateway", "calls", "preview"} {
 		if cert.URIs[0].String() == "spiffe://vault-chat/service/"+s {
 			return s
 		}
@@ -169,9 +169,9 @@ func (c *Config) authorize(ctx context.Context, method string) error {
 	}
 	switch c.service {
 	case "auth":
-		allowed = allowed || (caller == "chat" && (method == "/auth.v1.AuthService/ValidateToken" || method == "/auth.v1.AuthService/GetUser")) || (caller == "media" && method == "/auth.v1.AuthService/ValidateToken")
+		allowed = allowed || (caller == "chat" && (method == "/auth.v1.AuthService/ValidateToken" || method == "/auth.v1.AuthService/GetUser")) || ((caller == "media" || caller == "calls") && method == "/auth.v1.AuthService/ValidateToken") || (caller == "calls" && method == "/auth.v1.AuthService/ValidateSession")
 	case "chat":
-		allowed = allowed || (caller == "media" && method == "/chat.v1.ChatService/GetRoom")
+		allowed = allowed || ((caller == "media" || caller == "calls") && method == "/chat.v1.ChatService/GetRoom") || (caller == "calls" && method == "/chat.v1.ChatService/CheckMembership")
 	case "media":
 		allowed = allowed || (caller == "chat" && method == "/media.v1.MediaService/GetFile")
 	case "preview":

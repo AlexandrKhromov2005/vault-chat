@@ -2,7 +2,7 @@ groups:
   - name: vault-chat
     rules:
       - alert: ServiceMetricsUnavailable
-        expr: up{job=~"auth|chat|media|gateway|node|alertmanager|grafana|blackbox|gateway-ready|storage-ready|data-tcp"} == 0
+        expr: up{job=~"auth|chat|media|gateway|calls|node|alertmanager|grafana|blackbox|gateway-ready|storage-ready|data-tcp"} == 0
         for: 2m
         labels: {severity: critical}
         annotations: {summary: 'Metrics unavailable for {{ $labels.job }}'}
@@ -48,6 +48,30 @@ groups:
         expr: increase(vault_push_signals_exhausted_total[15m]) > 0
         labels: {severity: warning}
         annotations: {summary: 'Push signals were terminated after their last delivery failed'}
+      - alert: CallsCapacityNearlyFull
+        expr: vault_calls_active / vault_calls_capacity > 0.9
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Calls admission is above 90% capacity'}
+      - alert: CallsEventQueueNearlyFull
+        expr: vault_calls_event_queue / 1024 > 0.8
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Calls Redis event queue remains above 80%'}
+      - alert: CallsDependencyFailing
+        expr: increase(vault_calls_dependency_requests_total{code=~"unavailable|internal"}[5m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: 'Calls Auth/Chat dependency requests are failing'}
+      - alert: CallsHighRPCLatency
+        expr: histogram_quantile(0.99, sum by (le) (rate(vault_calls_grpc_request_duration_seconds_bucket{method!~"/grpc.health.*"}[5m]))) > 0.5
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Calls RPC p99 exceeds 500 ms'}
+      - alert: CallsDraining
+        expr: vault_calls_draining == 1
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Calls is draining and rejects new calls'}
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
         for: 5m

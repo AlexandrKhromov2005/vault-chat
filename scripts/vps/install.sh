@@ -11,9 +11,10 @@ lock_operations
 ip=$(value PUBLIC_IP)
 python3 -c 'import ipaddress,sys; a=ipaddress.ip_address(sys.argv[1]); assert a.version == 4 and a.is_global' "$ip"
 compose config --quiet
-for service in auth chat media gateway minio; do
+for service in auth chat media gateway minio calls; do
     docker image inspect "vault-chat/$service:$(value VAULT_IMAGE_TAG)" >/dev/null
  done
+docker image inspect coturn/coturn:4.19.2-alpine3.24@sha256:974824bdefa8759b7aa4508daf5066fdd9f5411e925055b6132fb2904aecca01 >/dev/null
 check_rpc_images
 for site in /etc/nginx/sites-enabled/*; do
     case "${site##*/}" in default|vault-chat|'*') ;; *) echo "Existing nginx site: $site; configure manually" >&2; exit 1;; esac
@@ -32,6 +33,8 @@ systemctl reload nginx
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
+ufw allow 3478
+ufw allow 50000:50099/udp
 ufw --force enable
 [ -x /opt/certbot/bin/certbot ] || python3 -m venv /opt/certbot
 /opt/certbot/bin/pip install 'certbot==5.8.0'

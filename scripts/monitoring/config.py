@@ -22,6 +22,8 @@ NETWORK_DEFAULTS = {
     'MEDIA_METRICS_IPV4_ADDRESS': '172.31.240.18',
     'GATEWAY_METRICS_SUBNET': '172.31.240.24/29',
     'GATEWAY_METRICS_IPV4_ADDRESS': '172.31.240.26',
+    'CALLS_METRICS_SUBNET': '172.31.240.72/29',
+    'CALLS_METRICS_IPV4_ADDRESS': '172.31.240.74',
     'AUTH_DATA_SUBNET': '172.31.240.32/29',
     'POSTGRES_IPV4_ADDRESS': '172.31.240.34',
     'CHAT_DATA_SUBNET': '172.31.240.40/29',
@@ -39,6 +41,7 @@ ADDRESS_SUBNETS = {
     'CHAT_METRICS_IPV4_ADDRESS': 'CHAT_METRICS_SUBNET',
     'MEDIA_METRICS_IPV4_ADDRESS': 'MEDIA_METRICS_SUBNET',
     'GATEWAY_METRICS_IPV4_ADDRESS': 'GATEWAY_METRICS_SUBNET',
+    'CALLS_METRICS_IPV4_ADDRESS': 'CALLS_METRICS_SUBNET',
     'POSTGRES_IPV4_ADDRESS': 'AUTH_DATA_SUBNET',
     'CHAT_POSTGRES_IPV4_ADDRESS': 'CHAT_DATA_SUBNET',
     'MEDIA_POSTGRES_IPV4_ADDRESS': 'MEDIA_DATA_SUBNET',
@@ -50,6 +53,7 @@ NETWORK_NAMES = {
     'CHAT_METRICS_SUBNET': 'metrics-chat',
     'MEDIA_METRICS_SUBNET': 'metrics-media',
     'GATEWAY_METRICS_SUBNET': 'metrics-gateway',
+    'CALLS_METRICS_SUBNET': 'metrics-calls',
     'AUTH_DATA_SUBNET': 'auth-data',
     'CHAT_DATA_SUBNET': 'chat-data',
     'MEDIA_DATA_SUBNET': 'media-data',
@@ -185,10 +189,11 @@ def render(root):
             stream.write(secrets.token_urlsafe(32) + '\n')
     runtime = root / 'deployments/monitoring/runtime'
     jobs = []
-    for name, key in [('auth', 'AUTH_METRICS_IPV4_ADDRESS'), ('chat', 'CHAT_METRICS_IPV4_ADDRESS'),
-                      ('media', 'MEDIA_METRICS_IPV4_ADDRESS'), ('gateway', 'GATEWAY_METRICS_IPV4_ADDRESS')]:
+    for name, key, port in [('auth', 'AUTH_METRICS_IPV4_ADDRESS', 9100), ('chat', 'CHAT_METRICS_IPV4_ADDRESS', 9100),
+                            ('media', 'MEDIA_METRICS_IPV4_ADDRESS', 9100), ('gateway', 'GATEWAY_METRICS_IPV4_ADDRESS', 9100),
+                            ('calls', 'CALLS_METRICS_IPV4_ADDRESS', 50056)]:
         jobs.append({'job_name': name, 'sample_limit': 15000, 'body_size_limit': '8MB',
-                     'static_configs': [{'targets': [f'{config[key]}:9100'], 'labels': {'service': name}}]})
+                     'static_configs': [{'targets': [f'{config[key]}:{port}'], 'labels': {'service': name}}]})
     for name, key in [('node', 'NODE_EXPORTER_PORT'), ('alertmanager', 'ALERTMANAGER_PORT'),
                       ('grafana', 'GRAFANA_PORT'), ('blackbox', 'BLACKBOX_PORT'), ('prometheus', 'PROMETHEUS_PORT')]:
         jobs.append({'job_name': name, 'sample_limit': 15000, 'body_size_limit': '8MB',

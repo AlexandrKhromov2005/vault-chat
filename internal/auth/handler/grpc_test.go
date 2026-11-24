@@ -155,6 +155,15 @@ func TestAuthGRPCHandler_Login(t *testing.T) {
 	})
 }
 
+func TestAuthGRPCHandler_ValidateSession(t *testing.T) {
+	svc := mocks.NewMockAuthService(t)
+	h := handler.NewAuthGRPCHandler(svc)
+	svc.EXPECT().ValidateSession(mock.Anything, "user-1", "login-1").Return(true, nil)
+	resp, err := h.ValidateSession(context.Background(), &authv1.ValidateSessionRequest{UserId: "user-1", SessionId: "login-1"})
+	require.NoError(t, err)
+	require.True(t, resp.GetActive())
+}
+
 func TestAuthGRPCHandler_ValidateToken(t *testing.T) {
 	t.Run("valid token", func(t *testing.T) {
 		svc := mocks.NewMockAuthService(t)

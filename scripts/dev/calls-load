@@ -11,6 +11,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 cd "$ROOT"
 export ERL_LIBS=calls/_build/default/lib
+export ERL_FLAGS="+Q 4096 +S 2:2 +A 2 +SDio 2 +SDcpu 2"
 set +e
 escript calls/loadgen.escript setup "$WORK"
 CODE=$?

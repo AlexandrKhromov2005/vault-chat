@@ -21,6 +21,9 @@ service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
   // ValidateToken verifies a JWT and returns the associated identity.
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  // ValidateSession checks a live login for Calls without relying on an
+  // unexpired access token. Only the Calls service identity may invoke it.
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
   // RefreshToken exchanges a refresh token for a new token pair. The presented
   // refresh token is revoked (rotation). A prompt retry of a rotation whose
   // response was lost gets a pair for the same successor session. Any other
@@ -165,6 +168,15 @@ message ValidateTokenResponse {
   // stable across refresh rotation: one login of one device. Services use it
   // to tell a user's devices apart; it is internal and never sent to clients.
   string session_id = 6;
+}
+
+message ValidateSessionRequest {
+  string user_id = 1;
+  string session_id = 2;
+}
+
+message ValidateSessionResponse {
+  bool active = 1;
 }
 
 message RefreshTokenRequest {

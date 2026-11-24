@@ -6,17 +6,19 @@ for script in scripts/vps/*.sh; do sh -n "$script"; done
 PUBLIC_IP=168.113.171.56 VAULT_IMAGE_TAG=validation \
 AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation \
 AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
+CALLS_DB_PASSWORD=validation CALLS_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
 docker compose -f deployments/docker-compose.vps.yml -f deployments/monitoring/app.yml config --format json | python3 -c '
 import ipaddress,json,sys
 c=json.load(sys.stdin)
-expected={"auth":("172.31.240.2","metrics-auth"),"chat":("172.31.240.10","metrics-chat"),
-          "media":("172.31.240.18","metrics-media"),"gateway":("172.31.240.26","metrics-gateway")}
+expected={"auth":("172.31.240.2","metrics-auth",9100),"chat":("172.31.240.10","metrics-chat",9100),
+          "media":("172.31.240.18","metrics-media",9100),"gateway":("172.31.240.26","metrics-gateway",9100),
+          "calls":("172.31.240.74","metrics-calls",50056)}
 subnets=[]
-for service,(address,network) in expected.items():
+for service,(address,network,port) in expected.items():
     spec=c["services"][service]
-    assert spec["environment"][service.upper()+"_METRICS_ADDR"]==address+":9100"
+    assert spec["environment"][service.upper()+"_METRICS_ADDR"]==address+":"+str(port)
     assert spec["networks"][network]["ipv4_address"]==address
     assert c["networks"][network]["internal"] is True
     subnet=c["networks"][network]["ipam"]["config"][0]["subnet"]

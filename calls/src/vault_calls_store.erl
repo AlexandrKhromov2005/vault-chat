@@ -33,7 +33,7 @@ stop(Store) ->
 
 -spec migrate(gen_server:server_ref()) -> ok | {error, unavailable}.
 migrate(Store) ->
-    request(Store, migrate, 5000).
+    request(Store, migrate, 15000).
 
 -spec create_call(gen_server:server_ref(), create_args()) -> create_reply().
 create_call(Store, Args) ->
@@ -175,6 +175,7 @@ create(Connection, #{id := Id, room_id := Room, caller := Caller, caller_device 
     end;
 create(_Connection, _Args) ->
     {error, badarg}.
+
 
 -spec safe(fun(() -> term())) -> term().
 safe(Fun) ->
@@ -584,7 +585,11 @@ request(Store, Request, Timeout) ->
 migrate_database(Connection) ->
     Path = filename:join(code:priv_dir(vault_calls), "migrations/0001_init.sql"),
     case file:read_file(Path) of
-        {ok, Sql} -> check_results(epgsql:squery(Connection, Sql));
+        {ok, Sql} ->
+            case check_results(epgsql:squery(Connection, Sql)) of
+                ok -> provision_runtime(Connection);
+                Error -> Error
+            end;
         {error, _} -> {error, unavailable}
     end.
 
@@ -596,6 +601,48 @@ check_results(Results) when is_list(Results) ->
     end;
 check_results({error, _}) -> {error, unavailable};
 check_results(_) -> ok.
+
+-spec provision_runtime(epgsql:connection()) -> ok | {error, unavailable}.
+provision_runtime(Connection) ->
+    case application:get_env(vault_calls, runtime_password, undefined) of
+        undefined -> ok;
+        Password when is_binary(Password), byte_size(Password) > 0 ->
+            try provision_role(Connection, Password) of
+                ok -> ok
+            catch
+                _:_ -> {error, unavailable}
+            end;
+        _ -> {error, unavailable}
+    end.
+
+-spec provision_role(epgsql:connection(), binary()) -> ok.
+provision_role(Connection, Password) ->
+    {ok, _, [{Exists}]} = provision_query(check_role, Connection, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'calls_app')", []),
+    _ = case Exists of
+        false -> {ok, _, _} = provision_query(create_role, Connection, "CREATE ROLE calls_app", []);
+        true -> ok
+    end,
+    {ok, _, [{Statement}]} = provision_query(format_role, Connection,
+        "SELECT format('ALTER ROLE calls_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1::text)",
+        [Password]),
+    {ok, _, _} = provision_query(alter_role, Connection, Statement, []),
+    {ok, _, [{Database}]} = provision_query(database_name, Connection, "SELECT current_database()", []),
+    {ok, _, [{RevokeDatabase}]} = provision_query(format_revoke, Connection, "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', $1::text)", [Database]),
+    {ok, _, _} = provision_query(revoke_database, Connection, RevokeDatabase, []),
+    {ok, _, [{GrantDatabase}]} = provision_query(format_grant, Connection, "SELECT format('GRANT CONNECT ON DATABASE %I TO calls_app', $1::text)", [Database]),
+    {ok, _, _} = provision_query(grant_database, Connection, GrantDatabase, []),
+    _ = [{ok, _, _} = provision_query(table_grants, Connection, Sql, []) || Sql <- [
+        "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
+        "GRANT USAGE ON SCHEMA public TO calls_app",
+        "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO calls_app",
+        "GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO calls_app"
+    ]],
+    ok.
+
+-spec provision_query(atom(), epgsql:connection(), iodata(), list()) -> term().
+provision_query(Step, Connection, Sql, Params) ->
+    put(calls_provision_step, Step),
+    query(Connection, Sql, Params).
 
 -spec connection_options(binary()) -> {ok, map()} | error.
 connection_options(Url) ->

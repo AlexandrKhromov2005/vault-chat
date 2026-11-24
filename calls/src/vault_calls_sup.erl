@@ -15,11 +15,12 @@ start_link() ->
 -spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     Flags = #{strategy => rest_for_one, intensity => 5, period => 10},
-    Children = [
+    Children = [#{id => vault_calls_metrics, start => {vault_calls_metrics, start_link, []}}] ++
+        vault_calls_config:channel_specs() ++ vault_calls_config:event_specs() ++ [
         #{id => vault_calls_registry, start => {vault_calls_registry, start_link, []}},
         #{id => vault_calls_store, start => {vault_calls_store, start_link, []}},
         #{id => vault_call_sup, start => {vault_call_sup, start_link, []}, type => supervisor},
         #{id => vault_calls_recovery, start => {vault_calls_recovery, start_link, []}},
         #{id => vault_calls_http, start => {vault_calls_http, start_link, []}}
-    ],
+    ] ++ vault_calls_config:monitor_specs() ++ vault_calls_config:grpc_specs(),
     {ok, {Flags, Children}}.

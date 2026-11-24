@@ -23,9 +23,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 # Capture IDs before pausing so even a partial pause failure is undone.
-paused_ids=$(compose ps --status running -q auth chat media gateway minio)
+paused_ids=$(compose ps --status running -q auth chat media gateway calls minio)
 if [ -n "$paused_ids" ]; then docker pause $paused_ids >/dev/null; fi
-for user in auth chat media; do
+for user in auth chat media calls; do
     case "$user" in auth) service=postgres;; *) service="$user-postgres";; esac
     python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/$user.dump.age" \
         docker compose -p "$VAULT_PROJECT" --env-file "$VAULT_ROOT/.env.vps" -f "$VAULT_ROOT/deployments/docker-compose.vps.yml" \
@@ -42,7 +42,7 @@ python3 "$VAULT_ROOT/scripts/vps/encrypted_backup.py" "$recipient" "$backup_dir/
 compose config --images > "$backup_dir/images.txt"
 cleanup
 paused_ids=''
-(cd "$backup_dir" && sha256sum auth.dump.age chat.dump.age media.dump.age config.tar.gz.age media-objects.tar.gz.age images.txt > SHA256SUMS)
+(cd "$backup_dir" && sha256sum auth.dump.age chat.dump.age media.dump.age calls.dump.age config.tar.gz.age media-objects.tar.gz.age images.txt > SHA256SUMS)
 destination="${remote%/}/${backup_dir##*/}"
 rclone --config "$rclone_config" copy --immutable --checksum "$backup_dir" "$destination"
 rclone --config "$rclone_config" check --download --one-way "$backup_dir" "$destination"

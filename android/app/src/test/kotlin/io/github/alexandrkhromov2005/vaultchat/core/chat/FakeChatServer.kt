@@ -1,6 +1,15 @@
 package io.github.alexandrkhromov2005.vaultchat.core.chat
 
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallCommand
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallDto
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallPage
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalPage
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalRequest
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalResult
+import io.github.alexandrkhromov2005.vaultchat.core.net.CreateCallRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.CreateChannelRequest
+import io.github.alexandrkhromov2005.vaultchat.core.net.EmptyCallBody
+import io.github.alexandrkhromov2005.vaultchat.core.net.TurnResponse
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmailAcknowledgement
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmailVerificationRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.FileDto
@@ -490,6 +499,19 @@ class FakeChatServer(val me: String) : GatewayApi {
         override suspend fun <T : Any> send(request: suspend GatewayApi.(authorization: String) -> Response<T>): T =
             call { this@FakeChatServer.request("Bearer test") }.body
     }
+
+    override suspend fun createCall(authorization: String, body: CreateCallRequest): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun activeCalls(authorization: String): Response<CallPage> = throw UnsupportedOperationException()
+    override suspend fun call(authorization: String, callId: String): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun acceptCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun rejectCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun cancelCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun connectedCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun endCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun heartbeatCall(authorization: String, callId: String, body: CallCommand): Response<CallDto> = throw UnsupportedOperationException()
+    override suspend fun signalCall(authorization: String, callId: String, body: CallSignalRequest): Response<CallSignalResult> = throw UnsupportedOperationException()
+    override suspend fun callSignals(authorization: String, callId: String, after: Long): Response<CallSignalPage> = throw UnsupportedOperationException()
+    override suspend fun turnCall(authorization: String, callId: String, body: EmptyCallBody): Response<TurnResponse> = throw UnsupportedOperationException()
 
     override suspend fun register(body: RegisterRequest): Response<Registration> = throw UnsupportedOperationException()
 

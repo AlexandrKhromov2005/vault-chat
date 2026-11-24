@@ -33,6 +33,8 @@ proves possession of a credential gives back the per-address token it took.
 | Credentials per address (`auth-ip:<addr>`) | 10/min, burst 10 | login, registration, email and recovery flows | login `200`, registration `201` | `503` |
 | Credentials per address and subject (`auth:<addr>:<subject>`) | 5/min, burst 5 | same | never | `503` |
 | Refresh per address (`refresh-ip:<addr>`) | 30/min, burst 30 | refresh | refresh `200` | local bucket only |
+| Calls per address/user | 1200/min, burst 256 | `/api/v1/calls*` signaling, reconciliation and commands | valid access token | fails open |
+| Call creation per user | 10/min, burst 3 | `POST /api/v1/calls` additionally | never | fails open |
 
 The *subject* is a SHA-256 of the lower-cased `email` (login, registration,
 email and recovery requests) or of the `token` (confirmations). The email
@@ -42,7 +44,11 @@ the subject `-`, so malformed traffic keeps a single strict bucket per
 address. Credential and refresh buckets are enforced both in process memory
 and in Redis, as before. Settings: `GATEWAY_AUTH_RATE_LIMIT_*` keep their
 defaults but now apply per address and subject; `GATEWAY_AUTH_IP_RATE_LIMIT_*`
-and `GATEWAY_REFRESH_RATE_LIMIT_*` are new.
+and `GATEWAY_REFRESH_RATE_LIMIT_*` are new. Calls use
+`GATEWAY_CALLS_RATE_LIMIT_*`; creation additionally uses
+`GATEWAY_CALLS_CREATE_RATE_LIMIT_*`. The Calls bucket matches the server's 20
+signals/s and bounded candidate/retry bursts without weakening the ordinary API
+bucket.
 
 Why this keeps brute force bounded:
 

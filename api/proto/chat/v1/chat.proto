@@ -17,6 +17,9 @@ service ChatService {
   rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
   // GetRoom returns NOT_FOUND for both absent rooms and nonmembers.
   rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+  // CheckMembership authorizes Calls' periodic monitor by mTLS service
+  // identity, without relying on an unexpired user access token.
+  rpc CheckMembership(CheckMembershipRequest) returns (CheckMembershipResponse);
   // ListRooms returns the caller's rooms, most recently active first. Activity is
   // the later of the latest message and the caller's enrollment in the room.
   rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
@@ -84,6 +87,15 @@ message GetRoomRequest {
 }
 
 message GetRoomResponse {
+  Room room = 1;
+}
+
+message CheckMembershipRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message CheckMembershipResponse {
   Room room = 1;
 }
 

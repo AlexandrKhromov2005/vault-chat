@@ -24,6 +24,7 @@ const (
 	AuthService_Register_FullMethodName                 = "/auth.v1.AuthService/Register"
 	AuthService_Login_FullMethodName                    = "/auth.v1.AuthService/Login"
 	AuthService_ValidateToken_FullMethodName            = "/auth.v1.AuthService/ValidateToken"
+	AuthService_ValidateSession_FullMethodName          = "/auth.v1.AuthService/ValidateSession"
 	AuthService_RefreshToken_FullMethodName             = "/auth.v1.AuthService/RefreshToken"
 	AuthService_Logout_FullMethodName                   = "/auth.v1.AuthService/Logout"
 	AuthService_RevokeAllSessions_FullMethodName        = "/auth.v1.AuthService/RevokeAllSessions"
@@ -57,6 +58,9 @@ type AuthServiceClient interface {
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error)
+	// ValidateSession checks a live login for Calls without relying on an
+	// unexpired access token. Only the Calls service identity may invoke it.
+	ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
 	// refresh token is revoked (rotation). A prompt retry of a rotation whose
 	// response was lost gets a pair for the same successor session. Any other
@@ -144,6 +148,16 @@ func (c *authServiceClient) ValidateToken(ctx context.Context, in *ValidateToken
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ValidateTokenResponse)
 	err := c.cc.Invoke(ctx, AuthService_ValidateToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateSessionResponse)
+	err := c.cc.Invoke(ctx, AuthService_ValidateSession_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +303,9 @@ type AuthServiceServer interface {
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	// ValidateToken verifies a JWT and returns the associated identity.
 	ValidateToken(context.Context, *ValidateTokenRequest) (*ValidateTokenResponse, error)
+	// ValidateSession checks a live login for Calls without relying on an
+	// unexpired access token. Only the Calls service identity may invoke it.
+	ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error)
 	// RefreshToken exchanges a refresh token for a new token pair. The presented
 	// refresh token is revoked (rotation). A prompt retry of a rotation whose
 	// response was lost gets a pair for the same successor session. Any other
@@ -346,6 +363,9 @@ func (UnimplementedAuthServiceServer) Login(context.Context, *LoginRequest) (*Lo
 }
 func (UnimplementedAuthServiceServer) ValidateToken(context.Context, *ValidateTokenRequest) (*ValidateTokenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateToken not implemented")
+}
+func (UnimplementedAuthServiceServer) ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateSession not implemented")
 }
 func (UnimplementedAuthServiceServer) RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RefreshToken not implemented")
@@ -490,6 +510,24 @@ func _AuthService_ValidateToken_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).ValidateToken(ctx, req.(*ValidateTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ValidateSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ValidateSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ValidateSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ValidateSession(ctx, req.(*ValidateSessionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -736,6 +774,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateToken",
 			Handler:    _AuthService_ValidateToken_Handler,
+		},
+		{
+			MethodName: "ValidateSession",
+			Handler:    _AuthService_ValidateSession_Handler,
 		},
 		{
 			MethodName: "RefreshToken",

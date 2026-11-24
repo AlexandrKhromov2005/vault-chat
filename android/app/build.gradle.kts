@@ -48,6 +48,7 @@ android {
         targetSdk = 37
         versionCode = 2
         versionName = "0.1.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "FIREBASE_APP_ID", "\"${firebase.getValue("appId")}\"")
         buildConfigField("String", "FIREBASE_API_KEY", "\"${firebase.getValue("apiKey")}\"")
@@ -137,9 +138,14 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.coil.compose)
     implementation(libs.firebase.messaging)
+    implementation(libs.webrtc)
     implementation(libs.kotlinx.coroutines.play.services)
     ksp(libs.room.compiler)
     debugImplementation(libs.compose.ui.tooling)
+
+    androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

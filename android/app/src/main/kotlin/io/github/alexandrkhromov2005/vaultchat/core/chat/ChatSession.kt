@@ -10,6 +10,9 @@ import androidx.paging.RemoteMediator
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDatabase
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.ChatDao
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.FileEntity
+import io.github.alexandrkhromov2005.vaultchat.core.calls.CallMedia
+import io.github.alexandrkhromov2005.vaultchat.core.calls.CallMediaFactory
+import io.github.alexandrkhromov2005.vaultchat.core.calls.Calls
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.MessageItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.RoomListItem
 import io.github.alexandrkhromov2005.vaultchat.core.chat.db.TimelineEntity
@@ -59,6 +62,11 @@ interface ChatSessionDeps {
 
     fun openSocket(session: SessionState.SignedIn, listener: WebSocketListener): WebSocket
 
+    /** A fresh media object for a new call; old calls must never share tracks. */
+    fun newCallMedia(): CallMedia = error("Calls are unavailable without a device media adapter")
+
+    fun callForeground(active: Boolean) {}
+
     /** Makes sure queued messages are sent even if the app leaves the screen (OutboxWorker). */
     fun scheduleBackgroundSend() {}
 
@@ -102,6 +110,10 @@ class ChatSession(
             deps.transfer(signedIn, request)
     }
 
+    val calls = Calls(me, requests, object : CallMediaFactory {
+        override fun create(): CallMedia = deps.newCallMedia()
+    }, deps::callForeground)
+
     val sync = ChatSync(dao, me, requests, scope, deps.elapsed)
 
     /** Copies of picked files waiting to be sent. */
@@ -137,8 +149,12 @@ class ChatSession(
         onReady = {
             sync.requestSync()
             outbox.kick()
+            calls.reconcile()
         },
-        onFrame = sync::onEvent,
+        onFrame = { frame ->
+            sync.onEvent(frame)
+            if (frame is Frame.CallEvent) calls.onEvent(frame)
+        },
     )
 
     val connection: StateFlow<ConnectionStatus> =
@@ -216,6 +232,7 @@ class ChatSession(
      */
     fun end(background: CoroutineScope, io: CoroutineDispatcher = Dispatchers.IO, wipe: (ChatSession) -> Unit = {}) {
         if (!ended.compareAndSet(false, true)) return
+        calls.stop()
         scope.cancel()
         notifier.stop()
         background.launch(io) {

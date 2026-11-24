@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+exec erl -noshell -pa /app/lib/*/ebin -eval '
+Dir = os:getenv("RPC_TLS_DIR"),
+{ok, Pem} = file:read_file(filename:join(Dir, "tls.crt")),
+[{'\''Certificate'\'', Cert, not_encrypted}] = public_key:pem_decode(Pem),
+calls = vault_calls_tls:identity(Cert),
+{ok, _} = file:read_file(filename:join(Dir, "ca.pem")),
+{ok, _} = file:read_file(filename:join(Dir, "tls.key")),
+halt(0).'

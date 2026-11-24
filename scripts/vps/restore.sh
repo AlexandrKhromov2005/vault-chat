@@ -82,9 +82,10 @@ if [ -f "$VAULT_ROOT/.env.rpc" ]; then
     chmod 600 "$VAULT_ROOT/secrets/rpc-ca/ca.key"
 fi
 check_rpc_images
-compose up -d --no-build --pull never --wait postgres chat-postgres media-postgres redis
-for user in auth chat media; do
+compose up -d --no-build --pull never --wait postgres chat-postgres media-postgres calls-postgres redis
+for user in auth chat media calls; do
     case "$user" in auth) service=postgres;; *) service="$user-postgres";; esac
+    [ -f "$backup_dir/$user.dump" ] || continue
     compose exec -T "$service" pg_restore -U "$user" --no-owner --no-acl --exit-on-error \
         -d "${user}_db" < "$backup_dir/$user.dump"
 done
