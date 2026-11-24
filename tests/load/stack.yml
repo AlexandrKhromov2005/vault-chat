@@ -1,0 +1,91 @@
+# Load acceptance overlay for deployments/docker-compose.vps.yml; started only
+# by tests/load/chat_load.py with synthetic secrets in a private temporary
+# directory. It keeps the VPS configuration (mTLS, TLS 1.3 at the Gateway,
+# Redis passwords, memory limits, rate limits) and changes only:
+#
+# - images are built from the checkout under a run-specific tag;
+# - the secrets come from ${LOAD_DIR} instead of ../secrets;
+# - the stand gets the two CPUs of the VPS (cpuset ${LOAD_STAND_CPUS}) and the
+#   generator other CPUs (${LOAD_CLIENT_CPUS}), so the two do not compete;
+# - the Gateway is published on an ephemeral loopback port instead of 443 and
+#   its healthcheck trusts the synthetic TLS CA;
+# - Auth, Chat and Gateway expose metrics on the internal network
+#   load-metrics, which only the generator joins.
+x-stand: &stand
+  cpuset: ${LOAD_STAND_CPUS:?set LOAD_STAND_CPUS}
+x-build: &build
+  context: ..
+  dockerfile: Dockerfile
+
+services:
+  postgres: *stand
+  chat-postgres: *stand
+  media-postgres: *stand
+  redis: *stand
+  profile-cache: *stand
+  # One-shot jobs (s3-init, *-migrate) run the images built below.
+  minio:
+    <<: *stand
+    build:
+      context: ..
+      dockerfile: Dockerfile.minio
+  auth:
+    <<: *stand
+    build: {<<: *build, args: {SERVICE: auth}}
+    environment:
+      AUTH_METRICS_ADDR: ":9100"
+    networks: [rpc, auth-data, events, load-metrics]
+    volumes:
+      - {type: bind, source: "${LOAD_DIR}/rpc/auth", target: /run/secrets/rpc, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${LOAD_DIR}/jwt/auth_jwt_private.pem", target: /run/secrets/auth_jwt_private.pem, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${LOAD_DIR}/jwt/auth_jwt_public.pem", target: /run/secrets/auth_jwt_public.pem, read_only: true, bind: {create_host_path: false}}
+  chat:
+    <<: *stand
+    build: {<<: *build, args: {SERVICE: chat}}
+    environment:
+      CHAT_METRICS_ADDR: ":9100"
+    networks: [rpc, chat-data, events, load-metrics]
+    volumes:
+      - {type: bind, source: "${LOAD_DIR}/rpc/chat", target: /run/secrets/rpc, read_only: true, bind: {create_host_path: false}}
+  media:
+    <<: *stand
+    build: {<<: *build, args: {SERVICE: media}}
+    volumes:
+      - {type: bind, source: "${LOAD_DIR}/rpc/media", target: /run/secrets/rpc, read_only: true, bind: {create_host_path: false}}
+  gateway:
+    <<: *stand
+    build: {<<: *build, args: {SERVICE: gateway}}
+    environment:
+      GATEWAY_METRICS_ADDR: ":9100"
+      SSL_CERT_FILE: /run/secrets/tls/ca.pem
+    networks: [rpc, events, edge, profile-cache, load-metrics]
+    ports: !override
+      - "127.0.0.1:${LOAD_GATEWAY_PORT:?set LOAD_GATEWAY_PORT}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "-http", "https://gateway:8080/health", "-timeout", "3s"]
+      interval: 5s
+    volumes:
+      - {type: bind, source: "${LOAD_DIR}/rpc/gateway", target: /run/secrets/rpc, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${LOAD_DIR}/tls", target: /run/secrets/tls, read_only: true, bind: {create_host_path: false}}
+
+  # The generator: cmd/chat-load in the service image recipe. It talks to the
+  # Gateway over TLS like a browser and reads the metrics of the services; it
+  # has no access to databases, Redis or the Docker engine.
+  loadgen:
+    profiles: [load]
+    image: vault-chat/chat-load:${VAULT_IMAGE_TAG}
+    build: {<<: *build, args: {SERVICE: chat-load}}
+    cpuset: ${LOAD_CLIENT_CPUS:?set LOAD_CLIENT_CPUS}
+    mem_limit: 512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge, load-metrics]
+    environment:
+      SSL_CERT_FILE: /run/secrets/tls/ca.pem
+    volumes:
+      - {type: bind, source: "${LOAD_DIR}/tls/ca.pem", target: /run/secrets/tls/ca.pem, read_only: true, bind: {create_host_path: false}}
+    command: ["-gateway", "https://gateway:8080", "-metrics", "auth=http://auth:9100/metrics,chat=http://chat:9100/metrics,gateway=http://gateway:9100/metrics"]
+
+networks:
+  load-metrics: {internal: true}
