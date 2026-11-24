@@ -36,9 +36,10 @@ else:
     fd = os.open(env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         stream.write(''.join(f'{key}={val}\n' for key, val in values.items()))
-# Append new least-privilege credentials on upgrade without replacing live keys.
+# Append credentials introduced by newer releases without replacing live keys.
 missing_secrets = [key for key in ('AUTH_RUNTIME_DB_PASSWORD', 'CHAT_RUNTIME_DB_PASSWORD',
-                                  'MEDIA_RUNTIME_DB_PASSWORD', 'CALLS_RUNTIME_DB_PASSWORD', 'S3_ROOT_ACCESS_KEY', 'S3_ROOT_SECRET_KEY',
+                                  'MEDIA_RUNTIME_DB_PASSWORD', 'CALLS_DB_PASSWORD', 'CALLS_RUNTIME_DB_PASSWORD',
+                                  'S3_ROOT_ACCESS_KEY', 'S3_ROOT_SECRET_KEY',
                                   'PROFILE_CACHE_PASSWORD')
                    if key not in values]
 if missing_secrets:
