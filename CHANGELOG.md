@@ -46,6 +46,8 @@
 
 - Исправлены TURN mapping за NAT, crash foreground service на Android API 26,
   взаимная блокировка offer/answer и очистка звонка после ответа 404 на `end`.
+- `init` при обновлении pre-Calls VPS теперь создаёт отсутствующий
+  `CALLS_DB_PASSWORD`; regression воспроизводит отказ Compose до исправления.
 
 ### Миграции и обновление VPS
 
