@@ -66,6 +66,12 @@ end без crash. Instrumented-тест не запускает Activity, поэ
 
 API 26 foreground-service crash, offer/answer mutex deadlock и остававшийся
 `active` после 404 на `end()` воспроизведены, покрыты regression и исправлены.
+На физическом Galaxy S23 Ultra с Android 17 release 0.2.0 дополнительно
+воспроизвёл SIGABRT при инициализации WebRTC: R8 удалил `WebRtcClassLoader` и
+`JniZero`. В 0.2.1 keep-rules и проверка APK исправляют это; установка поверх
+0.2.0, исходящий звонок и отмена прошли без crash или оставшегося microphone
+service. Собеседник вызов не принимал, поэтому remote RTP здесь не проверялся.
+
 Cold start с delayed/missed push, process death, реальный network handover и
 forced TURN именно на Android остаются непроверенными; поэтому #163 пока не
 закрывается.
