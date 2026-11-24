@@ -28,6 +28,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/service"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/config"
 	sharedlogger "github.com/AlexandrKhromov2005/vault-chat/internal/shared/logger"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/requestid"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/rpctls"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/telemetry"
@@ -91,8 +92,26 @@ func run() error {
 	// and clients recover missed events through catch-up.
 	redisClient := events.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword)
 	defer func() { _ = redisClient.Close() }()
-	publisher := events.NewPublisher(redisClient, logger,
-		events.WithQueueSize(cfg.EventQueueSize), events.WithPublishTimeout(cfg.EventPublishTimeout))
+	eventOptions := []events.Option{events.WithQueueSize(cfg.EventQueueSize), events.WithPublishTimeout(cfg.EventPublishTimeout)}
+	if cfg.PushBrokerURL != "" {
+		// Like Redis, the broker is not a startup or readiness dependency:
+		// the connection keeps retrying and signals meanwhile are counted
+		// lost. It needs mTLS; there is no plaintext fallback.
+		conn, err := pushbus.Connect(cfg.PushBrokerURL, "chat", rpcTLS, logger)
+		if err != nil {
+			return fmt.Errorf("configure push signals: %w", err)
+		}
+		// Closed after the publisher below has drained.
+		defer conn.Close()
+		signals, err := pushbus.NewPublisher(conn)
+		if err != nil {
+			return fmt.Errorf("configure push signals: %w", err)
+		}
+		eventOptions = append(eventOptions, events.WithPushSignals(signals))
+	}
+	publisher := events.NewPublisher(redisClient, logger, eventOptions...)
+	metrics.Counter("vault_push_signals_stored_total", "Push signals the stream acknowledged.", func() float64 { return float64(publisher.Stats().SignalsStored) })
+	metrics.Counter("vault_push_signals_lost_total", "Push signals not stored: broker or stream unavailable, stream full or change dropped.", func() float64 { return float64(publisher.Stats().SignalsLost) })
 	metrics.Gauge("vault_event_queue_pending", "Committed changes waiting for publication.", func() float64 { return float64(publisher.Stats().Pending) })
 	metrics.Gauge("vault_event_queue_capacity", "Maximum queued committed changes.", func() float64 { return float64(publisher.Stats().Capacity) })
 	metrics.Counter("vault_events_dropped_total", "Events discarded by queue overflow or shutdown.", func() float64 { return float64(publisher.Stats().Dropped) })

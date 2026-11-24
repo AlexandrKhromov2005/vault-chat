@@ -22,6 +22,9 @@ type ChatConfig struct {
 	EventPublishTimeout time.Duration
 	// EventDrainTimeout bounds publishing the queued events on shutdown.
 	EventDrainTimeout time.Duration
+	// PushBrokerURL is the NATS JetStream broker of push signals; empty
+	// makes none.
+	PushBrokerURL string
 }
 
 // LoadChat requires CHAT_DATABASE_URL; other settings have development defaults.
@@ -47,7 +50,11 @@ func LoadChat() (*ChatConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ChatConfig{MediaGRPCAddr: os.Getenv("CHAT_MEDIA_GRPC_ADDR"), GRPCAddr: envOr("CHAT_GRPC_ADDR", ":50052"), AuthGRPCAddr: envOr("CHAT_AUTH_GRPC_ADDR", "localhost:50051"), DatabaseURL: database,
+	broker, err := pushBrokerURL("CHAT_PUSH_NATS_URL")
+	if err != nil {
+		return nil, err
+	}
+	return &ChatConfig{PushBrokerURL: broker, MediaGRPCAddr: os.Getenv("CHAT_MEDIA_GRPC_ADDR"), GRPCAddr: envOr("CHAT_GRPC_ADDR", ":50052"), AuthGRPCAddr: envOr("CHAT_AUTH_GRPC_ADDR", "localhost:50051"), DatabaseURL: database,
 		RedisAddr: envOr("CHAT_REDIS_ADDR", "localhost:6379"), RedisPassword: os.Getenv("CHAT_REDIS_PASSWORD"), RequestTimeout: timeout, LogLevel: envOr("CHAT_LOG_LEVEL", "info"),
 		EventQueueSize: int(queueSize), EventPublishTimeout: publishTimeout, EventDrainTimeout: drainTimeout}, nil
 }

@@ -105,3 +105,24 @@ func FuzzChatRequestTimeout(f *testing.F) {
 		require.Equal(t, parsed, cfg.RequestTimeout)
 	})
 }
+
+// The broker URL is TLS only and carries no credentials: services
+// authenticate with their internal certificate.
+func TestLoadChat_PushBrokerURL(t *testing.T) {
+	t.Setenv("CHAT_DATABASE_URL", "postgres://chat-db")
+	t.Setenv("CHAT_PUSH_NATS_URL", "")
+	cfg, err := config.LoadChat()
+	require.NoError(t, err)
+	require.Empty(t, cfg.PushBrokerURL, "push is off by default")
+	t.Setenv("CHAT_PUSH_NATS_URL", "tls://nats:4222")
+	cfg, err = config.LoadChat()
+	require.NoError(t, err)
+	require.Equal(t, "tls://nats:4222", cfg.PushBrokerURL)
+	for _, bad := range []string{"nats://nats:4222", "tls://user:secret@nats:4222", "tls://nats", "tls://:4222",
+		"tls://nats:4222/x", "tls://nats:4222?x=1", "nats:4222", "tls:nats:4222"} {
+		t.Setenv("CHAT_PUSH_NATS_URL", bad)
+		_, err := config.LoadChat()
+		require.Error(t, err, bad)
+		require.NotContains(t, err.Error(), "secret")
+	}
+}
