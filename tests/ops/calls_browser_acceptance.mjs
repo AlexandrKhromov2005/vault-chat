@@ -11,10 +11,13 @@ const project = process.env.PROJECT;
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const work = await mkdtemp(join(tmpdir(), 'vault-calls-browser-'));
 const browsers = [];
+let traceInterval;
 const forceRelay = Boolean(process.env.FORCE_RELAY);
 const reconnectTest = Boolean(process.env.RECONNECT_TEST);
+const turnRestartTest = Boolean(process.env.TURN_RESTART_TEST);
 const androidPeer = Boolean(process.env.SKIP_CALLEE);
 if (reconnectTest && androidPeer) throw new Error('RECONNECT_TEST requires a browser callee');
+if (turnRestartTest && (!forceRelay || !project || androidPeer)) throw new Error('TURN_RESTART_TEST requires FORCE_RELAY, PROJECT and two browsers');
 if (forceRelay && reconnectTest) throw new Error('FORCE_RELAY and RECONNECT_TEST are separate scenarios');
 
 async function api(method, path, { token, body } = {}) {
@@ -93,7 +96,7 @@ async function launchBrowser(name, { fakeUi = true } = {}) {
   const process = spawn(chrome, [
     '--headless=new', '--disable-gpu', '--disable-background-networking', '--disable-extensions',
     '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0',
-    '--force-webrtc-ip-handling-policy=default_public_interface_only',
+    ...(globalThis.process.env.ALLOW_ALL_WEBRTC_IP ? [] : ['--force-webrtc-ip-handling-policy=default_public_interface_only']),
     `--user-data-dir=${profile}`, ...(fakeUi ? ['--use-fake-ui-for-media-stream'] : []),
     '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -144,6 +147,8 @@ async function openWorkspace(page, state) {
       window.__callReady = 0;
       window.__candidateAdds = 0;
       window.__endCandidateAdds = 0;
+      window.__callIceLoss = 0;
+      window.__callTrace = [];
       const NativePeer = RTCPeerConnection;
       window.RTCPeerConnection = class extends NativePeer {
         constructor(...args) {
@@ -151,6 +156,23 @@ async function openWorkspace(page, state) {
           if (${reconnectTest} && args[0]) args[0] = { ...args[0], iceServers: [] };
           super(...args);
           window.__callPeers.push(this);
+          if (${forceRelay}) {
+            const configure = this.setConfiguration.bind(this);
+            this.setConfiguration = (config) => configure({ ...config, iceTransportPolicy: 'relay' });
+          }
+          this.addEventListener('iceconnectionstatechange', () => {
+            if (this.iceConnectionState === 'disconnected' || this.iceConnectionState === 'failed') window.__callIceLoss++;
+          });
+          if (${Boolean(process.env.TRACE_ICE)}) {
+            const state = () => window.__callTrace.push({ at: performance.now(), connection: this.connectionState,
+              ice: this.iceConnectionState, gathering: this.iceGatheringState });
+            this.addEventListener('connectionstatechange', state);
+            this.addEventListener('iceconnectionstatechange', state);
+            this.addEventListener('icegatheringstatechange', state);
+            this.addEventListener('icecandidate', (event) => {
+              window.__callTrace.push({ candidate: event.candidate?.candidate?.match(/typ\s+(\S+)/)?.[1] ?? 'end' });
+            });
+          }
           const add = this.addIceCandidate.bind(this);
           this.addIceCandidate = (...args) => {
             window.__candidateAdds++;
@@ -178,6 +200,25 @@ async function openWorkspace(page, state) {
   await waitFor(page, `!document.getElementById('room').hidden`);
 }
 
+async function iceDiagnostics(page) {
+  return evaluate(page, `(async () => {
+    const pc = window.__callPeers[0];
+    const report = await pc?.getStats().catch(() => null);
+    const localTypes = {};
+    const remoteTypes = {};
+    const pairStates = {};
+    report?.forEach((entry) => {
+      if (entry.type === 'local-candidate') localTypes[entry.candidateType] = (localTypes[entry.candidateType] ?? 0) + 1;
+      if (entry.type === 'remote-candidate') remoteTypes[entry.candidateType] = (remoteTypes[entry.candidateType] ?? 0) + 1;
+      if (entry.type === 'candidate-pair') pairStates[entry.state] = (pairStates[entry.state] ?? 0) + 1;
+    });
+    return { state: document.getElementById('call').dataset.state,
+      error: document.getElementById('call-error').textContent,
+      connection: pc?.connectionState, ice: pc?.iceConnectionState,
+      gathering: pc?.iceGatheringState, localTypes, remoteTypes, pairStates };
+  })()`);
+}
+
 async function activeCall(token) {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
@@ -203,12 +244,24 @@ async function mediaBytes(page) {
     });
     if (selectedId) selected = entries.get(selectedId);
     if (!selected) report.forEach((entry) => {
-      if (entry.type === 'candidate-pair' && entry.selected) selected = entry;
+      if (entry.type === 'candidate-pair' && (entry.selected || (entry.nominated && entry.state === 'succeeded'))) selected = entry;
     });
     const local = selected ? entries.get(selected.localCandidateId) : null;
     const remote = selected ? entries.get(selected.remoteCandidateId) : null;
-    return { sent, received, relay: local?.type === 'relay' || remote?.type === 'relay' };
+    return { sent, received, localType: local?.candidateType, remoteType: remote?.candidateType,
+      relay: local?.candidateType === 'relay' || remote?.candidateType === 'relay' };
   })()`);
+}
+
+async function growingMedia(page, before) {
+  const deadline = Date.now() + 10000;
+  let current = before;
+  while (Date.now() < deadline) {
+    current = await mediaBytes(page);
+    if (current.sent > before.sent && current.received > before.received) return current;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return current;
 }
 
 async function endActiveCalls(token) {
@@ -265,6 +318,13 @@ try {
   await waitFor(caller, `!document.getElementById('call-start').hidden`);
 
   await evaluate(caller, `document.getElementById('call-start').click()`);
+  if (process.env.TRACE_ICE) {
+    traceInterval = setInterval(() => {
+      for (const [name, page] of [['caller', caller], ['callee', callee]]) {
+        if (page) iceDiagnostics(page).then((value) => console.log(name, JSON.stringify(value))).catch(() => {});
+      }
+    }, 2000);
+  }
   if (callee) {
     await waitFor(callee, `!document.getElementById('call-accept').hidden`);
     await evaluate(callee, `document.getElementById('call-accept').click(); document.getElementById('call-accept').click()`);
@@ -297,20 +357,12 @@ try {
   try {
     await waitFor(caller, `document.getElementById('call').dataset.state === 'active'`, Number(process.env.CALL_WAIT_MS ?? 20000));
   } catch (error) {
-    const diagnostics = await evaluate(caller, `(async () => {
-      const pc = window.__callPeers[0];
-      const report = await pc?.getStats();
-      const localTypes = {};
-      const pairStates = {};
-      report?.forEach((entry) => {
-        if (entry.type === 'local-candidate') localTypes[entry.candidateType] = (localTypes[entry.candidateType] ?? 0) + 1;
-        if (entry.type === 'candidate-pair') pairStates[entry.state] = (pairStates[entry.state] ?? 0) + 1;
-      });
-      return { state: document.getElementById('call').dataset.state,
-        error: document.getElementById('call-error').textContent,
-        connection: pc?.connectionState, ice: pc?.iceConnectionState, localTypes, pairStates };
-    })()`);
+    const diagnostics = await iceDiagnostics(caller);
     console.error('Caller ICE diagnostics', diagnostics);
+    if (process.env.TRACE_ICE) {
+      console.error('Caller event trace', await evaluate(caller, 'window.__callTrace'));
+      if (callee) console.error('Callee event trace', await evaluate(callee, 'window.__callTrace'));
+    }
     throw error;
   }
   if (callee) await waitFor(callee, `document.getElementById('call').dataset.state === 'active'`);
@@ -323,8 +375,8 @@ try {
   const beforeCaller = await mediaBytes(caller);
   const beforeCallee = callee ? await mediaBytes(callee) : null;
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.HOLD_ACTIVE_MS ?? 1500)));
-  const afterCaller = await mediaBytes(caller);
-  const afterCallee = callee ? await mediaBytes(callee) : null;
+  const afterCaller = await growingMedia(caller, beforeCaller);
+  const afterCallee = callee ? await growingMedia(callee, beforeCallee) : null;
   assert.ok(afterCaller.sent > beforeCaller.sent, 'caller produced no audio packets');
   assert.ok(afterCaller.received > beforeCaller.received, 'caller received no audio packets');
   if (callee) {
@@ -332,8 +384,27 @@ try {
     assert.ok(afterCallee.received > beforeCallee.received, 'callee received no audio packets');
   }
   if (forceRelay) {
+    console.log('Relay stats', { caller: afterCaller, callee: afterCallee });
     assert.equal(afterCaller.relay, true, 'caller did not select a TURN relay');
     if (callee) assert.equal(afterCallee.relay, true, 'callee did not select a TURN relay');
+  }
+
+  if (turnRestartTest) {
+    const lossBefore = await evaluate(caller, 'window.__callIceLoss');
+    const calleeLossBefore = await evaluate(callee, 'window.__callIceLoss');
+    execFileSync('docker', ['restart', `${project}-coturn-1`], { stdio: 'pipe' });
+    await waitFor(caller, `window.__callIceLoss > ${lossBefore}`, 30000);
+    await waitFor(callee, `window.__callIceLoss > ${calleeLossBefore}`, 30000);
+    await waitFor(caller, `document.getElementById('call').dataset.state === 'active' && ['connected', 'completed'].includes(window.__callPeers[0].iceConnectionState)`, 60000);
+    await waitFor(callee, `document.getElementById('call').dataset.state === 'active' && ['connected', 'completed'].includes(window.__callPeers[0].iceConnectionState)`, 60000);
+    const recoveredCaller = await growingMedia(caller, afterCaller);
+    const recoveredCallee = await growingMedia(callee, afterCallee);
+    assert.ok(recoveredCaller.sent > afterCaller.sent && recoveredCaller.received > afterCaller.received, 'caller RTP did not recover');
+    assert.ok(recoveredCallee.sent > afterCallee.sent && recoveredCallee.received > afterCallee.received, 'callee RTP did not recover');
+    assert.equal(recoveredCaller.relay, true, 'caller recovery left TURN');
+    assert.equal(recoveredCallee.relay, true, 'callee recovery left TURN');
+    assert.equal(await evaluate(caller, 'window.__callPeers.length'), 1);
+    assert.equal(await evaluate(callee, 'window.__callPeers.length'), 1);
   }
 
   if (reconnectTest) {
@@ -373,8 +444,9 @@ try {
   caller.cdp.close();
   callee?.cdp.close();
   denied.cdp.close();
-  console.log(`Two-browser audio acceptance passed: real bidirectional RTP, one peer per device, end cleanup, permission denial${forceRelay ? ', forced TURN relay' : ''}${reconnectTest ? ', WebSocket signal/end reconciliation' : ''}`);
+  console.log(`Two-browser audio acceptance passed: real bidirectional RTP, one peer per device, end cleanup, permission denial${forceRelay ? ', forced TURN relay' : ''}${reconnectTest ? ', WebSocket signal/end reconciliation' : ''}${turnRestartTest ? ', coturn restart and RTP recovery' : ''}`);
 } finally {
+  clearInterval(traceInterval);
   if (alice) await endActiveCalls(alice.pair.access_token);
   await Promise.all(browsers.map(async (process) => {
     if (process.exitCode !== null) return;

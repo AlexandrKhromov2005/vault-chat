@@ -58,10 +58,14 @@ GATEWAY_URL=http://127.0.0.1:8080 PROJECT=<local-project> \
 ringing/connecting/heartbeat timeouts можно увеличить через `ERL_FLAGS`
 (`-vault_calls ...`) только в disposable stack, не меняя production defaults.
 
-24 ноября 2026 на API 26 emulator без KVM отдельные Android ↔ browser запуски
-достигли active и двунаправленного RTP. При этом повторы также дали ICE без
-Android `connected` и `getStats()` timeouts; единого стабильного финального
-acceptance нет. Поэтому #163 остаётся открытым. Background, реальный network
-handover и forced TURN не проверены; forced TURN относится также к #162.
-API 26 foreground-service crash и вложенный offer/answer mutex deadlock
-воспроизведены и исправлены, но это не заменяет стабильный device matrix.
+24 ноября 2026 на API 26 emulator без KVM, после исправления TURN mapping и
+синхронизации acceptance, два подряд Android ↔ browser прогона завершились
+`OK (2 tests)`: Android и browser подтвердили рост sent/received RTP и корректный
+end без crash. Instrumented-тест не запускает Activity, поэтому звонок также
+выполнен без видимого UI с foreground microphone service.
+
+API 26 foreground-service crash, offer/answer mutex deadlock и остававшийся
+`active` после 404 на `end()` воспроизведены, покрыты regression и исправлены.
+Cold start с delayed/missed push, process death, реальный network handover и
+forced TURN именно на Android остаются непроверенными; поэтому #163 пока не
+закрывается.

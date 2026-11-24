@@ -19,7 +19,12 @@ Calls получает собственные PostgreSQL, Redis events, mTLS lea
 `CALLS_PRODUCTION=true` запрещает prototype-адаптеры. `RPC_TLS_MODE=mtls` и
 `RPC_TLS_DIR` обязательны на VPS. `CALLS_TURN_URIS` содержит только адреса
 собственного coturn; секрет монтируется через `CALLS_TURN_SECRET_FILE` и не
-появляется в логах. Backup/restore включает `calls.dump`; старые архивы без
+появляется в логах. Coturn получает `external-ip=PUBLIC/PRIVATE`. По умолчанию
+`TURN_PRIVATE_IP` совпадает с `PUBLIC_IP`; если NAT отображает публичный адрес в
+другой внутренний, задайте внутренний явно. Нельзя оставлять private side
+неопределённым: coturn может превратить peer address в `0.0.0.0` и отклонить
+CREATE_PERMISSION. `tests/ops/test_turn.py` проверяет эту генерацию.
+Backup/restore включает `calls.dump`; старые архивы без
 него восстанавливаются как pre-Calls состояние с пустой Calls БД.
 
 Проверки перед включением:

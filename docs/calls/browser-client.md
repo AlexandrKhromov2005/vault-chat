@@ -104,8 +104,10 @@ WebSocket: любой `type` с префиксом `call.` и полем `call_i
 Chrome: двусторонние RTP bytes росли, был один peer на устройство, end остановил
 microphone/peer, permission denial не создал звонок. Вариант `RECONNECT_TEST=1`
 также прошёл потерю `end-of-candidates` и `call.ended` с REST catch-up.
-Это локальное доказательство #161, не production rollout. RTP через forced TURN
-на том же host не прошёл и не отмечается как проверенный.
+Это локальное доказательство #161, не production rollout. `FORCE_RELAY=1`
+также прошёл: обе стороны выбрали relay и RTP рос в обе стороны. Вариант
+`FORCE_RELAY=1 TURN_RESTART_TEST=1` пережил реальный restart coturn: оба peer
+получили ICE loss, восстановили relay без нового peer и продолжили RTP.
 
 Восстановление (#162) проверено юнит-тестами (`web/test/call-recovery.test.mjs`):
 ICE restart звонящего и ответ вызываемого с новыми учётными данными TURN,
@@ -113,9 +115,9 @@ ICE restart звонящего и ответ вызываемого с новы�
 сети и `online`, повтор потерянного `offer`/`answer` с тем же `sender_seq`,
 откат отклонённого `offer`, обновление TURN для relay, лимит restart и
 повторная доставка сигналов после переподключения WebSocket. Live Chrome E2E
-подтвердил WebSocket reconnect/catch-up. Не проверено: смена Wi-Fi/мобильной
-сети, поведение `getStats` и `setConfiguration` в Firefox и Safari, RTP через
-TURN и звонок через TURN дольше 10 минут.
+подтвердил WebSocket reconnect/catch-up, forced TURN и восстановление RTP после
+restart coturn. Не проверено: смена Wi-Fi/мобильной сети, поведение `getStats` и
+`setConfiguration` в Firefox и Safari и звонок через TURN дольше 10 минут.
 
 Ограничения:
 

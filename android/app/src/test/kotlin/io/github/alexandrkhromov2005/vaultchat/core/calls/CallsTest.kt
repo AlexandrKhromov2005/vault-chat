@@ -119,6 +119,25 @@ class CallsTest {
     }
 
     @Test
+    fun serverEndedDuringLocalEndReleasesMedia() = runBlocking {
+        enqueue(
+            """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
+            call("call-1", "connecting", caller = "bob", callee = "alice"),
+            turn(),
+        )
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media") { media.started == 1 }
+        server.enqueue(MockResponse.Builder().code(404).body("""{"error":"ended"}""").build())
+
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertEquals(1, media.closed)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
     fun networkRetryReusesCommandId() = runBlocking {
         val id = UUID.randomUUID().toString().replace("-", "").uppercase()
         server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())

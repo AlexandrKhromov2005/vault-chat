@@ -74,12 +74,18 @@ class CallsInstrumentedTest {
             calls.view.value?.state == "active" && calls.view.value?.remote == true
         }
         val before = calls.audioBytes()
-        delay(2_000)
-        val after = calls.audioBytes()
+        var after = before
+        try {
+            await("bidirectional Android audio", 30_000) {
+                after = calls.audioBytes()
+                after.first > before.first && after.second > before.second
+            }
+        } finally {
+            calls.end()
+            await("ended", 15_000) { calls.view.value?.state == "ended" }
+        }
         assertTrue("Android sent no audio: $before -> $after", after.first > before.first)
         assertTrue("Android received no audio: $before -> $after", after.second > before.second)
-        calls.end()
-        await("ended", 5_000) { calls.view.value?.state == "ended" }
     }
 
     private suspend fun await(description: String, timeoutMs: Long, condition: suspend () -> Boolean) {

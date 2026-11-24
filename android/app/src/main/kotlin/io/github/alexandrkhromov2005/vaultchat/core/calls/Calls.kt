@@ -245,7 +245,8 @@ class Calls(
                 throw e
             } catch (e: Exception) {
                 call.pending = false
-                publish(call, error = e.message ?: "Команда $action не выполнена")
+                if (e is ApiException && e.status == 404) finish(call)
+                else publish(call, error = e.message ?: "Команда $action не выполнена")
             }
         }
     }
