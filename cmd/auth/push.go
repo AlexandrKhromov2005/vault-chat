@@ -70,10 +70,10 @@ func startPush(ctx context.Context, cfg *config.Config, sessions *repository.Ses
 		case <-done:
 		case <-time.After(15 * time.Second):
 		}
-		// Flushes the acknowledgements and the signals given back.
-		if err := conn.Drain(); err != nil {
-			conn.Close()
-		}
+		// Sends the acknowledgements and the signals given back before the
+		// process exits; Drain would do it in the background.
+		_ = conn.FlushTimeout(2 * time.Second)
+		conn.Close()
 	}, nil
 }
 
