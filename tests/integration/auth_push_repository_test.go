@@ -357,3 +357,65 @@ func TestPushTokens_DatabaseRefusesTheFirstTooLongToken(t *testing.T) {
 	require.Equal(t, "23514", pgErr.Code, "check_violation, got %s", pgErr.Message)
 	require.Empty(t, pushTokens(t, pool, user.ID))
 }
+
+// Marks skip handled recipients until they expire, keep the later expiry
+// when written again, and are deleted in bounded batches.
+func TestPushMarks_SkipHandledRecipientsUntilTheyExpire(t *testing.T) {
+	pool, sessions, _ := newSessionFixture(t)
+	ctx := context.Background()
+	signal, other := fmt.Sprintf("%064x", 1), fmt.Sprintf("%064x", 2)
+	alice, bob, carol := newTestUser().ID, newTestUser().ID, newTestUser().ID
+
+	unmarked, err := sessions.UnmarkedPushRecipients(ctx, signal, []string{carol, alice, bob})
+	require.NoError(t, err)
+	require.Equal(t, []string{carol, alice, bob}, unmarked, "the signal's order is kept")
+
+	require.NoError(t, sessions.MarkPushRecipient(ctx, []string{signal, other}, alice, time.Now().Add(time.Hour)))
+	require.NoError(t, sessions.MarkPushRecipient(ctx, []string{signal}, alice, time.Now().Add(-time.Hour)), "a repeat is not an error")
+	unmarked, err = sessions.UnmarkedPushRecipients(ctx, signal, []string{carol, alice, bob})
+	require.NoError(t, err)
+	require.Equal(t, []string{carol, bob}, unmarked, "the earlier expiry did not shorten the mark")
+	unmarked, err = sessions.UnmarkedPushRecipients(ctx, other, []string{alice})
+	require.NoError(t, err)
+	require.Empty(t, unmarked, "one push marks every signal merged into it")
+
+	require.NoError(t, sessions.MarkPushRecipient(ctx, []string{signal}, bob, time.Now().Add(-time.Second)))
+	unmarked, err = sessions.UnmarkedPushRecipients(ctx, signal, []string{bob})
+	require.NoError(t, err)
+	require.Equal(t, []string{bob}, unmarked, "an expired mark no longer counts")
+	for range 3 {
+		require.NoError(t, sessions.MarkPushRecipient(ctx, []string{fmt.Sprintf("%064x", 3)}, newTestUser().ID, time.Now().Add(-time.Second)))
+	}
+	deleted, err := sessions.DeleteExpiredPushMarks(ctx, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, deleted)
+	deleted, err = sessions.DeleteExpiredPushMarks(ctx, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, deleted)
+	var left int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM push_signal_marks`).Scan(&left))
+	require.Equal(t, 2, left, "live marks stay")
+
+	require.Error(t, sessions.MarkPushRecipient(ctx, []string{"not-a-signal-id"}, alice, time.Now().Add(time.Hour)),
+		"the database refuses ids that are not signal hashes")
+}
+
+// Two workers recording the same recipient at once both succeed.
+func TestPushMarks_ConcurrentWritesOfOneRecipient(t *testing.T) {
+	_, sessions, _ := newSessionFixture(t)
+	ctx := context.Background()
+	signal, user := fmt.Sprintf("%064x", 7), newTestUser().ID
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() { errs <- sessions.MarkPushRecipient(ctx, []string{signal}, user, time.Now().Add(time.Hour)) })
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	unmarked, err := sessions.UnmarkedPushRecipients(ctx, signal, []string{user})
+	require.NoError(t, err)
+	require.Empty(t, unmarked)
+}

@@ -14,9 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -102,18 +104,24 @@ type fcmMessage struct {
 	} `json:"message"`
 }
 
-// Send delivers a sync signal for one room to one device.
+// maxTTL is FCM's hold time for an offline device: a push wakes it no later
+// than an hour after its signal was published.
+const maxTTL = time.Hour
+
+// Send delivers a sync signal for one room to one device, held by FCM for
+// m.TTL at most. Failures of the network, of the access token and of FCM
+// itself (429, 5xx) wrap ErrTemporary.
 func (f *FCM) Send(ctx context.Context, m Message) error {
 	access, err := f.access(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrTemporary, err)
 	}
 	var body fcmMessage
 	body.Message.Token = m.Token
 	body.Message.Data = map[string]string{"type": "sync", "room_id": m.RoomID}
 	body.Message.Android.Priority = "HIGH"
 	body.Message.Android.CollapseKey = "room:" + m.RoomID
-	body.Message.Android.TTL = "3600s"
+	body.Message.Android.TTL = strconv.FormatInt(int64(math.Ceil(min(max(m.TTL, time.Second), maxTTL).Seconds())), 10) + "s"
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("encode FCM message: %w", err)
@@ -127,7 +135,7 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send FCM message: %w", err)
+		return fmt.Errorf("%w: send FCM message: %w", ErrTemporary, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
@@ -143,9 +151,13 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 	// Only FCM's own verdict on the token deletes it: a bare 404 may come
 	// from a proxy, and SENDER_ID_MISMATCH means our credentials belong to
 	// another project, not that the token is gone.
-	switch code {
-	case "UNREGISTERED":
+	switch {
+	case code == "UNREGISTERED":
 		return ErrTokenInvalid
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError ||
+		resp.StatusCode == http.StatusUnauthorized:
+		// A rejected access token was dropped above; the retry gets a new one.
+		return fmt.Errorf("%w: FCM answered %d %s", ErrTemporary, resp.StatusCode, code)
 	default:
 		// Neither the token nor the answer body is logged or returned.
 		return fmt.Errorf("FCM answered %d %s", resp.StatusCode, code)

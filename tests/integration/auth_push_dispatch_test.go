@@ -10,6 +10,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
@@ -17,6 +19,8 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/events"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus/pushbustest"
 )
 
 // recordingProvider stands in for FCM; tokens in invalid are rejected as
@@ -44,7 +48,9 @@ func (p *recordingProvider) messages() []push.Message {
 }
 
 // TestPushDispatch_FromChatMessageToActiveDevices runs Chat's publisher,
-// Redis Pub/Sub, Auth's subscriber and dispatcher, and the token store.
+// the deployment's NATS configuration, Auth's consumer and dispatcher, and
+// the token and mark store. Auth is down while the message is sent and
+// starts afterwards (ADR 0003, acceptance test 1).
 func TestPushDispatch_FromChatMessageToActiveDevices(t *testing.T) {
 	pool, sessions, sender := newSessionFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -63,26 +69,25 @@ func TestPushDispatch_FromChatMessageToActiveDevices(t *testing.T) {
 	require.NoError(t, sessions.RegisterPushToken(ctx, loggedOut.ID, gone.ID, "fcm", "logged-out-phone"))
 	require.NoError(t, sessions.RevokeFamily(ctx, loggedOut.ID, gone.ID))
 
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broker := pushbustest.Start(t)
+	connect := func(service string) *nats.Conn {
+		conn, err := pushbus.Connect(broker.URL(), service, pushbustest.TLS(t, service, broker.CA.Issue(t, service)), logger)
+		require.NoError(t, err)
+		t.Cleanup(conn.Close)
+		return conn
+	}
+	authJS, err := jetstream.New(connect("auth"))
+	require.NoError(t, err)
+	_, err = pushbus.Declare(ctx, authJS) // Auth ran once before
+	require.NoError(t, err)
+	signals, err := pushbus.NewPublisher(connect("chat"))
+	require.NoError(t, err)
+
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	provider := &recordingProvider{invalid: map[string]bool{"uninstalled-app": true}}
-	dispatcher := push.NewDispatcher(provider, sessions, logger, push.Config{Window: time.Second})
-	go dispatcher.Run(ctx)
-	subscribed := make(chan struct{})
-	go func() {
-		// Subscribe returns only when ctx ends.
-		close(subscribed)
-		_ = push.Subscribe(ctx, client, dispatcher, logger)
-	}()
-	<-subscribed
-	require.Eventually(t, func() bool {
-		n, err := client.PubSubNumSub(ctx, "push:signal:v1").Result()
-		return err == nil && n["push:signal:v1"] == 1
-	}, 5*time.Second, 10*time.Millisecond)
-
-	publisher := events.NewPublisher(client, logger)
+	publisher := events.NewPublisher(client, logger, events.WithPushSignals(signals))
 	room := uuid.NewString()
 	message := &domain.Message{ID: uuid.NewString(), RoomID: room, SenderID: sender.ID, Text: "synthetic text", CreatedAt: time.Now()}
 	publisher.Notify(ctx, domain.Event{Kind: domain.MessageCreated, RoomID: room, Message: message,
@@ -90,15 +95,27 @@ func TestPushDispatch_FromChatMessageToActiveDevices(t *testing.T) {
 	closeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	require.NoError(t, publisher.Close(closeCtx))
+	require.EqualValues(t, 1, publisher.Stats().SignalsStored)
 
-	require.Eventually(t, func() bool { return len(provider.messages()) == 2 }, 5*time.Second, 10*time.Millisecond)
-	// Sends for other users run on other workers: give a wrong push to the
-	// sender or the logged-out user time to arrive before checking.
-	time.Sleep(500 * time.Millisecond)
+	provider := &recordingProvider{invalid: map[string]bool{"uninstalled-app": true}}
+	dispatcher := push.NewDispatcher(provider, sessions, sessions, logger, push.Config{Window: time.Second})
+	consumer := push.NewConsumer(push.NewDeclaringSource(authJS), dispatcher, sessions, logger, push.ConsumerConfig{})
+	go dispatcher.Run(ctx)
+	go consumer.Run(ctx)
+
+	require.Eventually(t, func() bool { return consumer.Stats().Acked == 1 }, 10*time.Second, 10*time.Millisecond)
 	require.ElementsMatch(t, []push.Message{{Token: "recipient-phone", RoomID: room}, {Token: "uninstalled-app", RoomID: room}},
-		provider.messages(), "neither the sender nor a revoked login is woken")
-	require.Eventually(t, func() bool {
-		return len(pushTokens(t, pool, recipient.ID)) == 1
-	}, 5*time.Second, 10*time.Millisecond, "the token the provider rejected is deleted")
-	require.Equal(t, map[string]string{phone.ID: "recipient-phone"}, pushTokens(t, pool, recipient.ID))
+		withoutTTL(provider.messages()), "neither the sender nor a revoked login is woken")
+	require.Equal(t, map[string]string{phone.ID: "recipient-phone"}, pushTokens(t, pool, recipient.ID),
+		"the token the provider rejected is deleted")
+	unmarked, err := sessions.UnmarkedPushRecipients(ctx, pushbus.SignalID(message.ID, 0), []string{recipient.ID, loggedOut.ID})
+	require.NoError(t, err)
+	require.Empty(t, unmarked, "every recipient is marked before the signal is acknowledged")
+}
+
+func withoutTTL(messages []push.Message) []push.Message {
+	for i := range messages {
+		messages[i].TTL = 0
+	}
+	return messages
 }
