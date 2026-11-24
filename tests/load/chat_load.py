@@ -19,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -300,6 +301,8 @@ def main():
             print(run(compose + ['logs', '--tail', '60', 'auth', 'chat', 'gateway'], check=False), file=sys.stderr)
             raise
         finally:
+            # A second interrupt must not leave the project behind.
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             sampler.stopped.set()
             run(compose + ['--profile', 'load', 'down', '-v', '--remove-orphans'], check=False, timeout=300)
             run(['docker', 'image', 'rm', *[f'vault-chat/{image}:{tag}' for image in IMAGES]], check=False)

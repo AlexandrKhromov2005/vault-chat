@@ -530,13 +530,14 @@ func (r *Runner) send(ctx context.Context, stats *PhaseStats, op operation) {
 	stats.begin()
 	defer stats.end()
 	stats.sends.Add(1)
+	// Members connected when the send starts expect its event, once the
+	// message is stored.
 	var connected int64
 	for _, member := range op.room.members {
 		if member.connected() {
 			connected++
 		}
 	}
-	stats.expected.Add(connected)
 	token := op.user.access()
 	attempts := 1
 	if op.retry {
@@ -559,6 +560,7 @@ func (r *Runner) send(ctx context.Context, stats *PhaseStats, op operation) {
 		}
 		if attempt == 0 {
 			stats.acknowledged.Add(1)
+			stats.expected.Add(connected)
 		}
 		r.ledger.Acknowledged(op.clientID, m)
 	}
