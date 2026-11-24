@@ -46,6 +46,17 @@ func TestDirect_VerifiesActorAndResolvesPeer(t *testing.T) {
 	require.Equal(t, chatv1.RoomKind_ROOM_KIND_DIRECT, resp.GetRoom().GetKind())
 }
 
+func TestCheckMembership_UsesExistingMembershipCheckWithoutAccessToken(t *testing.T) {
+	h, rooms, auth := newHandler(t)
+	userID, roomID := uuid.NewString(), uuid.NewString()
+	room := &domain.Room{ID: roomID, Kind: domain.Direct, ParticipantIDs: []string{userID, uuid.NewString()}}
+	rooms.EXPECT().GetRoom(mock.Anything, userID, roomID).Return(room, nil).Once()
+	resp, err := h.CheckMembership(context.Background(), &chatv1.CheckMembershipRequest{RoomId: roomID, UserId: userID})
+	require.NoError(t, err)
+	require.Equal(t, roomID, resp.GetRoom().GetId())
+	require.Empty(t, auth.Calls)
+}
+
 func TestEveryRPC_RejectsMissingIdentity(t *testing.T) {
 	h, rooms, auth := newHandler(t)
 	_, a := h.GetOrCreateDirect(context.Background(), nil)

@@ -73,8 +73,8 @@
 
 ## Ожидаемый контракт сервера
 
-Production API (#156) и события (#157) ещё не выпущены. Клиент рассчитывает на
-пути и тела из ADR 0005 и на поля ниже. При расхождении менять нужно
+Production API (#156) и события (#157) реализованы и прошли live acceptance.
+Клиент использует пути и тела из ADR 0005 и поля ниже. При расхождении менять нужно
 `parseCall`, `parseSignal` и `parseIceServers` в `calls.mjs`.
 
 | Запрос | Ответ, который читает клиент |
@@ -100,19 +100,24 @@ WebSocket: любой `type` с префиксом `call.` и полем `call_i
 отказ микрофона, гонки accept/reject/cancel, повторы команд, устаревшие ответы,
 выход из аккаунта, бюджеты кандидатов и SDP.
 
-Не проверено, пока нет production API: реальный разговор двух браузеров через
-Gateway и live E2E сценарий приёмки #161. Звук через TURN при заблокированном
-P2P проверяется после #158.
+2026-11-24 `tests/ops/calls_browser_acceptance.mjs` прошёл на двух реальных
+Chrome: двусторонние RTP bytes росли, был один peer на устройство, end остановил
+microphone/peer, permission denial не создал звонок. Вариант `RECONNECT_TEST=1`
+также прошёл потерю `end-of-candidates` и `call.ended` с REST catch-up.
+Это локальное доказательство #161, не production rollout. `FORCE_RELAY=1`
+также прошёл: обе стороны выбрали relay и RTP рос в обе стороны. Вариант
+`FORCE_RELAY=1 TURN_RESTART_TEST=1` пережил реальный restart coturn: оба peer
+получили ICE loss, восстановили relay без нового peer и продолжили RTP.
 
 Восстановление (#162) проверено юнит-тестами (`web/test/call-recovery.test.mjs`):
 ICE restart звонящего и ответ вызываемого с новыми учётными данными TURN,
 восстановление без restart в пределах 2 с, завершение через 30 с, работа без
 сети и `online`, повтор потерянного `offer`/`answer` с тем же `sender_seq`,
 откат отклонённого `offer`, обновление TURN для relay, лимит restart и
-повторная доставка сигналов после переподключения WebSocket. Не проверено: смена
-Wi-Fi/мобильной сети в реальных браузерах, поведение `getStats` и
-`setConfiguration` в Firefox и Safari, live E2E двух браузеров (после #156 и
-#157) и звонок через TURN дольше 10 минут (после #158).
+повторная доставка сигналов после переподключения WebSocket. Live Chrome E2E
+подтвердил WebSocket reconnect/catch-up, forced TURN и восстановление RTP после
+restart coturn. Не проверено: смена Wi-Fi/мобильной сети, поведение `getStats` и
+`setConfiguration` в Firefox и Safari и звонок через TURN дольше 10 минут.
 
 Ограничения:
 

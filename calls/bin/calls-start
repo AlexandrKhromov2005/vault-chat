@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+exec erl -noshell -pa /app/lib/*/ebin -eval '
+case application:ensure_all_started(vault_calls) of
+    {ok, _} -> receive after infinity -> ok end;
+    {error, _} -> halt(1)
+end.'

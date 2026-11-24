@@ -902,6 +902,55 @@ func (_c *MockAuthService_UnregisterPushToken_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// ValidateSession provides a mock function with given fields: ctx, userID, sessionID
+func (_m *MockAuthService) ValidateSession(ctx context.Context, userID string, sessionID string) (bool, error) {
+	ret := _m.Called(ctx, userID, sessionID)
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSession")
+	}
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (bool, error)); ok {
+		return rf(ctx, userID, sessionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
+		r0 = rf(ctx, userID, sessionID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, userID, sessionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type MockAuthService_ValidateSession_Call struct {
+	*mock.Call
+}
+
+func (_e *MockAuthService_Expecter) ValidateSession(ctx interface{}, userID interface{}, sessionID interface{}) *MockAuthService_ValidateSession_Call {
+	return &MockAuthService_ValidateSession_Call{Call: _e.mock.On("ValidateSession", ctx, userID, sessionID)}
+}
+
+func (_c *MockAuthService_ValidateSession_Call) Run(run func(context.Context, string, string)) *MockAuthService_ValidateSession_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockAuthService_ValidateSession_Call) Return(_a0 bool, _a1 error) *MockAuthService_ValidateSession_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAuthService_ValidateSession_Call) RunAndReturn(run func(context.Context, string, string) (bool, error)) *MockAuthService_ValidateSession_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ValidateToken provides a mock function with given fields: ctx, token
 func (_m *MockAuthService) ValidateToken(ctx context.Context, token string) (*service.Access, error) {
 	ret := _m.Called(ctx, token)

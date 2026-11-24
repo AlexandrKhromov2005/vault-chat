@@ -154,7 +154,9 @@ commit_signal(Kind, Payload, SenderSeq, Device, State, NextData, Data, From) ->
     Signal = #{sender_device => Device, sender_seq => SenderSeq, kind => Kind, payload => Payload},
     case vault_calls_store:append_signal(vault_calls_store, maps:get(id, Data), Expected,
                                          NextData#{signal => Signal}) of
-        {ok, State, SignalSeq} -> {keep_state, NextData, [{reply, From, {ok, State, SignalSeq}}]};
+        {ok, State, SignalSeq} ->
+            ok = vault_calls_events:signal(NextData, Signal#{signal_seq => SignalSeq}),
+            {keep_state, NextData, [{reply, From, {ok, State, SignalSeq}}]};
         {replay, SavedState, SignalSeq} ->
             {keep_state_and_data, [{reply, From, {ok, SavedState, SignalSeq}}]};
         {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
@@ -234,10 +236,14 @@ commit(NextState, NextData0, From, Meta, State) ->
     case vault_calls_store:persist(vault_calls_store, maps:get(id, NextData0), Expected,
                                    NextData#{command => Meta}) of
         {replay, SavedState} -> {keep_state_and_data, [{reply, From, {ok, SavedState}}]};
-        {ok, ended} -> {stop_and_reply, normal, [{reply, From, {ok, ended}}]};
+        {ok, ended} ->
+            ok = vault_calls_events:call_changed(NextData),
+            {stop_and_reply, normal, [{reply, From, {ok, ended}}]};
         {ok, NextState} when NextState =:= State ->
             {keep_state, NextData, [{reply, From, {ok, NextState}} | timer_actions(Meta)]};
-        {ok, NextState} -> {next_state, NextState, NextData, [{reply, From, {ok, NextState}}]};
+        {ok, NextState} ->
+            ok = vault_calls_events:call_changed(NextData),
+            {next_state, NextState, NextData, [{reply, From, {ok, NextState}}]};
         {error, _} = Error -> {keep_state_and_data, [{reply, From, Error}]}
     end.
 
@@ -266,7 +272,9 @@ expire(#{id := Id, state_version := Version, caller_device := Device} = Data) ->
     Expected = {maps:get(state, Data), Version},
     Meta = meta(Id, {timeout, Version}, Device),
     case vault_calls_store:persist(vault_calls_store, Id, Expected, NextData#{command => Meta}) of
-        {ok, ended} -> {stop, normal};
+        {ok, ended} ->
+            ok = vault_calls_events:call_changed(NextData),
+            {stop, normal};
         {error, _} -> {keep_state_and_data, [{state_timeout, 1000, expired}]}
     end.
 

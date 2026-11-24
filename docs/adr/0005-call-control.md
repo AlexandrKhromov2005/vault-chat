@@ -1,8 +1,13 @@
 # ADR 0005: управление звонками на Erlang/OTP — контракт, бюджеты и gates
 
-Статус: предложено. Дата: 2026-11-03, переработано 2026-11-04 по ревью #121.
+Статус: принято для control plane; production rollout остаётся отдельной
+операцией. Дата: 2026-11-03, переработано 2026-11-04 по ревью #121,
+актуализировано 2026-11-24.
 Этап E1 из [ARCHITECTURE §12.1](../../ARCHITECTURE.md#121-erlangotp-call-control);
-владелец направления — Tagir. Кода нет: прототип — этап E2.
+владелец направления — Tagir. Erlang state machine, PostgreSQL journal,
+production gRPC/Auth/Chat, Redis events, TURN и resource gate реализованы;
+browser/Android media acceptance и фактическое включение на VPS фиксируются
+отдельно.
 
 ## Контекст
 
@@ -29,8 +34,9 @@ PostgreSQL и OTP решают разные задачи: БД восстана�
 - Gateway проверяет токен через `Auth.ValidateToken` на каждом запросе и при
   ошибке Auth завершает его сам (`internal/gateway/middleware/auth.go`): при
   отказе Auth ни одна команда до Calls не доходит.
-- `ValidateTokenResponse` возвращает пользователя, но не сессию
-  (`api/proto/auth/v1/auth.proto`).
+- `ValidateTokenResponse` возвращает пользователя и `session_id`; Calls также
+  использует отдельные `ValidateSession` и `CheckMembership` для монитора, не
+  сохраняя истекающий access token.
 - RPC между сервисами — mTLS с явным списком методов ([ADR 0001](0001-internal-mtls.md)).
 
 ## Первый сценарий
@@ -136,6 +142,9 @@ payload — `409 seq_reused`. Отправитель не шлёт следую�
 
 ### TURN
 
+Coturn слушает TURN на 3478 по UDP и TCP; Calls отдаёт оба URI, чтобы клиент
+мог выбрать доступный транспорт. `ufw allow 3478` разрешает оба.
+
 Учётные данные — по TURN REST API coturn (`use-auth-secret`): имя
 `<exp>:<call_id>:<user_id>`, где `<exp>` — unix-время истечения через 10 минут,
 пароль — HMAC-SHA1 общего секрета от имени. Срок задаёт метка в имени, сам HMAC
@@ -171,6 +180,7 @@ payload — `409 seq_reused`. Отправитель не шлёт следую�
 | Незавершённых звонков на пользователя | 1 |
 | Незавершённых звонков на установку | 200 |
 | Новых вызовов на пользователя | 10 в минуту, burst 3 |
+| Calls API на адрес/пользователя в Gateway | 1200 в минуту, burst 256; отдельно от обычного API |
 | Сигналов на устройство | 20 в секунду, не больше 200 за звонок |
 | SDP | ≤ 8 КиБ; кандидат ICE ≤ 512 байт, ≤ 32 на устройство |
 | Тело любой команды | ≤ 16 КиБ |
@@ -208,6 +218,16 @@ Erlang/OTP не обязан обгонять Go-эталон. Он обязан
 | Ресурсы | Пиковый RSS ≤ 256 МиБ при 200 звонках; очереди и повторы ограничены при отказах зависимостей |
 | Эксплуатация | Закреплённые OTP 28.5.0.8 и rebar3 3.27.3, Dialyzer без предупреждений, EUnit/Common Test в `xmake ci`, проверка уязвимостей зависимостей, JSON-логи в формате проекта, метрики Prometheus, отдельный образ, runbook и второй сопровождающий |
 
+**Проверено 2026-11-24 на отдельном локальном окружении.** 200 звонков,
+1600 команд, 0 ошибок, 146.05 команд/с, p95 101.87 мс, p99 148.74 мс,
+baseline RSS 57.57 МиБ, peak 76.62 МиБ, growth 19.04 МиБ. Падение процесса и
+`kill -9` VM с recovery прошли. Полный production-like mTLS lifecycle,
+TURN allocation, JSON logs, Calls metrics и 11-target monitoring acceptance
+прошли. SIGTERM drain отклонил новый create с 503, сохранил accepted state и
+восстановил его после restart в пределах 15-секундного budget. Это
+доказательства локальных gates, не production deployment; живой
+двухбраузерный audio и Android остаются отдельной приёмкой #161–163.
+
 E2 измеряет: p95/p99 установки звонка, пропускную способность команд, ошибки,
 CPU и память на 200 звонках; падение одного процесса звонка при продолжающихся
 соседних; `kill -9` всего сервиса и восстановление из БД. Для сравнения с
@@ -217,11 +237,11 @@ PostgreSQL, Auth и Chat, потому что на 200 звонках основ
 
 ## Последствия
 
-Отдельные PR после E2: поле `session_id` в `ValidateTokenResponse` и его передача
-из Gateway; сервис Calls на Erlang/OTP со своей БД, ролями, сетью, сертификатом
-mTLS и строками в списке RPC (Gateway → Calls; Calls → `Auth.ValidateToken`,
-`Chat.GetRoom`); coturn с UDP-портами на VPS, секрет TURN и его ротация; события
-WebSocket и REST в OpenAPI.
+Реализованы поле `session_id`, Calls со своей БД/ролями/сетью/mTLS и RPC ACL
+(Gateway → Calls; Calls → Auth/Chat), coturn и его backup/rotation lifecycle,
+WebSocket events и REST API. Production enable выполняется отдельно после
+browser/media acceptance и проверки конфигурации на VPS; merged code не
+считается включённым сервисом.
 
 ## Приёмочные тесты (этап E3)
 

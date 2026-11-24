@@ -17,6 +17,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	authv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/auth/v1"
+	callsv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/calls/v1"
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	mediav1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/media/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/gateway/handler"
@@ -109,6 +110,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to init refresh rate limiter: %w", err)
 	}
+	callsLimiter, err := ratelimit.NewRedisLimiter(redisClient, cfg.CallsRateLimitPerMinute, cfg.CallsRateLimitBurst)
+	if err != nil {
+		return fmt.Errorf("failed to init calls rate limiter: %w", err)
+	}
+	callsCreateLimiter, err := ratelimit.NewRedisLimiter(redisClient, cfg.CallsCreateRateLimitPerMinute, cfg.CallsCreateRateLimitBurst)
+	if err != nil {
+		return fmt.Errorf("failed to init calls create rate limiter: %w", err)
+	}
 
 	// Every instance subscribes to the event channels of its own WebSocket
 	// users on the same Redis; nothing is shared between instances.
@@ -154,6 +163,16 @@ func run() error {
 		mediaHandler = handler.NewMediaHandler(mediav1.NewMediaServiceClient(conn), logger)
 		checks["media"] = checkGRPCHealth(healthpb.NewHealthClient(conn), "media")
 	}
+	var callsHandler *handler.CallsHandler
+	if cfg.CallsGRPCAddr != "" {
+		conn, err := rpcTLS.Dial(cfg.CallsGRPCAddr, "calls")
+		if err != nil {
+			return fmt.Errorf("create calls client: %w", err)
+		}
+		defer conn.Close()
+		callsHandler = handler.NewCallsHandler(callsv1.NewCallsServiceClient(conn), logger)
+		checks["calls"] = checkGRPCHealth(healthpb.NewHealthClient(conn), "calls")
+	}
 	health := handler.NewHealth(checks, logger)
 
 	websockets := handler.NewRealtime(hub, authClient, handler.RealtimeOptions{
@@ -177,6 +196,9 @@ func run() error {
 			Chat:                      handler.NewChatHandler(chatClient, logger),
 			Health:                    health,
 			Media:                     mediaHandler,
+			Calls:                     callsHandler,
+			CallsLimiter:              callsLimiter,
+			CallsCreateLimiter:        callsCreateLimiter,
 			TokenValidator:            authClient,
 			Limiter:                   limiter,
 			AuthLimiter:               credentialLimiter,

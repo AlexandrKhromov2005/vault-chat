@@ -19,6 +19,7 @@ import (
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/events"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus/pushbustest"
 )
@@ -111,6 +112,42 @@ func TestPushDispatch_FromChatMessageToActiveDevices(t *testing.T) {
 	unmarked, err := sessions.UnmarkedPushRecipients(ctx, pushbus.SignalID(message.ID, 0), []string{recipient.ID, loggedOut.ID})
 	require.NoError(t, err)
 	require.Empty(t, unmarked, "every recipient is marked before the signal is acknowledged")
+}
+
+func TestCallsPushHintUsesRedisWithoutPersistentMarks(t *testing.T) {
+	pool, sessions, _ := newSessionFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recipient := newTestUser()
+	require.NoError(t, repository.NewUserRepository(pool).Create(ctx, recipient))
+	login := newLogin(t, sessions, recipient.ID)
+	require.NoError(t, sessions.RegisterPushToken(ctx, recipient.ID, login.ID, "fcm", "android-phone"))
+
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	provider := &recordingProvider{invalid: map[string]bool{}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dispatcher := push.NewDispatcher(provider, sessions, sessions, logger, push.Config{Window: time.Second})
+	go dispatcher.Run(ctx)
+	done := make(chan error, 1)
+	go func() { done <- push.Subscribe(ctx, client, dispatcher, logger) }()
+	require.Eventually(t, func() bool {
+		channels, err := client.PubSubChannels(ctx, eventbus.PushSignalChannel).Result()
+		return err == nil && len(channels) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	room := uuid.NewString()
+	payloads, err := eventbus.EncodePushSignals(room, []string{recipient.ID})
+	require.NoError(t, err)
+	require.NoError(t, client.Publish(ctx, eventbus.PushSignalChannel, payloads[0]).Err())
+	require.Eventually(t, func() bool { return len(provider.messages()) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, room, provider.messages()[0].RoomID)
+	var marks int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM push_signal_marks").Scan(&marks))
+	require.Zero(t, marks, "a best-effort Calls hint has no JetStream recipient marks")
+	cancel()
+	require.NoError(t, <-done)
 }
 
 func withoutTTL(messages []push.Message) []push.Message {

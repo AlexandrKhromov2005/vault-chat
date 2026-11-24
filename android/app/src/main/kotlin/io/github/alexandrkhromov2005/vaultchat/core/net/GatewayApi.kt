@@ -138,6 +138,42 @@ interface GatewayApi {
     @Streaming
     @GET("api/v1/files/{file_id}/content")
     suspend fun fileContent(@Header("Authorization") authorization: String, @Path("file_id") fileId: String): Response<ResponseBody>
+
+    @POST("api/v1/calls")
+    suspend fun createCall(@Header("Authorization") authorization: String, @Body body: CreateCallRequest): Response<CallDto>
+
+    @GET("api/v1/calls")
+    suspend fun activeCalls(@Header("Authorization") authorization: String): Response<CallPage>
+
+    @GET("api/v1/calls/{call_id}")
+    suspend fun call(@Header("Authorization") authorization: String, @Path("call_id") callId: String): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/accept")
+    suspend fun acceptCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/reject")
+    suspend fun rejectCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/cancel")
+    suspend fun cancelCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/connected")
+    suspend fun connectedCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/end")
+    suspend fun endCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/heartbeat")
+    suspend fun heartbeatCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallCommand): Response<CallDto>
+
+    @POST("api/v1/calls/{call_id}/signal")
+    suspend fun signalCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: CallSignalRequest): Response<CallSignalResult>
+
+    @GET("api/v1/calls/{call_id}/signals")
+    suspend fun callSignals(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Query("after") after: Long): Response<CallSignalPage>
+
+    @POST("api/v1/calls/{call_id}/turn")
+    suspend fun turnCall(@Header("Authorization") authorization: String, @Path("call_id") callId: String, @Body body: EmptyCallBody): Response<TurnResponse>
 }
 
 /**

@@ -1,6 +1,6 @@
 # Наблюдаемость одного VPS
 
-Prometheus собирает метрики Auth, Chat, Media и Gateway, Grafana показывает
+Prometheus собирает метрики Auth, Chat, Media, Gateway и Calls, Grafana показывает
 дашборд, Alertmanager маршрутизирует алерты. Node exporter читает метрики
 хоста, blackbox exporter проверяет HTTPS/readiness, S3 и TCP БД/Redis.
 Это диагностика одного VPS: полную потерю VPS или самого Prometheus должен
@@ -55,7 +55,8 @@ Alertmanager — localhost:19093 через тот же туннель.
 ## Метрики приложения
 
 `AUTH_METRICS_ADDR`, `CHAT_METRICS_ADDR`, `MEDIA_METRICS_ADDR`,
-`GATEWAY_METRICS_ADDR` включают отдельные HTTP listeners. Без переменной
+`GATEWAY_METRICS_ADDR` и `CALLS_METRICS_ADDR` включают отдельные HTTP listeners
+(Calls использует порт 50056). Для Go-сервисов без переменной
 listener не запускается. Compose overlay привязывает каждый listener к
 фиксированному адресу собственной `internal`-сети; адреса и подсети хранятся
 в `.env.monitoring`, а пересечения с существующими Docker networks отклоняются
@@ -73,6 +74,11 @@ Counters `vault_events_dropped_total`, `vault_events_publish_failures_total`,
 Redis pipeline и невалидное событие. Redis failure может означать частичную
 доставку: успешный Publish не гарантирует получение каждым клиентом.
 Гарантии Pub/Sub и восстановление через catch-up не меняются.
+
+Calls экспортирует active/capacity, drain, собственную Redis queue, RPC duration
+и результаты/latency Auth/Chat dependencies. Алерты проверяют заполнение
+admission и очереди, p99 >500 мс и сбои зависимостей. Подробности и drain —
+в [runbook Calls](calls/operations.md).
 
 ## Алерты и уведомления
 

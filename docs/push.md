@@ -118,34 +118,39 @@ to the documented statuses, and the routes being authenticated.
    parts). No text, names, sender or message id: its `Nats-Msg-Id` is an
    opaque SHA-256 of the message id and part number, so a publication
    repeated within two minutes is stored once.
-2. Auth pulls from its durable consumer `auth-push` only, so it never
+2. Calls separately publishes a best-effort signal on Redis `push:signal:v1`
+   for the callee of a new `ringing` call: the same room id and no call id,
+   SDP, candidates or other signaling content. Auth subscribes to that channel
+   only for these Calls hints; a missed hint is recovered by authoritative
+   active-call reconciliation and does not enter the durable Chat stream.
+3. Auth pulls Chat signals from its durable consumer `auth-push`, so it never
    receives message content. Every signal is validated (canonical UUIDs, at
    most 500 recipients, at most 24 KiB, an id of the hash form); anything
    else is terminated (`TERM`) and counted.
-3. Auth looks up which recipients already have a mark for this signal (see
+4. Auth looks up which recipients already have a mark for this signal (see
    below) and hands the others to the dispatcher. It fetches a signal only
    when the dispatcher has room for 500 new user/room pairs and fewer than 20
    signals are in work.
-4. The dispatcher collapses signals per user and room: the first one is sent
+5. The dispatcher collapses signals per user and room: the first one is sent
    at once, signals within the next 10 seconds are merged into one push at
    the end of that window, and quiet pairs are forgotten. While a signal
    waits, Auth extends its acknowledgement deadline (`InProgress`) every 10
    seconds.
-5. For each user it loads the tokens of active logins (same rule as access
+6. For each user it loads the tokens of active logins (same rule as access
    tokens) and sends `{"type":"sync","room_id":"…"}` as an FCM data-only
    message with high priority, collapse key `room:<id>` and a TTL of what is
    left of the newest merged signal's hour in the stream. The loaded list is
    only a set of candidates: right before each provider request the
    dispatcher checks again that the token belongs to an active login of that
    user, and skips it otherwise.
-6. When the user's push was sent or got a final answer, Auth writes a mark
+7. When the user's push was sent or got a final answer, Auth writes a mark
    `(signal id, user id)` for every signal merged into it, valid for two
    hours. A signal is acknowledged when all its recipients are marked. If
    any recipient failed temporarily, the signal is returned with a delay by
    its delivery number (5 s, 30 s, 2 min, 10 min) and the redelivery sends
    only to recipients without a mark; after the fifth failed delivery it is
    terminated and counted.
-7. Only FCM's verdict `UNREGISTERED` deletes the token that was sent. A bare
+8. Only FCM's verdict `UNREGISTERED` deletes the token that was sent. A bare
    `404` (a proxy or a wrong endpoint) and `SENDER_ID_MISMATCH` (credentials
    of another Firebase project) are configuration errors and keep the token.
    Network errors, access-token failures, `401`, `429` and `5xx` are
@@ -306,7 +311,8 @@ certificates; numbers in parentheses refer to ADR 0003.
    is woken, every recipient is marked.
 9. With PostgreSQL and one worker: a logout, a revoke-all or a move of the
    token to another user, committed while an earlier device of the user is
-   being sent to, stops the send to the affected device.
+   being sent to, stops the send to the affected device; a device that
+   cannot be checked gets nothing.
 10. Marks: order, repeated and concurrent writes, expiry and batched
     deletion against PostgreSQL; the database refuses ids of another form.
 11. Container: `tests/compose/push_broker_acceptance.py` starts the broker of
@@ -314,6 +320,10 @@ certificates; numbers in parentheses refer to ADR 0003.
     checks its user, read-only root, capabilities, memory, mounts and
     internal network, stores a signal as Chat, refuses Gateway, Media and
     Preview, restarts the container and receives the signal as Auth.
+12. Calls `ringing` publishes only room id and callee over the best-effort Redis
+    hint path; Android SyncWorker fetches authoritative active calls, so a
+    delayed push neither reveals nor revives an ended call. No SDP, candidates
+    or call id are sent to FCM.
 
 ### Operator configuration
 

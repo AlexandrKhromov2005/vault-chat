@@ -112,6 +112,7 @@ def main():
                 'auth': ('AUTH_METRICS_IPV4_ADDRESS', 'metrics-auth', 9100),
                 'chat': ('CHAT_METRICS_IPV4_ADDRESS', 'metrics-chat', 9100),
                 'media': ('MEDIA_METRICS_IPV4_ADDRESS', 'metrics-media', 9100),
+                'calls': ('CALLS_METRICS_IPV4_ADDRESS', 'metrics-calls', 50056),
             }
             for name, (key, network, port) in metrics.items():
                 container(name, PYTHON_IMAGE, ['python', '/fixture/server.py', config[key], str(port)],
@@ -144,7 +145,7 @@ def main():
             prometheus = json.loads(prometheus_path.read_text())
             prometheus['global'] = {'scrape_interval': '3s', 'scrape_timeout': '2s', 'evaluation_interval': '3s'}
             prometheus['scrape_configs'] = [job for job in prometheus['scrape_configs']
-                if job['job_name'] in {'auth', 'chat', 'media', 'gateway', 'gateway-ready', 'storage-ready', 'data-tcp'}]
+                if job['job_name'] in {'auth', 'chat', 'media', 'gateway', 'calls', 'gateway-ready', 'storage-ready', 'data-tcp'}]
             prometheus.pop('alerting')
             prometheus_path.write_text(json.dumps(prometheus))
             alerts_path = root / 'deployments/monitoring/runtime/alerts.yml'
@@ -177,7 +178,7 @@ def main():
 
             def targets_up():
                 targets = json_url(base + '/api/v1/targets?state=active')['data']['activeTargets']
-                return len(targets) == 10 and all(target['health'] == 'up' for target in targets)
+                return len(targets) == 11 and all(target['health'] == 'up' for target in targets)
 
             wait_for('all application and probe targets up', targets_up, 90)
 

@@ -1,0 +1,173 @@
+syntax = "proto3";
+
+package calls.v1;
+
+option go_package = "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/calls/v1;callsv1";
+
+// CallsService is the internal control plane exposed to Gateway only.
+// Every request carries the user's access token so Calls can validate the
+// identity and session family directly with Auth instead of trusting Gateway.
+service CallsService {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Accept(AcceptRequest) returns (AcceptResponse);
+  rpc Reject(RejectRequest) returns (RejectResponse);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc Connected(ConnectedRequest) returns (ConnectedResponse);
+  rpc Hangup(HangupRequest) returns (HangupResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc Signal(SignalRequest) returns (SignalResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc ListActive(ListActiveRequest) returns (ListActiveResponse);
+  rpc Signals(SignalsRequest) returns (SignalsResponse);
+  rpc Turn(TurnRequest) returns (TurnResponse);
+}
+
+// Identity is populated by Gateway and checked again by Calls through Auth.
+message Identity {
+  string access_token = 1;
+  string user_id = 2;
+  string session_id = 3;
+}
+
+message CreateRequest {
+  Identity identity = 1;
+  string room_id = 2;
+  string command_id = 3;
+}
+
+message AcceptRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message RejectRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message CancelRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message ConnectedRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message HangupRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message HeartbeatRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string command_id = 3;
+}
+
+message SignalRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  string kind = 3;
+  string payload = 4;
+  int64 sender_seq = 5;
+}
+
+message GetRequest {
+  Identity identity = 1;
+  string call_id = 2;
+}
+
+message ListActiveRequest {
+  Identity identity = 1;
+}
+
+message SignalsRequest {
+  Identity identity = 1;
+  string call_id = 2;
+  int64 after = 3;
+}
+
+message TurnRequest {
+  Identity identity = 1;
+  string call_id = 2;
+}
+
+message Call {
+  string call_id = 1;
+  string room_id = 2;
+  string state = 3;
+  int64 state_version = 4;
+  string caller_id = 5;
+  string callee_id = 6;
+}
+
+message CreateResponse {
+  Call call = 1;
+}
+
+message AcceptResponse {
+  Call call = 1;
+}
+
+message RejectResponse {
+  Call call = 1;
+}
+
+message CancelResponse {
+  Call call = 1;
+}
+
+message ConnectedResponse {
+  Call call = 1;
+}
+
+message HangupResponse {
+  Call call = 1;
+}
+
+message HeartbeatResponse {
+  Call call = 1;
+}
+
+message GetResponse {
+  Call call = 1;
+}
+
+message SignalResponse {
+  string state = 1;
+  int64 signal_seq = 2;
+}
+
+message ListActiveResponse {
+  repeated Call calls = 1;
+}
+
+message Signal {
+  int64 signal_seq = 1;
+  string sender_device = 2;
+  int64 sender_seq = 3;
+  string kind = 4;
+  string payload = 5;
+}
+
+message SignalsResponse {
+  repeated Signal signals = 1;
+}
+
+message IceServer {
+  repeated string urls = 1;
+  string username = 2;
+  string credential = 3;
+}
+
+message TurnResponse {
+  repeated IceServer ice_servers = 1;
+  int64 ttl = 2;
+}

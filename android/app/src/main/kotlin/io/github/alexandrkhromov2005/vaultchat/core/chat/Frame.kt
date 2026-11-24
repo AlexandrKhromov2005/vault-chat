@@ -21,6 +21,9 @@ sealed interface Frame {
     /** `member.removed` and `member.left`: the user is no longer a member. */
     data class MemberGone(val roomId: String, val userId: String) : Frame
 
+    /** A call change or signal; the client reconciles it through REST. */
+    data class CallEvent(val type: String, val callId: String) : Frame
+
     companion object {
         /**
          * Parses a text frame. Unknown types, frames without the fields their
@@ -37,6 +40,10 @@ sealed interface Frame {
             }
             val type = frame.string("type") ?: return null
             if (type == "ready") return frame.string("user_id")?.let { Ready(it, frame.string("expires_at")) }
+            if (type.startsWith("call.")) {
+                val callId = frame.string("call_id")?.takeIf { it.matches(Regex("[0-9A-F]{64}")) } ?: return null
+                return CallEvent(type, callId)
+            }
             val roomId = frame.string("room_id")?.takeIf(::isUuid) ?: return null
             return when (type) {
                 "message.created" -> frame["message"]?.let { message ->

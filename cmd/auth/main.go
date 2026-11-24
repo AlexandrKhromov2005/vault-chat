@@ -121,7 +121,7 @@ func run() error {
 	}
 	stopMail := startMailWorker(ctx, mailWorker)
 	defer stopMail()
-	stopPush, err := startPush(ctx, cfg, sessions, rpcTLS, metrics, logger)
+	stopPush, err := startPush(ctx, cfg, sessions, redisClient, rpcTLS, metrics, logger)
 	if err != nil {
 		return fmt.Errorf("configure push notifications: %w", err)
 	}

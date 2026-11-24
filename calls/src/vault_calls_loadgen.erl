@@ -1,7 +1,7 @@
 -module(vault_calls_loadgen).
 -moduledoc "Measured 200-call acceptance and restart drill for the HTTP prototype.".
 
--export([setup/1, verify/1, percentile/2]).
+-export([setup/1, verify/1, percentile/2, gate_status/4, gates/1]).
 
 -spec setup(file:name_all()) -> no_return().
 setup(Directory) ->
@@ -190,7 +190,7 @@ metrics(Count, Latencies, Errors, Elapsed, SchedulerStarted, SchedulerEnded, Bas
       <<"scheduler_utilization">> => utilization(SchedulerStarted, SchedulerEnded),
       <<"baseline_rss_bytes">> => BaselineRss, <<"rss_bytes">> => PeakRss, <<"rss_delta_bytes">> => Delta,
       <<"step_p95">> => step_p95(Results),
-      <<"gate_status">> => gate_status(Latencies, Errors, BaselineRss, Delta)}.
+      <<"gate_status">> => gate_status(Latencies, Errors, BaselineRss, PeakRss)}.
 
 -spec utilization(term(), term()) -> float().
 utilization(undefined, _SchedulerEnded) -> 0.0;
@@ -233,16 +233,17 @@ rss_bytes() ->
 
 -spec gates(map()) -> boolean().
 gates(#{<<"gate_status">> := Status}) ->
-    Status =/= <<"latency_failed">> andalso Status =/= <<"rss_growth_exceeded">>.
+    Status =:= <<"pass">>.
 
 -spec gate_status([non_neg_integer()], non_neg_integer(), non_neg_integer(), non_neg_integer()) -> atom().
-gate_status(Latencies, Errors, BaselineRss, Delta) ->
+gate_status(Latencies, Errors, BaselineRss, PeakRss) ->
     P95 = percentile(Latencies, 95),
     P99 = percentile(Latencies, 99),
+    Delta = max(0, PeakRss - BaselineRss),
     if
         Errors > 0; P95 > 200000; P99 > 500000 -> latency_failed;
         Delta > 268435456 -> rss_growth_exceeded;
-        BaselineRss > 268435456 -> baseline_rss_exceeded;
+        PeakRss > 268435456 -> absolute_rss_exceeded;
         true -> pass
     end.
 

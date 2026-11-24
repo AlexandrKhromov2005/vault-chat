@@ -152,6 +152,20 @@ func (h *GRPCHandler) GetRoom(ctx context.Context, req *chatv1.GetRoomRequest) (
 	return &chatv1.GetRoomResponse{Room: roomProto(room)}, nil
 }
 
+// CheckMembership uses the mTLS Calls identity and the same membership check
+// as GetRoom; it is intended for the periodic active-call monitor.
+func (h *GRPCHandler) CheckMembership(ctx context.Context, req *chatv1.CheckMembershipRequest) (*chatv1.CheckMembershipResponse, error) {
+	actor, err := validator.CanonicalID(req.GetUserId())
+	if err != nil {
+		return nil, h.roomStatus(ctx, err)
+	}
+	room, err := h.rooms.GetRoom(ctx, actor, req.GetRoomId())
+	if err != nil {
+		return nil, h.roomStatus(ctx, err)
+	}
+	return &chatv1.CheckMembershipResponse{Room: roomProto(room)}, nil
+}
+
 // AddMember resolves the target before the atomic owner-authorized write.
 func (h *GRPCHandler) AddMember(ctx context.Context, req *chatv1.AddMemberRequest) (*chatv1.AddMemberResponse, error) {
 	actor, token, err := h.identity(ctx)

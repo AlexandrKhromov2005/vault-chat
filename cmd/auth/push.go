@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/push"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
@@ -22,10 +23,10 @@ import (
 // startPush runs the push dispatcher and the consumer of the signal stream
 // when FCM credentials are configured (docs/push.md). The broker is not a
 // startup dependency: the connection and the declaration of the stream
-// keep retrying. The returned function stops both, gives the signals in
-// work back to the stream and waits for sends in progress, at most 15
-// seconds.
-func startPush(ctx context.Context, cfg *config.Config, sessions *repository.SessionRepository, rpcTLS *rpctls.Config,
+// keep retrying. The returned function stops the dispatcher, JetStream consumer
+// and Redis Calls subscription, gives back signals in work and waits for sends
+// in progress, at most 15 seconds.
+func startPush(ctx context.Context, cfg *config.Config, sessions *repository.SessionRepository, redisClient *redis.Client, rpcTLS *rpctls.Config,
 	metrics *telemetry.Metrics, logger *slog.Logger) (func(), error) {
 	if cfg.PushFCMCredentialsFile == "" {
 		logger.Info("push notifications disabled")
@@ -60,6 +61,18 @@ func startPush(ctx context.Context, cfg *config.Config, sessions *repository.Ses
 	var running sync.WaitGroup
 	running.Go(func() { dispatcher.Run(runCtx) })
 	running.Go(func() { consumer.Run(runCtx) })
+	running.Go(func() {
+		// Calls hints remain best effort; Redis reconnects are retried forever.
+		for runCtx.Err() == nil {
+			if err := push.Subscribe(runCtx, redisClient, dispatcher, logger); err != nil && runCtx.Err() == nil {
+				logger.Warn("Calls push subscription failed", "error", err)
+			}
+			select {
+			case <-runCtx.Done():
+			case <-time.After(time.Second):
+			}
+		}
+	})
 	running.Go(func() { push.CleanMarks(runCtx, sessions, time.Minute, logger) })
 	logger.Info("push notifications enabled", "provider", "fcm")
 	return func() {

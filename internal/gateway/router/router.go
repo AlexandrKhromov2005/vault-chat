@@ -16,12 +16,15 @@ import (
 
 // Deps are the collaborators and settings the routes are built from.
 type Deps struct {
-	Auth           *handler.AuthHandler
-	Chat           *handler.ChatHandler
-	Media          *handler.MediaHandler
-	Health         *handler.Health
-	TokenValidator middleware.TokenValidator
-	Limiter        middleware.Limiter
+	Auth               *handler.AuthHandler
+	Chat               *handler.ChatHandler
+	Media              *handler.MediaHandler
+	Calls              *handler.CallsHandler
+	CallsLimiter       middleware.Limiter
+	CallsCreateLimiter middleware.Limiter
+	Health             *handler.Health
+	TokenValidator     middleware.TokenValidator
+	Limiter            middleware.Limiter
 	// AuthLimiter enforces the shared credential quota per client IP and
 	// subject, AuthIPLimiter the one per client IP; both fail closed.
 	// RefreshLimiter is the shared refresh quota per client IP and fails
@@ -153,6 +156,39 @@ func New(d Deps) http.Handler {
 	if d.Media != nil {
 		api.Handle("GET /api/v1/files/{file_id}", protected(d.Media.File))
 	}
+	var callsAPI http.Handler
+	if d.Calls != nil {
+		callsQuota := d.CallsLimiter
+		if callsQuota == nil {
+			callsQuota = d.Limiter
+		}
+		callsAuthenticated := []func(http.Handler) http.Handler{
+			middleware.Authenticate(d.TokenValidator),
+			middleware.RefundAuthenticated(d.Logger, ipCharge),
+			middleware.RateLimit(callsQuota, middleware.ByUserID, d.Logger),
+		}
+		call := func(h http.HandlerFunc) http.Handler {
+			return middleware.Chain(middleware.Chain(h, callsAuthenticated...), middleware.BodyLimit(16<<10))
+		}
+		create := call(d.Calls.Create)
+		if d.CallsCreateLimiter != nil {
+			create = middleware.Chain(create, middleware.RateLimit(d.CallsCreateLimiter, middleware.ByUserID, d.Logger))
+		}
+		mux := http.NewServeMux()
+		mux.Handle("POST /api/v1/calls", create)
+		mux.Handle("GET /api/v1/calls", call(d.Calls.Active))
+		mux.Handle("GET /api/v1/calls/{call_id}", call(d.Calls.Get))
+		mux.Handle("GET /api/v1/calls/{call_id}/signals", call(d.Calls.Signals))
+		mux.Handle("POST /api/v1/calls/{call_id}/accept", call(d.Calls.Accept))
+		mux.Handle("POST /api/v1/calls/{call_id}/reject", call(d.Calls.Reject))
+		mux.Handle("POST /api/v1/calls/{call_id}/cancel", call(d.Calls.Cancel))
+		mux.Handle("POST /api/v1/calls/{call_id}/connected", call(d.Calls.Connected))
+		mux.Handle("POST /api/v1/calls/{call_id}/end", call(d.Calls.End))
+		mux.Handle("POST /api/v1/calls/{call_id}/signal", call(d.Calls.Signal))
+		mux.Handle("POST /api/v1/calls/{call_id}/heartbeat", call(d.Calls.Heartbeat))
+		mux.Handle("POST /api/v1/calls/{call_id}/turn", call(d.Calls.Turn))
+		callsAPI = mux
+	}
 	api.HandleFunc("/", notFound)
 
 	root := http.NewServeMux()
@@ -180,6 +216,20 @@ func New(d Deps) http.Handler {
 		root.Handle("GET /api/v1/files/{file_id}/preview", middleware.Chain(protected(d.Media.Preview),
 			middleware.FileTransfer(transfer.MaxDuration, transfer.IdleTimeout), middleware.CORS(d.CORSAllowedOrigins),
 			middleware.RateLimit(d.Limiter, middleware.ByClientIP, d.Logger, clientIP)))
+	}
+	if callsAPI != nil {
+		callsQuota := d.CallsLimiter
+		if callsQuota == nil {
+			callsQuota = d.Limiter
+		}
+		handler := middleware.Chain(callsAPI,
+			middleware.Timeout(d.RequestTimeout),
+			middleware.CORS(d.CORSAllowedOrigins),
+			middleware.RateLimit(callsQuota, middleware.ByClientIP, d.Logger, clientIP),
+			middleware.BodyLimit(d.MaxBodyBytes),
+		)
+		root.Handle("/api/v1/calls", handler)
+		root.Handle("/api/v1/calls/", handler)
 	}
 	root.Handle("/api/", middleware.Chain(api,
 		middleware.Timeout(d.RequestTimeout),

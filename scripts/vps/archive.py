@@ -19,15 +19,18 @@ def verify(root):
     version = (root / 'COMPLETE').read_text().strip()
     if version not in ('1', '2'):
         raise ValueError('Unsupported or incomplete backup')
-    expected_files = FILES if version == '1' else {name + '.age' if name != 'images.txt' else name for name in FILES}
+    all_files = FILES | {'calls.dump'}
+    required_files = FILES
+    expected_files = all_files if version == '1' else {name + '.age' if name != 'images.txt' else name for name in all_files}
+    required_files = required_files if version == '1' else {name + '.age' if name != 'images.txt' else name for name in required_files}
     entries = {}
     for line in (root / 'SHA256SUMS').read_text().splitlines():
         match = re.fullmatch(r'([0-9a-f]{64})  ([a-z.-]+)', line)
         if not match or match[2] not in expected_files or match[2] in entries:
             raise ValueError('Invalid checksum manifest')
         entries[match[2]] = match[1]
-    if set(entries) != expected_files:
-        raise ValueError('Missing backup files')
+    if not required_files.issubset(entries) or not set(entries).issubset(expected_files):
+        raise ValueError('Missing or unexpected backup files')
     for name, expected in entries.items():
         if (root / name).is_symlink():
             raise ValueError('Backup files must not be symbolic links')

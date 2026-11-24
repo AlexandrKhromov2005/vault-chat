@@ -22,6 +22,7 @@ const (
 	ChatService_GetOrCreateDirect_FullMethodName = "/chat.v1.ChatService/GetOrCreateDirect"
 	ChatService_CreateChannel_FullMethodName     = "/chat.v1.ChatService/CreateChannel"
 	ChatService_GetRoom_FullMethodName           = "/chat.v1.ChatService/GetRoom"
+	ChatService_CheckMembership_FullMethodName   = "/chat.v1.ChatService/CheckMembership"
 	ChatService_ListRooms_FullMethodName         = "/chat.v1.ChatService/ListRooms"
 	ChatService_AddMember_FullMethodName         = "/chat.v1.ChatService/AddMember"
 	ChatService_ListMembers_FullMethodName       = "/chat.v1.ChatService/ListMembers"
@@ -46,6 +47,9 @@ type ChatServiceClient interface {
 	CreateChannel(ctx context.Context, in *CreateChannelRequest, opts ...grpc.CallOption) (*CreateChannelResponse, error)
 	// GetRoom returns NOT_FOUND for both absent rooms and nonmembers.
 	GetRoom(ctx context.Context, in *GetRoomRequest, opts ...grpc.CallOption) (*GetRoomResponse, error)
+	// CheckMembership authorizes Calls' periodic monitor by mTLS service
+	// identity, without relying on an unexpired user access token.
+	CheckMembership(ctx context.Context, in *CheckMembershipRequest, opts ...grpc.CallOption) (*CheckMembershipResponse, error)
 	// ListRooms returns the caller's rooms, most recently active first. Activity is
 	// the later of the latest message and the caller's enrollment in the room.
 	ListRooms(ctx context.Context, in *ListRoomsRequest, opts ...grpc.CallOption) (*ListRoomsResponse, error)
@@ -102,6 +106,16 @@ func (c *chatServiceClient) GetRoom(ctx context.Context, in *GetRoomRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRoomResponse)
 	err := c.cc.Invoke(ctx, ChatService_GetRoom_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) CheckMembership(ctx context.Context, in *CheckMembershipRequest, opts ...grpc.CallOption) (*CheckMembershipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckMembershipResponse)
+	err := c.cc.Invoke(ctx, ChatService_CheckMembership_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +207,9 @@ type ChatServiceServer interface {
 	CreateChannel(context.Context, *CreateChannelRequest) (*CreateChannelResponse, error)
 	// GetRoom returns NOT_FOUND for both absent rooms and nonmembers.
 	GetRoom(context.Context, *GetRoomRequest) (*GetRoomResponse, error)
+	// CheckMembership authorizes Calls' periodic monitor by mTLS service
+	// identity, without relying on an unexpired user access token.
+	CheckMembership(context.Context, *CheckMembershipRequest) (*CheckMembershipResponse, error)
 	// ListRooms returns the caller's rooms, most recently active first. Activity is
 	// the later of the latest message and the caller's enrollment in the room.
 	ListRooms(context.Context, *ListRoomsRequest) (*ListRoomsResponse, error)
@@ -233,6 +250,9 @@ func (UnimplementedChatServiceServer) CreateChannel(context.Context, *CreateChan
 }
 func (UnimplementedChatServiceServer) GetRoom(context.Context, *GetRoomRequest) (*GetRoomResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRoom not implemented")
+}
+func (UnimplementedChatServiceServer) CheckMembership(context.Context, *CheckMembershipRequest) (*CheckMembershipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckMembership not implemented")
 }
 func (UnimplementedChatServiceServer) ListRooms(context.Context, *ListRoomsRequest) (*ListRoomsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRooms not implemented")
@@ -326,6 +346,24 @@ func _ChatService_GetRoom_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatServiceServer).GetRoom(ctx, req.(*GetRoomRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_CheckMembership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckMembershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).CheckMembership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_CheckMembership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).CheckMembership(ctx, req.(*CheckMembershipRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -474,6 +512,10 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRoom",
 			Handler:    _ChatService_GetRoom_Handler,
+		},
+		{
+			MethodName: "CheckMembership",
+			Handler:    _ChatService_CheckMembership_Handler,
 		},
 		{
 			MethodName: "ListRooms",

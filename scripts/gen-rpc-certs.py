@@ -12,8 +12,9 @@ import subprocess
 import sys
 import tempfile
 
-# nats is the push signal broker: a server identity only, mapped to no RPC.
-SERVICES = ('auth', 'chat', 'media', 'gateway', 'preview', 'nats')
+# calls is the Erlang control plane; nats is the push signal broker. NATS is a
+# server identity only, mapped to no RPC.
+SERVICES = ('auth', 'chat', 'media', 'gateway', 'calls', 'preview', 'nats')
 
 
 def openssl(*args):

@@ -218,6 +218,23 @@ services:
     # (5s). The rest is headroom for closing connections.
     stop_grace_period: 15s
 
+  calls-postgres:
+    networks: [calls-data]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: calls
+      POSTGRES_PASSWORD: calls
+      POSTGRES_DB: calls_db
+    ports:
+      - "127.0.0.1:${CALLS_POSTGRES_HOST_PORT:-5434}:5432"
+    volumes:
+      - calls_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calls -d calls_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   media-postgres:
     networks: [media-data]
     image: postgres:16-alpine
@@ -272,6 +289,79 @@ services:
       start_period: 10s
     stop_grace_period: 10s
 
+  coturn:
+    network_mode: host
+    user: "65532:65532"
+    image: coturn/coturn:4.19.2-alpine3.24@sha256:974824bdefa8759b7aa4508daf5066fdd9f5411e925055b6132fb2904aecca01
+    entrypoint: ["/usr/local/bin/turn-entrypoint"]
+    environment:
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:-127.0.0.1}
+      TURN_ALLOW_PRIVATE: "true"
+    volumes:
+      - type: bind
+        source: ./turnserver-entrypoint.sh
+        target: /usr/local/bin/turn-entrypoint
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../secrets/turn_secret
+        target: /run/secrets/turn_secret
+        read_only: true
+        bind: {create_host_path: false}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3478"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  calls:
+    networks: [rpc, calls-data, events]
+    <<: *go-service
+    build:
+      context: ..
+      dockerfile: Dockerfile.calls
+    environment:
+      CALLS_PRODUCTION: "true"
+      CALLS_GRPC_ENABLED: "true"
+      CALLS_MONITOR_ENABLED: "true"
+      CALLS_GRPC_PORT: "50054"
+      CALLS_DATABASE_URL: postgres://calls_app:${CALLS_RUNTIME_DB_PASSWORD:-calls-runtime}@calls-postgres:5432/calls_db?sslmode=disable
+      CALLS_AUTH_GRPC_ADDR: auth:50051
+      CALLS_CHAT_GRPC_ADDR: chat:50052
+      CALLS_REDIS_ADDR: redis:6379
+      CALLS_TURN_SECRET_FILE: /run/secrets/turn_secret
+      CALLS_TURN_URIS: ${CALLS_TURN_URIS:-turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp}
+    volumes:
+      - type: bind
+        source: ../secrets/turn_secret
+        target: /run/secrets/turn_secret
+        read_only: true
+        bind: {create_host_path: false}
+    depends_on:
+      calls-migrate:
+        condition: service_completed_successfully
+      calls-postgres:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      coturn:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/calls-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 15s
+
   gateway:
     networks: [rpc, events, edge, profile-cache]
     <<: *go-service
@@ -285,6 +375,7 @@ services:
       GATEWAY_AUTH_GRPC_ADDR: passthrough:///auth:50051
       GATEWAY_MEDIA_GRPC_ADDR: passthrough:///media:50053
       GATEWAY_CHAT_GRPC_ADDR: passthrough:///chat:50052
+      GATEWAY_CALLS_GRPC_ADDR: passthrough:///calls:50054
       GATEWAY_REDIS_ADDR: redis:6379
       # Not a startup or readiness dependency: without it profiles come from Auth.
       GATEWAY_PROFILE_CACHE_ADDR: profile-cache:6379
@@ -311,6 +402,8 @@ services:
       auth:
         condition: service_healthy
       chat:
+        condition: service_healthy
+      calls:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -397,6 +490,23 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: media
+  calls-migrate:
+    restart: 'no'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [calls-data]
+    build:
+      context: ..
+      dockerfile: Dockerfile.calls
+    entrypoint: ["/usr/local/bin/calls-migrate"]
+    environment:
+      CALLS_DATABASE_URL: postgres://calls:calls@calls-postgres:5432/calls_db?sslmode=disable
+      CALLS_RUNTIME_DB_PASSWORD: ${CALLS_RUNTIME_DB_PASSWORD:-calls-runtime}
+    depends_on:
+      calls-postgres:
+        condition: service_healthy
+
   s3-init:
     restart: 'no'
     read_only: true
@@ -428,6 +538,7 @@ volumes:
   pgdata:
   chat_pgdata:
   media_pgdata:
+  calls_pgdata:
   redisdata:
   miniodata:
 
@@ -438,5 +549,6 @@ networks:
   auth-data: {}
   chat-data: {}
   media-data: {}
+  calls-data: {}
   edge: {}
   profile-cache: {internal: true}

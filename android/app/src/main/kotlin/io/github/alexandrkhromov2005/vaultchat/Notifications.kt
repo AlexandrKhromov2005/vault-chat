@@ -29,11 +29,13 @@ import kotlinx.coroutines.flow.getAndUpdate
 object Notifications {
     const val MESSAGES = "messages"
     const val SYNC = "sync"
+    const val CALLS = "calls"
     const val EXTRA_ROOM = "io.github.alexandrkhromov2005.vaultchat.ROOM"
     const val EXTRA_ACCOUNT = "io.github.alexandrkhromov2005.vaultchat.ACCOUNT"
 
     /** The id of the background sync's own notification, below Android 12 only. */
     const val SYNC_ID = 1
+    const val CALL_ID = 2
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -42,6 +44,9 @@ object Notifications {
         )
         manager.createNotificationChannel(
             NotificationChannel(SYNC, context.getString(R.string.channel_sync), NotificationManager.IMPORTANCE_MIN),
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CALLS, context.getString(R.string.channel_calls), NotificationManager.IMPORTANCE_HIGH),
         )
     }
 

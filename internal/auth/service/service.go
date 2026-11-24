@@ -262,6 +262,18 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*Access, err
 	return &Access{Claims: claims, LoginID: login}, nil
 }
 
+// ValidateSession reports whether a login remains active after access-token
+// expiry. It never issues credentials and is exposed only to Calls by RPC ACL.
+func (s *Service) ValidateSession(ctx context.Context, userID, sessionID string) (bool, error) {
+	user, userErr := uuid.Parse(userID)
+	session, sessionErr := uuid.Parse(sessionID)
+	if userErr != nil || sessionErr != nil || user == uuid.Nil || session == uuid.Nil {
+		return false, nil
+	}
+	family, err := s.sessions.ActiveFamily(ctx, userID, sessionID)
+	return family != "", err
+}
+
 // parseToken validates token and checks that it is of the wanted type. Every
 // failure is reported as ErrInvalidToken.
 func (s *Service) parseToken(ctx context.Context, token string, want jwt.TokenType) (*jwt.Claims, error) {

@@ -1,7 +1,10 @@
 -module(vault_calls_chat_stub).
 -moduledoc "Configurable direct-room adapter for the loopback prototype.".
 
--export([get_room/2]).
+-export([get_room/2, get_room/3, check_membership/2]).
+
+-spec get_room(binary(), binary(), binary()) -> {ok, binary()} | {error, not_found | unavailable}.
+get_room(RoomId, User, _Token) -> get_room(RoomId, User).
 
 -spec get_room(binary(), binary()) -> {ok, binary()} | {error, not_found | unavailable}.
 get_room(RoomId, User) ->
@@ -18,6 +21,17 @@ member(RoomId, User) ->
         [User, Other] -> {ok, Other};
         [Other, User] -> {ok, Other};
         _ -> {error, not_found}
+    end.
+
+-spec check_membership(binary(), binary()) -> ok | {error, removed | unavailable}.
+check_membership(RoomId, User) ->
+    case application:get_env(vault_calls, chat_available, true) of
+        false -> {error, unavailable};
+        true ->
+            case member(RoomId, User) of
+                {ok, _} -> ok;
+                {error, _} -> {error, removed}
+            end
     end.
 
 -spec delay(atom()) -> ok.

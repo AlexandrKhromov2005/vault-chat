@@ -1,7 +1,9 @@
 # Calls
 
 The call control plane of [ADR 0005](../docs/adr/0005-call-control.md) in
-Erlang/OTP. This is stage E2: a prototype to measure, not a deployed service.
+Erlang/OTP. The production gRPC API, persistence, events, TURN and monitoring
+are implemented; the loopback HTTP prototype remains available for isolated
+load tests. Local acceptance is not evidence of a production rollout.
 
 ## Toolchain
 
@@ -53,6 +55,16 @@ owned Compose project. `xmake doctor` refuses other versions of OTP or rebar3.
   capped at 8 KiB and candidates at 512 bytes. Commands expire after 24 h and
   signals one hour after `ended`, with cleanup at startup and hourly. Database
   statements and locks have bounded timeouts.
+- Production gRPC: session-bound identity is rechecked through Auth on every
+  request; direct-room membership comes from Chat. Calls publishes bounded Redis
+  events, recovers lost signals through REST and ends revoked/removed sessions
+  in the periodic monitor. mTLS verifies exact SPIFFE identities with TLS 1.3.
+- TURN credentials use coturn REST HMAC-SHA1 with a 600-second TTL. The
+  production drain rejects new calls, reports `NOT_SERVING` and waits at most
+  9 seconds before normal OTP shutdown, leaving up to 6 seconds for sockets.
+- `vault_calls_metrics`: private Prometheus text endpoint with RPC/dependency
+  histograms, active/capacity, drain and Redis queue counters. Production logs
+  are JSON with OTP report bodies suppressed. See `docs/calls/operations.md`.
 - `vault_calls_http`: a loopback-only HTTP/1.1 prototype with 32 headers,
   16-KiB bodies and at most 200 connections. `vault_calls_auth_stub` and
   `vault_calls_chat_stub` provide synthetic sessions and direct rooms with
@@ -65,16 +77,13 @@ above, `scripts/dev/calls-load` starts the HTTP prototype and runs full call
 lifecycles in batches of eight concurrent clients. It measures command p95/p99,
 throughput, scheduler utilization and RSS sampled every 20 ms. One process is
 killed and recovered, then the whole VM is killed with `kill -9` and a second VM
-verifies all 200 calls. Latency or RSS-growth failure is reported only after the
-restart check. The metrics JSON includes `baseline_rss_bytes`, `rss_delta_bytes`
-and `gate_status`; a high baseline is reported as `baseline_rss_exceeded` rather
-than a passed absolute RSS gate. `xmake ci` runs this scenario after the Calls
-checks.
+verifies all 200 calls. Latency, absolute-RSS or RSS-growth failure is reported
+only after the restart check, and only `gate_status: pass` opens the gate. The
+metrics JSON includes baseline and peak RSS. `xmake ci` runs this scenario after
+the Calls checks.
 
-The 2026-11-11 local run completed 200 calls and 1600 commands with zero errors,
-177.9 commands/s, p95 81.46 ms and p99 121.64 ms; crash and restart recovery both
-passed. The host BEAM baseline was 2.06 GiB and the sampled peak delta was about
-24.5 MiB, so the 256-MiB absolute RSS gate remains explicitly unmet on this host
-(`baseline_rss_exceeded`). This is prototype evidence, not production acceptance.
-
-Not yet: production adapters.
+The 2026-11-24 local run completed 200 calls and 1600 commands with zero errors,
+146.05 commands/s, p95 101.87 ms and p99 148.74 ms. Baseline RSS was 57.57 MiB,
+peak 76.62 MiB and growth 19.04 MiB; process crash and `kill -9` recovery passed.
+This satisfies the 200-call resource/SLO gate on that host, but is not production
+rollout evidence.

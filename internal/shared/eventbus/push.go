@@ -12,6 +12,9 @@ import (
 // into pushes (docs/push.md); pushbus carries it. It names a room and
 // recipients only: no text, names or sender.
 
+// PushSignalChannel carries best-effort Calls hints over Redis Pub/Sub.
+const PushSignalChannel = "push:signal:v1"
+
 // MaxPushSignalRecipients bounds one signal; Chat splits larger rooms.
 const MaxPushSignalRecipients = 500
 

@@ -375,6 +375,7 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
     val uploads by model.uploads.collectAsStateWithLifecycle()
     val draft by model.draft.collectAsStateWithLifecycle()
     val staging by model.staging.collectAsStateWithLifecycle()
+    val callView by chat.calls.view.collectAsStateWithLifecycle()
 
     LaunchedEffect(room) {
         if (room == RoomView.Gone) onBack()
@@ -396,6 +397,10 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val files = rememberFileActions(chat.attachments) { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val microphoneDenied = stringResource(R.string.call_microphone_denied)
+    val startCall = rememberCallStarter(appContext, chat.calls) {
+        scope.launch { snackbar.showSnackbar(microphoneDenied) }
+    }
     val resources = LocalResources.current
     LaunchedEffect(model) {
         model.notices.collect { notice ->
@@ -439,6 +444,12 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
                     }
                 },
                 actions = {
+                    if (present?.room?.kind == RoomEntity.DIRECT) {
+                        TextButton(
+                            enabled = callView == null || callView?.state == "ended",
+                            onClick = { startCall(roomId) },
+                        ) { Text(stringResource(R.string.call_start)) }
+                    }
                     if (present?.room?.kind == RoomEntity.CHANNEL) {
                         IconButton(onClick = onMembers) {
                             Icon(painterResource(R.drawable.ic_group), contentDescription = stringResource(R.string.members_open))
@@ -461,19 +472,22 @@ fun ConversationScreen(chat: ChatSession, roomId: String, onBack: () -> Unit, on
         },
     ) { padding ->
         CompositionLocalProvider(LocalFileSource provides chat.attachments, LocalFileActions provides files) {
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                Messages(
-                    rows,
-                    outgoing,
-                    me = chat.me,
-                    channel = present?.room?.kind == RoomEntity.CHANNEL,
-                    onNewestSeen = model::markRead,
-                    onRetry = model::retry,
-                    onDelete = model::delete,
-                    outgoingFiles = outgoingFiles,
-                    uploads = uploads,
-                    onCancel = model::cancel,
-                )
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                CallPanel(chat.calls)
+                Box(Modifier.weight(1f)) {
+                    Messages(
+                        rows,
+                        outgoing,
+                        me = chat.me,
+                        channel = present?.room?.kind == RoomEntity.CHANNEL,
+                        onNewestSeen = model::markRead,
+                        onRetry = model::retry,
+                        onDelete = model::delete,
+                        outgoingFiles = outgoingFiles,
+                        uploads = uploads,
+                        onCancel = model::cancel,
+                    )
+                }
             }
             files.viewing?.let { ImageViewer(it, files) }
         }

@@ -26,6 +26,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result {
         val container = (applicationContext as VaultChatApplication).container
         val done = syncAndNotify(container.chats, BUDGET_MS)
+        // A call push is only a wake-up; authoritative state is fetched here.
+        container.chats.awaitCurrent()?.calls?.reconcile()
         return if (done || tags.contains(PERIODIC)) Result.success() else Result.retry()
     }
 

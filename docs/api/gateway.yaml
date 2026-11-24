@@ -1003,6 +1003,238 @@ paths:
         "503": {$ref: "#/components/responses/Unavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
 
+  /api/v1/calls:
+    get:
+      summary: List the caller's unfinished calls
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Authoritative active calls for reconciliation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calls]
+                properties:
+                  calls: {type: array, items: {$ref: "#/components/schemas/Call"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+    post:
+      summary: Create a one-to-one audio call in a direct room
+      description: Creates `ringing`; one unfinished call per user and at most 200 per installation. Capacity/drain returns 503 with Retry-After.
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: "#/components/schemas/CallCommand"}
+                - type: object
+                  required: [room_id]
+                  properties:
+                    room_id: {type: string, format: uuid}
+      responses:
+        "201":
+          description: Call created; repeated command_id returns the original response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Call"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: Caller or callee already has a call, or a command was reused with another request.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+
+  /api/v1/calls/{call_id}:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    get:
+      summary: Get authoritative call state
+      description: Ended or another user's calls are indistinguishable from missing calls.
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Current call state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Call"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+
+  /api/v1/calls/{call_id}/accept:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Accept a ringing call on the callee's current session
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+
+  /api/v1/calls/{call_id}/reject:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Reject a ringing call
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+
+  /api/v1/calls/{call_id}/cancel:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Cancel the caller's ringing call
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+
+  /api/v1/calls/{call_id}/connected:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Report connected ICE for the current session
+      description: The call becomes active after both the caller and callee devices report connected.
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+
+  /api/v1/calls/{call_id}/end:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: End a call and release admission
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+
+  /api/v1/calls/{call_id}/heartbeat:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Refresh the current device's heartbeat deadline
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody: {$ref: "#/components/requestBodies/CallCommand"}
+      responses:
+        "200": {$ref: "#/components/responses/CallState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+
+  /api/v1/calls/{call_id}/signal:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Send an SDP or ICE signal
+      description: Signals follow ADR 0005 state/device matrix. Reusing sender_seq with identical payload returns the original signal_seq; another payload is rejected.
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, payload, sender_seq]
+              properties:
+                kind: {type: string, enum: [offer, answer, candidate, end-of-candidates]}
+                payload: {type: string, maxLength: 8192}
+                sender_seq: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: Signal committed and assigned a per-call sequence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, signal_seq]
+                properties:
+                  state: {type: string, enum: [connecting, active]}
+                  signal_seq: {type: integer, format: int64, minimum: 1}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /api/v1/calls/{call_id}/signals:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    get:
+      summary: Catch up signals after a sequence or WebSocket reconnect
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: after
+          in: query
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+      responses:
+        "200":
+          description: Ordered committed signals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signals]
+                properties:
+                  signals: {type: array, items: {$ref: "#/components/schemas/CallSignal"}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/calls/{call_id}/turn:
+    parameters: [{$ref: "#/components/parameters/CallID"}]
+    post:
+      summary: Issue short-lived coturn credentials for a connecting/active call
+      description: Credentials expire after 600 seconds; ended calls receive no new credentials. Existing relay lifetime is bounded by coturn.
+      tags: [calls]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "200":
+          description: TURN REST credentials.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TurnCredentials"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/CallConflict"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1022,6 +1254,11 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    CallID:
+      name: call_id
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[0-9A-F]{64}$"}
 
   schemas:
     File:
@@ -1190,6 +1427,45 @@ components:
           type: object
           additionalProperties: {type: string, enum: [ok, fail]}
           example: {auth: ok, chat: ok}
+    Call:
+      type: object
+      required: [call_id, room_id, state, state_version, caller_id, callee_id]
+      properties:
+        call_id: {type: string, pattern: "^[0-9A-F]{64}$"}
+        room_id: {type: string, format: uuid}
+        state: {type: string, enum: [ringing, connecting, active, ended]}
+        state_version: {type: integer, format: int64, minimum: 0}
+        caller_id: {type: string, format: uuid}
+        callee_id: {type: string, format: uuid}
+    CallCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id]
+      properties:
+        command_id: {type: string, minLength: 1, maxLength: 128}
+    CallSignal:
+      type: object
+      required: [signal_seq, sender_device, sender_seq, kind, payload]
+      properties:
+        signal_seq: {type: integer, format: int64, minimum: 1}
+        sender_device: {type: string, format: uuid}
+        sender_seq: {type: integer, format: int64, minimum: 1}
+        kind: {type: string, enum: [offer, answer, candidate, end-of-candidates]}
+        payload: {type: string, description: "SDP ≤8 KiB or ICE candidate ≤512 bytes; empty for end-of-candidates."}
+    TurnCredentials:
+      type: object
+      required: [ttl, ice_servers]
+      properties:
+        ttl: {type: integer, enum: [600]}
+        ice_servers:
+          type: array
+          items:
+            type: object
+            required: [urls, username, credential]
+            properties:
+              urls: {type: array, items: {type: string}, minItems: 1}
+              username: {type: string, description: "<expiry>:<call_id>:<user_id>"}
+              credential: {type: string, format: password}
     Error:
       type: object
       properties:
@@ -1203,7 +1479,24 @@ components:
                      cors_forbidden, origin_forbidden, too_many_connections, shutting_down, request_timeout, timeout, unavailable, internal]
             message: {type: string}
 
+  requestBodies:
+    CallCommand:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/CallCommand"}
+
   responses:
+    CallState:
+      description: State after the idempotent command.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Call"}
+    CallConflict:
+      description: The command is not valid in the current state, the device/session is not selected, or a command/sequence was reused with another request.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
     EmailVerificationRequired:
       description: Login requires verified email ownership before a session may be issued; email change requires the current email to be verified (`email_verification_required`).
       content:

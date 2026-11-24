@@ -93,6 +93,12 @@ The schema of each database version is exported to `app/schemas` for
 migration tests; there is no migration yet because no version has been
 released.
 
+## Calls
+
+One-to-one WebRTC audio uses the pinned `io.github.webrtc-sdk:android` AAR,
+session-bound Calls API and a microphone foreground service. Architecture,
+permission/reconnect rules and device evidence: [docs/android/calls.md](../docs/android/calls.md).
+
 ## Server requirement
 
 The client relies on Auth accepting a repeat of the refresh token it has just

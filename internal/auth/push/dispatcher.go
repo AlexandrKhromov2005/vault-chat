@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
 )
 
 // ErrTokenInvalid is returned by a Provider when the device token is no
@@ -191,6 +193,14 @@ func (d *Dispatcher) Submit(delivery *Delivery) {
 	finish(finished)
 }
 
+// Signal schedules a best-effort Calls hint received outside JetStream. It has
+// no persistent id or recipient marks; active-call REST reconciliation is the
+// recovery path when Redis Pub/Sub loses it.
+func (d *Dispatcher) Signal(signal eventbus.PushSignal) {
+	d.Submit(&Delivery{RoomID: signal.RoomID, UserIDs: signal.UserIDs,
+		Expires: d.now().Add(time.Hour), Done: func(bool) {}})
+}
+
 // resolve counts one recipient of w as handled; a finished w is appended.
 // The caller holds d.mu.
 func (d *Dispatcher) resolve(finished []*work, w *work, retry bool) []*work {
@@ -270,15 +280,19 @@ func (d *Dispatcher) send(ctx context.Context, key target) {
 	defer cancel()
 	retry := d.wake(ctx, key, sending)
 	if !retry {
-		ids := make([]string, len(sending))
-		for i, w := range sending {
-			ids[i] = w.ID
+		ids := make([]string, 0, len(sending))
+		for _, w := range sending {
+			if w.ID != "" {
+				ids = append(ids, w.ID)
+			}
 		}
-		if err := d.marks.MarkPushRecipient(ctx, ids, key.userID, d.now().Add(d.cfg.MarkTTL)); err != nil {
-			// The push went out, but a redelivery will repeat it.
-			d.failed.Add(1)
-			d.warn(ctx, "record push recipient failed", err)
-			retry = true
+		if len(ids) > 0 {
+			if err := d.marks.MarkPushRecipient(ctx, ids, key.userID, d.now().Add(d.cfg.MarkTTL)); err != nil {
+				// The push went out, but a redelivery will repeat it.
+				d.failed.Add(1)
+				d.warn(ctx, "record push recipient failed", err)
+				retry = true
+			}
 		}
 	}
 	var finished []*work
