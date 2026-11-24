@@ -42,6 +42,7 @@ key must never change (see below).
    ```sh
    cd android
    ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+   python3 ../tests/ops/android_release_acceptance.py app/build/outputs/apk/release/app-release.apk
    apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
    sha256sum app/build/outputs/apk/release/app-release.apk
    ```
@@ -66,7 +67,9 @@ key must never change (see below).
 
 ## Remaining acceptance
 
-- Baseline Profiles and installation/upgrade on physical devices are not done.
-- API 26 emulator calls with bidirectional RTP are verified, but delayed push,
-  process death, real network handover and forced TURN on Android remain open in
-  [#163](https://github.com/AlexandrKhromov2005/vault-chat/issues/163).
+- Baseline Profiles are not done. Android 0.2.1 was installed over 0.2.0 on a
+  physical Galaxy S23 Ultra; an outgoing call was created and cancelled without
+  a crash or a retained microphone service.
+- API 26 emulator calls with bidirectional RTP are verified. Physical remote
+  audio, delayed push, process death, real network handover and forced TURN on
+  Android remain open in [#163](https://github.com/AlexandrKhromov2005/vault-chat/issues/163).
