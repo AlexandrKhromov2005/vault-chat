@@ -217,3 +217,43 @@ func TestServiceMethodMatrixAndStreams(t *testing.T) {
 		})
 	}
 }
+
+// A client of the NATS broker accepts only the broker's certificate from the
+// deployment CA: another service's leaf or a foreign CA is refused, and
+// without mTLS there is no configuration at all.
+func TestClientTLSVerifiesTheExactServerIdentity(t *testing.T) {
+	a := newAuthority(t)
+	chat := loadTest(t, "chat", a.issue(t, "chat", false))
+	handshake := func(serverDir string) error {
+		pair, err := tls.LoadX509KeyPair(filepath.Join(serverDir, "tls.crt"), filepath.Join(serverDir, "tls.key"))
+		require.NoError(t, err)
+		listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}})
+		require.NoError(t, err)
+		defer func() { _ = listener.Close() }()
+		go func() {
+			if conn, err := listener.Accept(); err == nil {
+				_ = conn.(*tls.Conn).Handshake()
+				_ = conn.Close()
+			}
+		}()
+		cfg, err := chat.ClientTLS("nats")
+		require.NoError(t, err)
+		conn, err := tls.Dial("tcp", listener.Addr().String(), cfg)
+		if err == nil {
+			_ = conn.Close()
+		}
+		return err
+	}
+	require.NoError(t, handshake(a.issue(t, "nats", false)))
+	require.ErrorContains(t, handshake(a.issue(t, "auth", false)), "certificate")
+	require.Error(t, handshake(newAuthority(t).issue(t, "nats", false)))
+
+	_, err := chat.ClientTLS("redis")
+	require.Error(t, err)
+	t.Setenv("RPC_TLS_MODE", "")
+	t.Setenv("RPC_TLS_DIR", "")
+	plaintext, err := Load("chat")
+	require.NoError(t, err)
+	_, err = plaintext.ClientTLS("nats")
+	require.ErrorContains(t, err, "disabled")
+}
