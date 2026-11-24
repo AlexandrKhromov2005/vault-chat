@@ -12,7 +12,8 @@ import subprocess
 import sys
 import tempfile
 
-SERVICES = ('auth', 'chat', 'media', 'gateway', 'preview')
+# nats is the push signal broker: a server identity only, mapped to no RPC.
+SERVICES = ('auth', 'chat', 'media', 'gateway', 'preview', 'nats')
 
 
 def openssl(*args):

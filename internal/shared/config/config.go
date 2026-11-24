@@ -29,6 +29,9 @@ type Config struct {
 	// PushFCMCredentialsFile is a private FCM service account file; empty
 	// disables push (docs/push.md).
 	PushFCMCredentialsFile string
+	// PushBrokerURL is the NATS JetStream broker of push signals; push
+	// requires it.
+	PushBrokerURL string
 }
 
 // Load reads configuration from AUTH_* environment variables. DatabaseURL
@@ -75,6 +78,13 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.Argon2Parallelism = uint8(parallelism)
+
+	if cfg.PushBrokerURL, err = pushBrokerURL("AUTH_PUSH_NATS_URL"); err != nil {
+		return nil, err
+	}
+	if (cfg.PushBrokerURL == "") != (cfg.PushFCMCredentialsFile == "") {
+		return nil, fmt.Errorf("push needs both AUTH_PUSH_FCM_CREDENTIALS_FILE and AUTH_PUSH_NATS_URL, or neither")
+	}
 
 	if err := cfg.loadEmail(); err != nil {
 		return nil, err

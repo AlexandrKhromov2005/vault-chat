@@ -117,8 +117,8 @@ func newTestFCM(t *testing.T, answer func(http.ResponseWriter, []byte)) (*FCM, *
 func TestFCMSendsADataOnlySignal(t *testing.T) {
 	f, google := newTestFCM(t, func(w http.ResponseWriter, _ []byte) { _, _ = w.Write([]byte(`{"name":"projects/p/messages/1"}`)) })
 	ctx := context.Background()
-	require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1"}))
-	require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1"}))
+	require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1", TTL: time.Hour}))
+	require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1", TTL: 9*time.Minute + 59500*time.Millisecond}))
 	require.EqualValues(t, 1, google.exchanges.Load(), "the access token is cached")
 
 	var sent map[string]any
@@ -126,8 +126,14 @@ func TestFCMSendsADataOnlySignal(t *testing.T) {
 	require.Equal(t, map[string]any{"message": map[string]any{
 		"token":   "device-token",
 		"data":    map[string]any{"type": "sync", "room_id": "room-1"},
-		"android": map[string]any{"priority": "HIGH", "collapse_key": "room:room-1", "ttl": "3600s"},
-	}}, sent, "no notification text, names or sender")
+		"android": map[string]any{"priority": "HIGH", "collapse_key": "room:room-1", "ttl": "600s"},
+	}}, sent, "no notification text, names or sender; the rest of the signal's hour, rounded up")
+
+	for ttl, want := range map[time.Duration]string{0: "1s", 2 * time.Hour: "3600s", time.Millisecond: "1s"} {
+		require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1", TTL: ttl}))
+		require.NoError(t, json.Unmarshal(google.lastBody.Load().([]byte), &sent))
+		require.Equal(t, want, sent["message"].(map[string]any)["android"].(map[string]any)["ttl"], ttl)
+	}
 
 	f.now = func() time.Time { return time.Now().Add(59 * time.Minute) }
 	require.NoError(t, f.Send(ctx, Message{Token: "device-token", RoomID: "room-1"}))
@@ -136,21 +142,22 @@ func TestFCMSendsADataOnlySignal(t *testing.T) {
 
 func TestFCMMapsProviderAnswers(t *testing.T) {
 	for name, tc := range map[string]struct {
-		status  int
-		body    string
-		invalid bool
+		status    int
+		body      string
+		invalid   bool
+		temporary bool
 	}{
-		"unregistered": {http.StatusNotFound, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true},
+		"unregistered": {http.StatusNotFound, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, true, false},
 		// A service account of another project is a configuration error: the
 		// tokens are still valid for the app's own project.
-		"sender mismatch": {http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED","details":[{"errorCode":"SENDER_ID_MISMATCH"}]}}`, false},
+		"sender mismatch": {http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED","details":[{"errorCode":"SENDER_ID_MISMATCH"}]}}`, false, false},
 		// A proxy or wrong endpoint answering 404 must not delete every token.
-		"plain not found":    {http.StatusNotFound, `not found`, false},
-		"404 without code":   {http.StatusNotFound, `{"error":{"status":"NOT_FOUND"}}`, false},
-		"invalid argument":   {http.StatusBadRequest, `{"error":{"status":"INVALID_ARGUMENT"}}`, false},
-		"quota":              {http.StatusTooManyRequests, `{"error":{"status":"RESOURCE_EXHAUSTED"}}`, false},
-		"unavailable":        {http.StatusServiceUnavailable, `not json`, false},
-		"hostile error code": {http.StatusInternalServerError, `{"error":{"status":"device-token <script>"}}`, false},
+		"plain not found":    {http.StatusNotFound, `not found`, false, false},
+		"404 without code":   {http.StatusNotFound, `{"error":{"status":"NOT_FOUND"}}`, false, false},
+		"invalid argument":   {http.StatusBadRequest, `{"error":{"status":"INVALID_ARGUMENT"}}`, false, false},
+		"quota":              {http.StatusTooManyRequests, `{"error":{"status":"RESOURCE_EXHAUSTED"}}`, false, true},
+		"unavailable":        {http.StatusServiceUnavailable, `not json`, false, true},
+		"hostile error code": {http.StatusInternalServerError, `{"error":{"status":"device-token <script>"}}`, false, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, _ := newTestFCM(t, func(w http.ResponseWriter, _ []byte) {
@@ -160,6 +167,7 @@ func TestFCMMapsProviderAnswers(t *testing.T) {
 			err := f.Send(context.Background(), Message{Token: "device-token", RoomID: "room-1"})
 			require.Error(t, err)
 			require.Equal(t, tc.invalid, errors.Is(err, ErrTokenInvalid))
+			require.Equal(t, tc.temporary, errors.Is(err, ErrTemporary), "only the provider's own trouble is retried")
 			require.NotContains(t, err.Error(), "device-token", "errors never carry the token")
 		})
 	}
@@ -193,4 +201,15 @@ func TestFCMTokenExchangeFailureIsAnError(t *testing.T) {
 	err := f.Send(context.Background(), Message{Token: "device-token", RoomID: "room-1"})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, ErrTokenInvalid), "an auth failure must not delete tokens")
+	require.ErrorIs(t, err, ErrTemporary, "the token exchange is retried")
+}
+
+// A network failure toward FCM is retried, never taken as an answer.
+func TestFCMNetworkFailureIsTemporary(t *testing.T) {
+	f, _ := newTestFCM(t, func(w http.ResponseWriter, _ []byte) { _, _ = w.Write([]byte(`{}`)) })
+	require.NoError(t, f.Send(context.Background(), Message{Token: "device-token", RoomID: "room-1"}))
+	f.endpoint = "http://127.0.0.1:1"
+	err := f.Send(context.Background(), Message{Token: "device-token", RoomID: "room-1"})
+	require.ErrorIs(t, err, ErrTemporary)
+	require.NotContains(t, err.Error(), "device-token")
 }

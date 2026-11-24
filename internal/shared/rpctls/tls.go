@@ -108,6 +108,31 @@ func (c *Config) Dial(addr, target string) (*grpc.ClientConn, error) {
 	return grpc.NewClient(addr, grpc.WithTransportCredentials(creds), grpc.WithUnaryInterceptor(requestid.UnaryClientInterceptor()))
 }
 
+// ClientTLS is the client side of a connection to an internal server that is
+// not a gRPC service of this package's matrix, such as the "nats" broker:
+// this service's certificate, the deployment CA and the server's exact
+// service URI. It fails when internal TLS is disabled; there is no plaintext
+// fallback.
+func (c *Config) ClientTLS(target string) (*tls.Config, error) {
+	if !c.Enabled() {
+		return nil, errors.New("internal TLS is disabled; set RPC_TLS_MODE=mtls")
+	}
+	if target != "nats" && !known(target) {
+		return nil, errors.New("unknown internal server identity")
+	}
+	cfg := c.tls.Clone()
+	cfg.ClientCAs, cfg.ClientAuth = nil, tls.NoClientCert
+	cfg.ServerName = target + ".vault.internal"
+	uri := "spiffe://vault-chat/service/" + target
+	cfg.VerifyConnection = func(state tls.ConnectionState) error {
+		if len(state.VerifiedChains) == 0 || len(state.PeerCertificates[0].URIs) != 1 || state.PeerCertificates[0].URIs[0].String() != uri {
+			return errors.New("unexpected internal server identity")
+		}
+		return nil
+	}
+	return cfg, nil
+}
+
 // ServerOption requires a client certificate issued by this deployment's private CA.
 func (c *Config) ServerOption() grpc.ServerOption {
 	if !c.Enabled() {

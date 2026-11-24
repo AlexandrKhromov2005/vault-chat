@@ -8,10 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// PushSignalChannel carries the wake-up signals Chat publishes for new
-// messages and Auth turns into pushes (docs/push.md). A signal names a room
-// and recipients only: no text, names or sender.
-const PushSignalChannel = "push:signal:v1"
+// A push signal is the wake-up Chat stores for a new message and Auth turns
+// into pushes (docs/push.md); pushbus carries it. It names a room and
+// recipients only: no text, names or sender.
 
 // MaxPushSignalRecipients bounds one signal; Chat splits larger rooms.
 const MaxPushSignalRecipients = 500
@@ -46,8 +45,8 @@ func EncodePushSignals(roomID string, userIDs []string) ([][]byte, error) {
 	return payloads, nil
 }
 
-// DecodePushSignal parses a signal from the channel, which anyone with Redis
-// access can write to, so every field is checked.
+// DecodePushSignal parses a stored signal. Anyone permitted to publish to the
+// stream could have written it, so every field is checked.
 func DecodePushSignal(payload []byte) (PushSignal, error) {
 	var signal PushSignal
 	if len(payload) > maxPushSignalBytes || json.Unmarshal(payload, &signal) != nil {

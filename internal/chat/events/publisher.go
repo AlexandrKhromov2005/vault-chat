@@ -1,5 +1,7 @@
 // Package events publishes committed Chat changes to Redis Pub/Sub, from
-// where every Gateway instance relays them to its WebSocket clients.
+// where every Gateway instance relays them to its WebSocket clients, and the
+// push signals of new messages to the JetStream stream Auth consumes
+// (docs/push.md).
 package events
 
 import (
@@ -18,6 +20,7 @@ import (
 	chatv1 "github.com/AlexandrKhromov2005/vault-chat/api/gen/go/chat/v1"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/chat/domain"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus"
 )
 
 const (
@@ -36,6 +39,12 @@ type Pipeliner interface {
 	Pipelined(ctx context.Context, fn func(redis.Pipeliner) error) ([]redis.Cmder, error)
 }
 
+// SignalPublisher stores push signals and reports how many it could not;
+// pushbus.Publisher implements it.
+type SignalPublisher interface {
+	Publish(ctx context.Context, signals []pushbus.Signal) (int, error)
+}
+
 // publication is one encoded event and the users it is published to, plus
 // the push signals of a new message (docs/push.md).
 type publication struct {
@@ -43,7 +52,7 @@ type publication struct {
 	roomID     string
 	payload    []byte
 	recipients []string
-	signals    [][]byte
+	signals    []pushbus.Signal
 }
 
 // change holds the publications of one committed change and the context of
@@ -60,6 +69,7 @@ type change struct {
 // and clients recover what they missed through message sequences and catch-up.
 type Publisher struct {
 	redis   Pipeliner
+	push    SignalPublisher
 	logger  *slog.Logger
 	timeout time.Duration
 	queue   chan change
@@ -76,6 +86,9 @@ type Publisher struct {
 	encodingFailures atomic.Uint64
 	dropped          atomic.Uint64
 	lastDropLog      atomic.Int64
+	signalsStored    atomic.Uint64
+	signalsLost      atomic.Uint64
+	lastSignalLog    atomic.Int64
 }
 
 // Option configures a Publisher.
@@ -99,6 +112,12 @@ func WithPublishTimeout(timeout time.Duration) Option {
 			p.timeout = timeout
 		}
 	}
+}
+
+// WithPushSignals publishes the push signals of new messages through s.
+// Without it no signals are made, and no push is sent.
+func WithPushSignals(s SignalPublisher) Option {
+	return func(p *Publisher) { p.push = s }
 }
 
 // NewPublisher binds a Redis client and the logger for publishing failures and
@@ -144,10 +163,12 @@ func (p *Publisher) Notify(ctx context.Context, events ...domain.Event) {
 			p.logger.ErrorContext(ctx, "encode chat event failed", "kind", event.Kind, "error", err)
 			continue
 		}
-		signals, err := pushSignals(event)
-		if err != nil {
-			// The event itself is still published; only the wake-up is lost.
-			p.logger.ErrorContext(ctx, "encode push signal failed", "kind", event.Kind, "error", err)
+		var signals []pushbus.Signal
+		if p.push != nil {
+			if signals, err = pushSignals(event); err != nil {
+				// The event itself is still published; only the wake-up is lost.
+				p.logger.ErrorContext(ctx, "encode push signal failed", "kind", event.Kind, "error", err)
+			}
 		}
 		publications = append(publications, publication{kind: event.Kind, roomID: event.RoomID, payload: payload,
 			recipients: slices.Clone(event.Recipients), signals: signals})
@@ -202,7 +223,8 @@ func (p *Publisher) run() {
 	}
 }
 
-// publish sends one change to the channels of all its recipients in one round trip.
+// publish sends one change to the channels of all its recipients in one
+// round trip, then stores its push signals.
 func (p *Publisher) publish(queued change) {
 	if p.base.Err() != nil {
 		p.drop(queued, "shutdown timed out")
@@ -215,12 +237,12 @@ func (p *Publisher) publish(queued change) {
 			for _, user := range publication.recipients {
 				pipe.Publish(ctx, eventbus.UserChannel(user), publication.payload)
 			}
-			for _, signal := range publication.signals {
-				pipe.Publish(ctx, eventbus.PushSignalChannel, signal)
-			}
 		}
 		return nil
 	})
+	// Signals do not depend on Redis: a wake-up is useful even when the
+	// live event was lost, since the client synchronizes on its own.
+	p.publishSignals(queued)
 	if err == nil {
 		p.published.Add(uint64(len(queued.publications)))
 		return
@@ -235,21 +257,60 @@ func (p *Publisher) publish(queued change) {
 		"events", len(queued.publications), "error", err)
 }
 
+// publishSignals waits for the stream to store the change's signals, within
+// the publish timeout. A signal not stored is counted and lost: it is a
+// hint, and the client gets the message when it next synchronizes.
+func (p *Publisher) publishSignals(queued change) {
+	signals := queuedSignals(queued)
+	if len(signals) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(p.base, p.timeout)
+	defer cancel()
+	lost, err := p.push.Publish(ctx, signals)
+	lost = min(max(lost, 0), len(signals))
+	p.signalsStored.Add(uint64(len(signals) - lost))
+	if lost == 0 {
+		return
+	}
+	total := p.signalsLost.Add(uint64(lost))
+	if p.throttled(&p.lastSignalLog) {
+		return
+	}
+	p.logger.WarnContext(queued.ctx, "push signals not stored", "lost", lost, "lost_total", total, "error", err)
+}
+
+func queuedSignals(queued change) []pushbus.Signal {
+	var signals []pushbus.Signal
+	for _, publication := range queued.publications {
+		signals = append(signals, publication.signals...)
+	}
+	return signals
+}
+
+// throttled reports whether a warning was already logged through last
+// within dropLogInterval; otherwise it claims the slot for this one.
+func (p *Publisher) throttled(last *atomic.Int64) bool {
+	now := time.Now().UnixNano()
+	previous := last.Load()
+	return (previous != 0 && now-previous < int64(dropLogInterval)) || !last.CompareAndSwap(previous, now)
+}
+
 // drop counts the events of a change that will not be published and logs at
 // most one warning per dropLogInterval.
 func (p *Publisher) drop(queued change, reason string) {
+	p.signalsLost.Add(uint64(len(queuedSignals(queued))))
 	total := p.dropped.Add(uint64(len(queued.publications)))
-	now := time.Now().UnixNano()
-	last := p.lastDropLog.Load()
-	if (last != 0 && now-last < int64(dropLogInterval)) || !p.lastDropLog.CompareAndSwap(last, now) {
+	if p.throttled(&p.lastDropLog) {
 		return
 	}
 	p.logger.WarnContext(queued.ctx, "chat events dropped", "reason", reason, "dropped_total", total)
 }
 
 // pushSignals wakes the devices of a new message's recipients other than its
-// sender. The signal names the room only.
-func pushSignals(event domain.Event) ([][]byte, error) {
+// sender. The signal names the room only; its id is an opaque hash of the
+// message id and the part, so that a repeated publication is recognized.
+func pushSignals(event domain.Event) ([]pushbus.Signal, error) {
 	if event.Kind != domain.MessageCreated || event.Message == nil {
 		return nil, nil
 	}
@@ -259,7 +320,15 @@ func pushSignals(event domain.Event) ([][]byte, error) {
 			recipients = append(recipients, user)
 		}
 	}
-	return eventbus.EncodePushSignals(event.RoomID, recipients)
+	payloads, err := eventbus.EncodePushSignals(event.RoomID, recipients)
+	if err != nil {
+		return nil, err
+	}
+	signals := make([]pushbus.Signal, len(payloads))
+	for part, payload := range payloads {
+		signals[part] = pushbus.Signal{ID: pushbus.SignalID(event.Message.ID, part), Payload: payload}
+	}
+	return signals, nil
 }
 
 // Encode converts an event to its protobuf wire form, chatv1.Event.
@@ -291,12 +360,16 @@ func Encode(event domain.Event) ([]byte, error) {
 }
 
 // Stats is a race-safe, approximate scrape-time view of the event publisher.
+// SignalsLost counts push signals not stored: broker or stream unavailable,
+// stream full, or their change dropped.
 type Stats struct {
 	Pending, Capacity                            int
 	Dropped, Failed, Published, EncodingFailures uint64
+	SignalsStored, SignalsLost                   uint64
 }
 
 // Stats distinguishes queue/shutdown losses from ambiguous Redis failures.
 func (p *Publisher) Stats() Stats {
-	return Stats{Pending: len(p.queue), Capacity: cap(p.queue), Dropped: p.dropped.Load(), Failed: p.failed.Load(), Published: p.published.Load(), EncodingFailures: p.encodingFailures.Load()}
+	return Stats{Pending: len(p.queue), Capacity: cap(p.queue), Dropped: p.dropped.Load(), Failed: p.failed.Load(), Published: p.published.Load(),
+		EncodingFailures: p.encodingFailures.Load(), SignalsStored: p.signalsStored.Load(), SignalsLost: p.signalsLost.Load()}
 }

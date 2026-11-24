@@ -14,7 +14,7 @@ import (
 
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/push"
 	"github.com/AlexandrKhromov2005/vault-chat/internal/auth/repository"
-	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/eventbus"
+	"github.com/AlexandrKhromov2005/vault-chat/internal/shared/pushbus"
 )
 
 // interceptingProvider records messages and runs during, a change committed
@@ -88,21 +88,22 @@ func TestPushDispatch_NoSendStartsAfterRevocation(t *testing.T) {
 			provider := &interceptingProvider{during: map[string]func(){
 				"first-device": func() { changed <- change(pool, sessions, user.ID, queued.ID) },
 			}}
-			dispatcher := push.NewDispatcher(provider, sessions, slog.New(slog.NewTextHandler(io.Discard, nil)),
+			dispatcher := push.NewDispatcher(provider, sessions, sessions, slog.New(slog.NewTextHandler(io.Discard, nil)),
 				push.Config{Window: time.Minute, Workers: 1})
 			done := make(chan struct{})
 			go func() { dispatcher.Run(ctx); close(done) }()
 			t.Cleanup(func() { cancel(); <-done })
 
 			room := uuid.NewString()
-			dispatcher.Signal(eventbus.PushSignal{RoomID: room, UserIDs: []string{user.ID, marker.ID}})
+			dispatcher.Submit(&push.Delivery{ID: pushbus.SignalID(uuid.NewString(), 0), RoomID: room, UserIDs: []string{user.ID, marker.ID},
+				Expires: time.Now().Add(time.Hour), Done: func(bool) {}})
 			require.Eventually(t, func() bool {
 				sent := provider.messages()
 				return len(sent) > 0 && sent[len(sent)-1].Token == "marker-device"
 			}, 10*time.Second, 10*time.Millisecond)
 			require.NoError(t, <-changed)
 			require.Equal(t, []push.Message{{Token: "first-device", RoomID: room}, {Token: "marker-device", RoomID: room}},
-				provider.messages(), "no send starts for a device whose login was revoked or which left the user")
+				withoutTTL(provider.messages()), "no send starts for a device whose login was revoked or which left the user")
 		})
 	}
 }

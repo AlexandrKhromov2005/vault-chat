@@ -14,6 +14,7 @@ func setRequiredEnv(t *testing.T) {
 	for _, key := range []string{
 		"AUTH_GRPC_ADDR", "AUTH_JWT_ACCESS_TTL", "AUTH_JWT_REFRESH_TTL",
 		"AUTH_ARGON2_MEMORY_KIB", "AUTH_ARGON2_TIME", "AUTH_ARGON2_PARALLELISM", "AUTH_LOG_LEVEL",
+		"AUTH_PUSH_FCM_CREDENTIALS_FILE", "AUTH_PUSH_NATS_URL",
 	} {
 		t.Setenv(key, "")
 	}
@@ -119,4 +120,29 @@ func TestLoad(t *testing.T) {
 		_, err := config.Load()
 		require.ErrorContains(t, err, "AUTH_ARGON2_TIME")
 	})
+}
+
+// Push needs both the FCM credentials and the broker: either alone would
+// send nothing or let signals pile up unread.
+func TestLoad_PushNeedsCredentialsAndBroker(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	require.Empty(t, cfg.PushBrokerURL)
+
+	t.Setenv("AUTH_PUSH_FCM_CREDENTIALS_FILE", "/run/secrets/push/fcm.json")
+	_, err = config.Load()
+	require.ErrorContains(t, err, "AUTH_PUSH_NATS_URL")
+	t.Setenv("AUTH_PUSH_NATS_URL", "tls://nats:4222")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	require.Equal(t, "tls://nats:4222", cfg.PushBrokerURL)
+	t.Setenv("AUTH_PUSH_NATS_URL", "nats://nats:4222")
+	_, err = config.Load()
+	require.Error(t, err)
+
+	t.Setenv("AUTH_PUSH_FCM_CREDENTIALS_FILE", "")
+	t.Setenv("AUTH_PUSH_NATS_URL", "tls://nats:4222")
+	_, err = config.Load()
+	require.ErrorContains(t, err, "AUTH_PUSH_FCM_CREDENTIALS_FILE")
 }
