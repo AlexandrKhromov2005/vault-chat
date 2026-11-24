@@ -80,7 +80,7 @@ AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=valida
 AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation \
 REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation \
 S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation \
-VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
+AUTH_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/push/fcm.json VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
 import json,sys
 c=json.load(sys.stdin)
 auth=c["services"]["auth"]
@@ -92,7 +92,27 @@ assert "push-egress" in auth["networks"] and not c["networks"]["push-egress"].ge
 for name,s in c["services"].items():
     assert name=="auth" or ("push-egress" not in s.get("networks",{}) and all("/secrets/push" not in v["source"] for v in s.get("volumes",[]) if isinstance(v,dict)))
 assert not auth.get("ports")
-print("Push overlay: key and egress for Auth only, read-only mount, no new ports")'
+assert auth["environment"]["AUTH_PUSH_NATS_URL"]=="tls://nats:4222"
+assert c["services"]["chat"]["environment"]["CHAT_PUSH_NATS_URL"]=="tls://nats:4222"
+assert c["networks"]["push-signals"]["internal"]
+assert sorted(n for n,s in c["services"].items() if "push-signals" in s.get("networks",{}))==["auth","chat","nats"]
+nats=c["services"]["nats"]
+assert not nats.get("ports") and nats["user"]=="65532:65532" and nats["read_only"] and nats["cap_drop"]==["ALL"]
+assert "@sha256:" in nats["image"] and nats["image"]==c["services"]["nats-permissions"]["image"]
+assert nats["depends_on"]["nats-permissions"]["condition"]=="service_completed_successfully"
+binds={v["target"]:v for v in nats["volumes"] if v["type"]=="bind"}
+assert set(binds)=={"/etc/nats/nats.conf","/run/secrets/nats"}
+assert binds["/run/secrets/nats"]["source"].endswith("/secrets/rpc/nats") and all(v["read_only"] for v in binds.values())
+assert all("rpc-ca" not in v["source"] for v in nats["volumes"])
+assert c["services"]["nats-permissions"]["network_mode"]=="none"
+print("Push overlay: key and egress for Auth only, broker on an internal network of Chat and Auth, read-only mounts, no new ports")'
+AUTH_DB_PASSWORD=validation CHAT_DB_PASSWORD=validation MEDIA_DB_PASSWORD=validation AUTH_RUNTIME_DB_PASSWORD=validation CHAT_RUNTIME_DB_PASSWORD=validation MEDIA_RUNTIME_DB_PASSWORD=validation REDIS_PASSWORD=validation PROFILE_CACHE_PASSWORD=cache-validation S3_ACCESS_KEY=validation S3_SECRET_KEY=validation S3_ROOT_ACCESS_KEY=root-validation S3_ROOT_SECRET_KEY=validation AUTH_PUSH_FCM_CREDENTIALS_FILE= VAULT_IMAGE_TAG=validation PUBLIC_IP=198.51.100.10 docker compose -f deployments/docker-compose.vps.yml -f deployments/docker-compose.push.yml config --format json | python3 -c '
+import json,sys
+c=json.load(sys.stdin)
+assert c["services"]["auth"]["environment"]["AUTH_PUSH_FCM_CREDENTIALS_FILE"]==""
+assert c["services"]["auth"]["environment"]["AUTH_PUSH_NATS_URL"]==""
+assert c["services"]["chat"]["environment"]["CHAT_PUSH_NATS_URL"]==""
+print("Push overlay paused: no credentials, no signals published or consumed")'
 
 VAULT_IMAGE_TAG=validation docker compose -f deployments/docker-compose.preview.yml config --format json | python3 -c '
 import json,sys

@@ -1,0 +1,9 @@
+# Acceptance only (push_broker_acceptance.py): the broker also joins a
+# network of its own with an ephemeral loopback port, so that the test can
+# connect from the host. The deployed overlay publishes nothing.
+services:
+  nats:
+    networks: [push-acceptance]
+    ports: ["127.0.0.1::4222"]
+networks:
+  push-acceptance: {}

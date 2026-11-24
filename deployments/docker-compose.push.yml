@@ -1,15 +1,86 @@
-# Explicit opt-in: use with .env.push; see docs/push.md.
+# Explicit opt-in: use with .env.push and the mTLS overlay; see docs/push.md.
+# Chat stores content-free push signals in NATS JetStream, Auth consumes them
+# and sends FCM wake-ups (docs/adr/0003-push-signals-jetstream.md). Both
+# authenticate to the broker with their internal certificates; the broker
+# has no host port and shares a network with Chat and Auth only.
+x-nats-image: &nats-image nats:2.15.3-alpine@sha256:558394a23dd3c36f2d3a64b51865fd09908010e80a542cea5e75c2af543ed62a
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+#
+# AUTH_PUSH_FCM_CREDENTIALS_FILE from .env.push is the only switch: empty
+# pauses push, and then neither Chat publishes signals nor Auth consumes them.
 services:
   auth:
     environment:
-      AUTH_PUSH_FCM_CREDENTIALS_FILE: ${AUTH_PUSH_FCM_CREDENTIALS_FILE-/run/secrets/push/fcm.json}
+      AUTH_PUSH_FCM_CREDENTIALS_FILE: ${AUTH_PUSH_FCM_CREDENTIALS_FILE-}
+      AUTH_PUSH_NATS_URL: ${AUTH_PUSH_FCM_CREDENTIALS_FILE:+tls://nats:4222}
     networks:
       - push-egress
+      - push-signals
     volumes:
       - type: bind
         source: ../secrets/push
         target: /run/secrets/push
         read_only: true
         bind: {create_host_path: false}
+  chat:
+    environment:
+      CHAT_PUSH_NATS_URL: ${AUTH_PUSH_FCM_CREDENTIALS_FILE:+tls://nats:4222}
+    networks:
+      - push-signals
+  # A new volume belongs to root; the broker runs unprivileged.
+  nats-permissions:
+    network_mode: none
+    user: root
+    image: *nats-image
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - natsdata:/data
+    entrypoint: ['sh', '-c', 'chown -R 65532:65532 /data && chmod 700 /data']
+    restart: 'no'
+    logging: *logging
+    mem_limit: 32m
+  nats:
+    networks: [push-signals]
+    image: *nats-image
+    user: '65532:65532'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: ['-c', '/etc/nats/nats.conf']
+    depends_on:
+      nats-permissions:
+        condition: service_completed_successfully
+    volumes:
+      - natsdata:/data
+      - type: bind
+        source: ./nats/nats.conf
+        target: /etc/nats/nats.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NATS_RPC_CERTS_DIR:-../secrets/rpc/nats}
+        target: /run/secrets/nats
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8222/healthz?js-enabled-only=true']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
 networks:
   push-egress: {}
+  push-signals: {internal: true}
+volumes:
+  # Not backed up: signals expire within an hour, and an empty stream is
+  # declared again by Auth.
+  natsdata: {}

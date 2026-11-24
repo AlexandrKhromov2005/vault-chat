@@ -4,6 +4,10 @@ set -eu
 . "$(dirname -- "$0")/common.sh"
 root_only
 lock_operations
+# The push broker serves with its own leaf and must be restarted with the
+# others; it exists only with the push overlay.
+leaves="auth chat media gateway"
+if [ -f "$VAULT_ROOT/.env.push" ]; then leaves="$leaves nats"; fi
 case "${1:-status}" in
     init) python3 "$VAULT_ROOT/scripts/gen-rpc-certs.py" "$VAULT_ROOT/secrets";;
     enable|rotate)
@@ -22,18 +26,20 @@ case "${1:-status}" in
         "$VAULT_ROOT/scripts/vps.sh" backup
         if [ "$action" = rotate ]; then
             compose stop gateway media chat auth
+            if [ -f "$VAULT_ROOT/.env.push" ]; then compose stop nats; fi
             python3 "$VAULT_ROOT/scripts/gen-rpc-certs.py" "$VAULT_ROOT/secrets" --rotate
         fi
         printf 'RPC_TLS_MODE=mtls\n' > "$VAULT_ROOT/.env.rpc"
         chmod 600 "$VAULT_ROOT/.env.rpc"
-        compose up -d --no-build --force-recreate --wait auth chat media gateway
+        # shellcheck disable=SC2086
+        compose up -d --no-build --force-recreate --wait $leaves
         probe_ready
         echo 'mTLS enabled; service identities and user authorization are both checked'
         ;;
     status)
         if [ -f "$VAULT_ROOT/.env.rpc" ]; then
             echo 'mTLS overlay enabled'
-            for service in auth chat media gateway; do
+            for service in $leaves; do
                 printf '%s: ' "$service"
                 openssl x509 -in "$VAULT_ROOT/secrets/rpc/$service/tls.crt" -noout -enddate
             done

@@ -15,7 +15,7 @@ name: vault-chat
 # other through service names and container ports, so overrides never affect
 # the application configuration.
 #
-# Every published port is bound to 127.0.0.1: the databases, Redis, NATS and
+# Every published port is bound to 127.0.0.1: the databases, Redis and
 # MinIO use fixed development credentials or none at all and must not be
 # reachable from other machines. The gateway is the only service meant for
 # clients; set GATEWAY_HOST_ADDR=0.0.0.0 to expose it on all interfaces, for
@@ -91,22 +91,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # NATS remains an optional development tool; Redis carries chat events.
-  nats:
-    networks: [events]
-    profiles: [events]
-    image: nats:2.10-alpine
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "127.0.0.1:${NATS_HOST_PORT:-4222}:4222"
-      - "127.0.0.1:${NATS_MONITOR_HOST_PORT:-8222}:8222"
-    volumes:
-      - natsdata:/data
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+  # NATS JetStream for push signals comes with the push overlay
+  # (docker-compose.push.yml, docs/push.md): TLS with service certificates
+  # only, so it needs the mTLS overlay too.
 
   minio:
     networks: [objects]
@@ -442,7 +429,6 @@ volumes:
   chat_pgdata:
   media_pgdata:
   redisdata:
-  natsdata:
   miniodata:
 
 networks:

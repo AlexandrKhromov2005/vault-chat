@@ -47,6 +47,26 @@ class Certificates(unittest.TestCase):
             self.assertTrue((root / 'rpc/preview/tls.key').is_file())
             certs.issue(root)
 
+    def test_push_broker_leaf_is_added_to_an_existing_deployment(self):
+        # A deployment issued before the push broker keeps its CA and
+        # leaves; init adds only the broker's identity.
+        original = certs.SERVICES
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            try:
+                certs.SERVICES = ('auth', 'chat', 'media', 'gateway', 'preview')
+                certs.issue(root)
+            finally:
+                certs.SERVICES = original
+            before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+            certs.issue(root)
+            for path, content in before.items():
+                self.assertEqual(content, (root / path).read_bytes())
+            output = certs.openssl('x509', '-in', root / 'rpc/nats/tls.crt', '-text', '-noout').decode()
+            self.assertIn('DNS:nats.vault.internal', output)
+            self.assertIn('URI:spiffe://vault-chat/service/nats', output)
+            self.assertFalse((root / 'rpc/nats/ca.key').exists(), 'the signing key stays outside the broker mount')
+
     def test_incomplete_ca_is_not_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
             ca = Path(directory) / 'rpc-ca'

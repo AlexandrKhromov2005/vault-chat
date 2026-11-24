@@ -30,6 +30,24 @@ groups:
         for: 2m
         labels: {severity: warning}
         annotations: {summary: 'Event queue remains above 80%'}
+      - alert: PushSignalsLost
+        expr: increase(vault_push_signals_lost_total[10m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: 'Push signals were not stored: the broker or stream is unavailable or full; devices wake on their next sync'}
+      - alert: PushSignalsBacklog
+        expr: vault_push_stream_pending > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: 'More than 1000 push signals wait in the stream; Auth is not keeping up'}
+      - alert: PushStreamUnreachable
+        expr: vault_push_stream_pending < 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Auth cannot read the push signal stream'}
+      - alert: PushSignalsExhausted
+        expr: increase(vault_push_signals_exhausted_total[15m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: 'Push signals were terminated after their last delivery failed'}
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
         for: 5m
