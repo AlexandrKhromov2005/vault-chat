@@ -24,6 +24,8 @@ class Initialization(unittest.TestCase):
             self.assertTrue(values['CALLS_DB_PASSWORD'])
             self.assertTrue(values['CALLS_RUNTIME_DB_PASSWORD'])
             self.assertTrue(values['S3_ROOT_SECRET_KEY'])
+            self.assertEqual((root / 'secrets').stat().st_mode & 0o777, 0o700)
+            self.assertEqual((root / 'secrets/turn_secret').stat().st_mode & 0o777, 0o644)
 
     def test_repeat_preserves_credentials_and_keys(self):
         with tempfile.TemporaryDirectory() as directory:
