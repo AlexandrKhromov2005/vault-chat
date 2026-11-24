@@ -4,17 +4,26 @@
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-24
+
 ### Добавлено
 
-- Аудиозвонки один на один в личном диалоге в веб-клиенте (WebRTC): входящий
-  и исходящий вызов, принятие, отклонение, отмена и завершение, сигналы по
-  `signal_seq` с догрузкой после пропусков. Кнопка звонка появляется, только
-  когда Gateway отдаёт API звонков; см. [docs/calls/browser-client.md](docs/calls/browser-client.md).
+- Аудиозвонки один на один в личном диалоге в веб-клиенте и Android 0.2.0
+  (WebRTC): входящий и исходящий вызов, принятие, отклонение, отмена и
+  завершение, сигналы по `signal_seq` с догрузкой после пропусков. Android
+  использует закреплённую WebRTC-библиотеку и foreground service с микрофоном;
+  кнопка звонка появляется только при доступном Calls API.
+- Erlang/OTP control plane Calls: session-bound команды через Gateway, mTLS RPC
+  в Auth/Chat, собственная PostgreSQL с восстановлением незавершённых звонков,
+  лимит 200 активных звонков, drain, JSON-логи без SDP/candidates, метрики и
+  алерты. Coturn выдаёт ограниченные по времени TURN credentials; Calls БД
+  включена в backup/restore. См. [ADR 0005](docs/adr/0005-call-control.md) и
+  [эксплуатацию Calls](docs/calls/operations.md).
 - Звонок в веб-клиенте восстанавливается после краткой потери сети: ICE
   restart с новыми учётными данными TURN, повтор потерянных описаний с тем же
   `sender_seq`, завершение через 30 с без связи. Соединение через relay
   перезапускается до истечения учётных данных TURN.
-- Android-сборка 0.1.1 включает FCM: push сразу запускает синхронизацию и
+- Android-сборка 0.1.1 включила FCM: push сразу запускает синхронизацию и
   уведомление, а периодическая синхронизация каждые 15 минут остаётся fallback.
 
 ### Изменено
@@ -26,13 +35,47 @@
   получают его повторно. Брокер подключается push-оверлеем, требует mTLS и
   сертификат `secrets/rpc/nats` (`scripts/vps.sh mtls init`). Необязательный
   NATS без TLS из базового Compose удалён.
-
 - Веб-клиент перестроен по консольному макету Pulse: тёмная моноширинная тема,
   группы каналов и диалогов, сообщения без пузырей и мобильная навигация
   «список ↔ диалог». Все пользовательские данные и действия сохранены.
 - Android-клиент получил ту же консольную тему: строки комнат без аватаров,
   сообщения `time <author>` на всю ширину и command-style composer. Существующие
   чаты, вложения, outbox, аккаунт и навигация сохранены.
+
+### Исправлено
+
+- Исправлены TURN mapping за NAT, crash foreground service на Android API 26,
+  взаимная блокировка offer/answer и очистка звонка после ответа 404 на `end`.
+- `init` при обновлении pre-Calls VPS теперь создаёт отсутствующий
+  `CALLS_DB_PASSWORD`; regression воспроизводит отказ Compose до исправления.
+
+### Миграции и обновление VPS
+
+- Auth автоматически применяет additive-миграцию `0008_push_signal_marks`.
+  Calls получает новую отдельную БД; существующие комнаты, сообщения и файлы
+  не мигрируются и не изменяются. Старые backup без `calls.dump` остаются
+  пригодными для восстановления pre-Calls состояния.
+- Перед обновлением с v0.6.x выполните backup старого релиза. Из нового
+  checkout повторите `init` с прежним `VAULT_IMAGE_TAG`, чтобы добавить Calls,
+  TURN и NATS secrets без замены существующих ключей; до первого backup нового
+  релиза запустите `calls-postgres`. Точный порядок — в
+  [docs/deployment.md](docs/deployment.md#обновление-с-v06x-и-раньше).
+- На VPS должны быть разрешены TURN `3478/tcp+udp` и relay
+  `50000–50099/udp`. При включённом `.env.push` обновление также поднимает
+  NATS JetStream с mTLS; новый stream не входит в backup и создаётся заново
+  после restore.
+
+### Проверки и ограничения
+
+- Для Calls прошли 152 EUnit, xref, Dialyzer и нагрузочная проверка 200
+  звонков без ошибок; browser RTP, reconnect, forced TURN и восстановление
+  после restart coturn проверены отдельными acceptance-сценариями. Два
+  последовательных Android API 26 ↔ browser прогона подтвердили двунаправленный
+  RTP. Эти результаты не заменяют полный CI итогового release commit.
+- Реальный Wi-Fi/mobile handover, relay дольше 10 минут (#162), delayed push,
+  process death и forced TURN именно на Android (#163) остаются непроверенными.
+  Production rollout и конфигурация (#160) фиксируются отдельно от публикации
+  исходного кода.
 
 ## [0.6.1] — 2026-11-11
 
@@ -234,7 +277,12 @@ Compose с тремя отдельными PostgreSQL, Redis и закрытым
   нужен поддерживаемый S3-провайдер. Антивирус, квоты и retention файлов не реализованы.
 - Уже выданный access token действует до истечения срока после отзыва сессии.
 
-[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.4.0...main
+[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.7.0...main
+[0.7.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.7.0
+[0.6.1]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.6.1
+[0.6.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.6.0
+[0.5.1]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.5.1
+[0.5.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.5.0
 [0.4.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.4.0
 [0.3.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.3.0
 [0.2.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.2.0

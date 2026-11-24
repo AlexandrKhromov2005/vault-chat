@@ -21,6 +21,8 @@ class Initialization(unittest.TestCase):
             values = dict(line.split('=', 1) for line in (root / '.env.vps').read_text().splitlines() if '=' in line)
             self.assertEqual(values['AUTH_DB_PASSWORD'], 'keep-existing')
             self.assertTrue(values['AUTH_RUNTIME_DB_PASSWORD'])
+            self.assertTrue(values['CALLS_DB_PASSWORD'])
+            self.assertTrue(values['CALLS_RUNTIME_DB_PASSWORD'])
             self.assertTrue(values['S3_ROOT_SECRET_KEY'])
 
     def test_repeat_preserves_credentials_and_keys(self):
