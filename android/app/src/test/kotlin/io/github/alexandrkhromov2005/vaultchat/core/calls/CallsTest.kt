@@ -83,6 +83,8 @@ class CallsTest {
         await("media") { media.started == 1 }
         media.listener!!.connected()
         media.listener!!.remote()
+        media.listener!!.connection(CallConnection.RELAY)
+        await("relay transport") { calls.view.value?.connection == CallConnection.RELAY }
         media.listener!!.signal("offer", "synthetic-offer")
         calls.onEvent(Frame.CallEvent("call.signal", id))
         await("answer") { media.received.contains("answer") }
@@ -150,6 +152,20 @@ class CallsTest {
         val command = """"command_id":"([^"]+)"""".toRegex()
         val firstId = command.find(first)!!.groupValues[1]
         assertEquals(firstId, command.find(second)!!.groupValues[1])
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun callerCancelsRingingCallWithoutNestedCommandLock() = runBlocking {
+        enqueue(call("call-1", "ringing"), call("call-1", "ringing"), call("call-1", "ended"))
+
+        calls.start("room-1")
+        await("created") { calls.view.value?.state == "ringing" }
+        calls.cancel()
+
+        await("cancelled") { calls.view.value?.state == "ended" }
+        assertEquals(1, media.closed)
+        assertEquals(3, server.requestCount)
         assertSingleBearerPrefix()
     }
 

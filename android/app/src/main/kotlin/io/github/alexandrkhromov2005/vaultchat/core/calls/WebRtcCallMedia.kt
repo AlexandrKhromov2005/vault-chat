@@ -175,6 +175,10 @@ class WebRtcCallMedia(
                     recovering = false
                     restarts = 0
                     listener?.connected()
+                    scope.launch {
+                        val relay = runCatching { usesRelay() }.getOrNull() ?: return@launch
+                        listener?.connection(if (relay) CallConnection.RELAY else CallConnection.DIRECT)
+                    }
                 }
                 PeerConnection.IceConnectionState.FAILED -> recover(failed = true)
                 PeerConnection.IceConnectionState.DISCONNECTED -> recover(failed = false)
@@ -198,6 +202,7 @@ class WebRtcCallMedia(
             return
         }
         recovering = true
+        listener?.connection(CallConnection.RECOVERING)
         scope.launch {
             delay(if (failed) 0 else 2_000)
             while (recovering && restarts < 3) {
