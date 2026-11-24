@@ -27,6 +27,9 @@ open PRs and course coverage. Target features below are not evidence of completi
 | Independent Deploy | Services deploy independently; chat can be updated without touching auth. |
 | Separate Databases | Every service owns its data exclusively; no cross-service table access. |
 
+The decision as implemented, with its cost, is recorded in
+[ADR 0008](docs/adr/0008-service-decomposition.md).
+
 ### Why not Monolith?
 
 A modular monolith would be easier for 3 people short-term, but:
@@ -121,6 +124,8 @@ A modular monolith would be easier for 3 people short-term, but:
 ### 3.1 Synchronous (gRPC)
 
 Used for request/response operations requiring immediate consistency.
+Contracts, identity, limits and versioning are recorded in
+[ADR 0009](docs/adr/0009-internal-grpc.md).
 
 **Implementation:** the official [`google.golang.org/grpc`](https://pkg.go.dev/google.golang.org/grpc) (grpc-go) library for servers and clients; `.proto` sources in `api/proto/`, code generated with [`buf`](https://buf.build). Connect-RPC was considered and rejected: grpc-go is the reference implementation with the most mature interceptor / mTLS / load-balancing ecosystem, and the team already knows it.
 
@@ -164,6 +169,8 @@ for managing mTLS, retries and circuit breakers.
 | Media | PostgreSQL | File metadata, retention rules |
 
 **Rule:** No service queries another service's database directly. All data access via API.
+See [ADR 0010](docs/adr/0010-database-per-service.md) for roles, networks and
+what keeps cross-service references consistent.
 
 ### 4.2 Caching Strategy (Redis)
 
@@ -214,6 +221,9 @@ for managing mTLS, retries and circuit breakers.
 - **AuthN:** JWT (RS256, short-lived access tokens + long-lived refresh tokens). Optional TOTP 2FA.
 - **AuthZ:** RBAC with permissions: `message:read`, `message:write`, `room:admin`, `org:owner`, etc.
 - **Service-to-service:** mTLS with internal CA; each service has its own certificate.
+
+Implemented sessions, revocation and WebSocket authentication are recorded in
+[ADR 0011](docs/adr/0011-authentication-and-sessions.md).
 
 ### 5.3 Encryption
 
