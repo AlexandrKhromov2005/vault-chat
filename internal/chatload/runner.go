@@ -25,8 +25,12 @@ import (
 
 const (
 	requestTimeout = 10 * time.Second
-	// settle lets events of the last requests of a phase arrive.
-	settle = 2 * time.Second
+	// After the last request of a phase the generator waits until every
+	// expected event arrived, as long as events keep arriving within
+	// settleQuiet, and at most settleLimit. Late events would otherwise be
+	// missing from the delivery count under overload.
+	settleQuiet = 2 * time.Second
+	settleLimit = 15 * time.Second
 	// maxInFlight bounds the open-loop generator; beyond it the stand is
 	// far past saturation and new operations are counted as overload.
 	maxInFlight = 2000
@@ -447,7 +451,7 @@ func (r *Runner) phase(ctx context.Context, name string, sendRate float64, durat
 	}
 	wg.Wait()
 	elapsed := time.Since(begin)
-	time.Sleep(settle)
+	settled(stats)
 	stopSampling()
 	server := <-samples
 	r.scraper.delta(ctx, before, &server)
@@ -504,6 +508,22 @@ func (r *Runner) phase(ctx context.Context, name string, sendRate float64, durat
 		"send_p95_ms", report.Send.P95, "delivery_p95_ms", report.Delivery.P95, "errors", failed,
 		"integrity_violations", report.Integrity.Violations())
 	return report, nil
+}
+
+// settled waits for the events of the phase's last messages.
+func settled(stats *PhaseStats) {
+	limit := time.Now().Add(settleLimit)
+	last, quiet := stats.deliveries.Load(), time.Now().Add(settleQuiet)
+	for time.Now().Before(limit) && time.Now().Before(quiet) {
+		delivered := stats.deliveries.Load()
+		if delivered >= stats.expected.Load() {
+			return
+		}
+		if delivered != last {
+			last, quiet = delivered, time.Now().Add(settleQuiet)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func (r *Runner) send(ctx context.Context, stats *PhaseStats, op operation) {
