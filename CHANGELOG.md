@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-24
+
+### Исправлено
+
+- `init` выставляет `turn_secret` mode 0644 при неизменном закрытом родительском
+  каталоге `secrets` 0700: coturn и Calls работают от UID 65532 и не могли
+  прочитать root-only файл 0600 при первом production upgrade. Повторный `init`
+  исправляет существующую установку без смены секрета.
+
 ## [0.7.0] — 2026-11-24
 
 ### Добавлено
@@ -277,7 +286,8 @@ Compose с тремя отдельными PostgreSQL, Redis и закрытым
   нужен поддерживаемый S3-провайдер. Антивирус, квоты и retention файлов не реализованы.
 - Уже выданный access token действует до истечения срока после отзыва сессии.
 
-[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.7.0...main
+[Unreleased]: https://github.com/AlexandrKhromov2005/vault-chat/compare/v0.7.1...main
+[0.7.1]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.7.1
 [0.7.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.7.0
 [0.6.1]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.6.1
 [0.6.0]: https://github.com/AlexandrKhromov2005/vault-chat/releases/tag/v0.6.0

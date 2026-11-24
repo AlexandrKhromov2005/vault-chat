@@ -56,6 +56,7 @@ if not turn_secret.exists():
     fd = os.open(turn_secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         stream.write(secrets.token_hex(32) + '\n')
+turn_secret.chmod(0o644)
 rpc_env = root / '.env.rpc'
 if not rpc_env.exists():
     fd = os.open(rpc_env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
