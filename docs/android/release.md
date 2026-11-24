@@ -64,9 +64,9 @@ key must never change (see below).
        --title "Vault Chat for Android $version" --notes "APK SHA-256: … Certificate SHA-256: …"
    ```
 
-## Not done yet
+## Remaining acceptance
 
-- Baseline Profiles and checks on real devices and on the API 26 emulator:
-  no device or emulator was available while building the app. The release
-  build with R8 was built, not run.
-- The first release itself, which needs the signing key.
+- Baseline Profiles and installation/upgrade on physical devices are not done.
+- API 26 emulator calls with bidirectional RTP are verified, but delayed push,
+  process death, real network handover and forced TURN on Android remain open in
+  [#163](https://github.com/AlexandrKhromov2005/vault-chat/issues/163).
