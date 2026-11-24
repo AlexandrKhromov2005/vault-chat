@@ -18,6 +18,9 @@
 - WebRTC закреплён как `io.github.webrtc-sdk:android:150.7871.08` в version
   catalog. AAR загружается из Maven Central; никаких незакреплённых версий или
   сторонних TURN/SFU нет.
+- UI показывает четыре этапа звонка и пояснение, чего ждёт пользователь. Тип
+  связи `DIRECT`/`RELAY` определяется по selected candidate pair из RTCStats;
+  `RECOVERING` приходит из ICE callback, а не из предположения о сети.
 - `WebRtcCallMedia` передаёт только audio, использует DTLS-SRTP стека WebRTC,
   не пишет SDP/candidates в логи. Caller делает bounded ICE restart, callee
   отвечает на новый offer. TURN credentials обновляются перед expiry и при

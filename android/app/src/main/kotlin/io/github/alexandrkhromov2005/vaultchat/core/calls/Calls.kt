@@ -26,6 +26,7 @@ import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
 enum class CallRole { CALLER, CALLEE }
+enum class CallConnection { UNKNOWN, DIRECT, RELAY, RECOVERING }
 
 data class CallView(
     val callId: String? = null,
@@ -35,6 +36,7 @@ data class CallView(
     val owned: Boolean,
     val pending: Boolean = false,
     val remote: Boolean = false,
+    val connection: CallConnection = CallConnection.UNKNOWN,
     val error: String? = null,
 )
 
@@ -52,6 +54,7 @@ interface CallMediaListener {
     suspend fun signal(kind: String, payload: String)
     fun connected()
     fun remote()
+    fun connection(value: CallConnection) {}
     suspend fun refreshTurn(): List<IceServerDto> = emptyList()
     fun failed()
 }
@@ -90,6 +93,7 @@ class Calls(
         var loopsStarted: Boolean = false,
         var connectedSent: Boolean = false,
         var remote: Boolean = false,
+        var connection: CallConnection = CallConnection.UNKNOWN,
         var cursor: Long = 0,
         var senderSeq: Long = 0,
         val ownSignals: MutableSet<Long> = mutableSetOf(),
@@ -155,12 +159,8 @@ class Calls(
         runCommand(call, "cancel") { id, body -> cancelCall(id, call.id!!, body) }
     }
 
-    fun end() {
-        scope.launch {
-            val call = current ?: return@launch
-            if (call.state == "ended") return@launch
-            runCommand(call, "end") { id, body -> endCall(id, call.id!!, body) }
-        }
+    fun end() = command { call ->
+        runCommand(call, "end") { id, body -> endCall(id, call.id!!, body) }
     }
 
     fun dismiss() {
@@ -232,22 +232,20 @@ class Calls(
     }
 
     private suspend fun runCommand(call: CallSession, action: String, request: suspend io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi.(String, CallCommand) -> retrofit2.Response<CallDto>) {
-        commandLock.withLock {
-            if (current != call || call.state == "ended") return@withLock
-            call.pending = true
-            publish(call)
-            try {
-                val command = CallCommand(newId())
-                val result = withRetries { requests.send { request(this, it, command) } }
-                call.pending = false
-                apply(call, result)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                call.pending = false
-                if (e is ApiException && e.status == 404) finish(call)
-                else publish(call, error = e.message ?: "Команда $action не выполнена")
-            }
+        if (current != call || call.state == "ended") return
+        call.pending = true
+        publish(call)
+        try {
+            val command = CallCommand(newId())
+            val result = withRetries { requests.send { request(this, it, command) } }
+            call.pending = false
+            apply(call, result)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            call.pending = false
+            if (e is ApiException && e.status == 404) finish(call)
+            else publish(call, error = e.message ?: "Команда $action не выполнена")
         }
     }
 
@@ -314,6 +312,11 @@ class Calls(
         }
         override fun remote() {
             call.remote = true
+            publish(call)
+        }
+        override fun connection(value: CallConnection) {
+            if (current != call || call.state == "ended") return
+            call.connection = value
             publish(call)
         }
         override fun failed() = end()
@@ -395,7 +398,7 @@ class Calls(
 
     private fun publish(call: CallSession, id: String? = call.id, error: String? = null) {
         if (current != call) return
-        mutableView.value = CallView(id, call.roomId, call.state, call.role, call.owned, call.pending, call.remote, error)
+        mutableView.value = CallView(id, call.roomId, call.state, call.role, call.owned, call.pending, call.remote, call.connection, error)
     }
 
     private fun finish(call: CallSession, error: String? = null) {
