@@ -30,7 +30,7 @@ REST; комнаты, отправка сообщений и история до
 | Наблюдаемость | JSON-логи через `slog`, request ID через HTTP → gRPC, `/health` и `/ready` у Gateway | Реализовано для Auth/Chat/Gateway |
 | Проверки | Unit-, PostgreSQL integration- и race-тесты, фаззинг, проверка `govulncheck`, конфигурации golangci-lint, buf и mockery | Локальные проверки |
 | Media | Загрузка и скачивание закрытых файлов, метаданные в отдельной БД, текущие права участника комнаты, вложения в сообщениях, истории и WebSocket; лимит 10 МиБ и проверка содержимого | gRPC и REST; [правила и ограничения](docs/media/files.md) |
-| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth, Chat и Media, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Media и Gateway с тремя PostgreSQL, Redis и S3 запускаются одной командой; NATS остаётся опциональным |
+| Инфраструктура | Docker Compose с отдельными PostgreSQL для Auth, Chat и Media, Redis, NATS и MinIO; общий `Dockerfile` для Go-сервисов (distroless, non-root), healthchecks и порядок старта | Auth, Chat, Media и Gateway с тремя PostgreSQL, Redis и S3 запускаются одной командой; NATS JetStream входит в opt-in push-оверлей |
 
 Правила и ограничения комнат описаны в [документации Chat](docs/chat/rooms.md).
 Chat хранит свои данные отдельно и не обращается к таблицам Auth.
@@ -162,7 +162,8 @@ Go-сервиса и локальное S3 из закреплённого ис�
 Первая сборка S3 занимает несколько минут. Ограничение поддержки MinIO и порядок
 работы с файлами описаны в [документации Media](docs/media/files.md).
 
-NATS пока не используется приложением и запускается отдельно через `--profile events`.
+NATS JetStream хранит push-сигналы Chat → Auth и запускается push-оверлеем вместе
+с mTLS; см. [push](docs/push.md).
 
 Gateway доступен на `http://localhost:8080`; Auth и Chat открыты только внутри
 сети Compose. По этому же адресу открывается [веб-клиент](#веб-клиент).
