@@ -1,0 +1,30 @@
+{
+  "seed": 181,
+  "users": 120,
+  "group_size": 10,
+  "min_text_bytes": 32,
+  "max_text_bytes": 512,
+  "send_rate": 40,
+  "retry_share": 0.02,
+  "read_rate": 20,
+  "warmup_seconds": 20,
+  "series": 3,
+  "series_seconds": 60,
+  "reconnect": {"users": 20, "offline_seconds": 10, "seconds": 40},
+  "ramp": {"send_rates": [60, 80, 100, 120, 140], "step_seconds": 30},
+  "gates": {
+    "send_p95_ms": 100,
+    "send_p99_ms": 250,
+    "read_p95_ms": 100,
+    "read_p99_ms": 250,
+    "delivery_p95_ms": 150,
+    "delivery_p99_ms": 300,
+    "max_error_rate": 0.001,
+    "min_throughput_ratio": 0.98,
+    "min_delivery_ratio": 0.999,
+    "max_throughput_cv": 0.05,
+    "max_p95_spread": 1.5,
+    "max_memory_ratio": 0.9,
+    "max_reconnect_ms": 3000
+  }
+}
