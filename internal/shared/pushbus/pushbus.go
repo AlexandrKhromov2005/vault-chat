@@ -146,7 +146,12 @@ type Signal struct {
 
 // Publisher stores signals in the stream.
 type Publisher struct {
-	js jetstream.JetStream
+	js asyncPublisher
+}
+
+// asyncPublisher is the part of jetstream.JetStream a Publisher uses.
+type asyncPublisher interface {
+	PublishMsgAsync(msg *nats.Msg, opts ...jetstream.PublishOpt) (jetstream.PubAckFuture, error)
 }
 
 // NewPublisher binds a connection made with Connect.
@@ -188,6 +193,16 @@ func (p *Publisher) Publish(ctx context.Context, signals []Signal) (int, error) 
 		futures = append(futures, future)
 	}
 	for _, future := range futures {
+		// An answer already in counts even when ctx ended meanwhile: select
+		// would pick among ready cases at random.
+		select {
+		case <-future.Ok():
+			continue
+		case err := <-future.Err():
+			fail(err)
+			continue
+		default:
+		}
 		select {
 		case <-future.Ok():
 		case err := <-future.Err():
