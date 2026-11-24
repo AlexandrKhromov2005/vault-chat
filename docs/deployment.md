@@ -111,13 +111,13 @@ Calls БД должна существовать до первого backup но
 cd /opt/vault-chat
 scripts/vps.sh backup  # старым релизом, до смены checkout
 git fetch origin --tags
-git checkout v0.7.0
+git checkout v0.7.1
 # Подставить публичный IP и прежний VAULT_IMAGE_TAG, например v0.6.1.
 scripts/vps.sh init PUBLIC_IP OLD_IMAGE_TAG
-scripts/vps.sh build v0.7.0  # либо загрузить заранее собранные образы
+scripts/vps.sh build v0.7.1  # либо загрузить заранее собранные образы
 docker compose -p vault-chat --env-file .env.vps \
     -f deployments/docker-compose.vps.yml up -d --no-build --wait calls-postgres
-scripts/vps.sh update v0.7.0
+scripts/vps.sh update v0.7.1
 ufw allow 3478
 ufw allow 50000:50099/udp
 scripts/vps.sh monitoring install  # если настроен мониторинг
