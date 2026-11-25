@@ -145,7 +145,8 @@ class Calls(
             throw e
         } catch (e: Exception) {
             call.pending = false
-            publish(call, error = e.message ?: "Не удалось принять звонок")
+            if (e is ApiException && e.status == 404) finish(call)
+            else publish(call, error = e.message ?: "Не удалось принять звонок")
         }
     }
 
@@ -191,9 +192,17 @@ class Calls(
             val call = current
             if (call != null && call.state != "ended") {
                 val id = call.id ?: return
-                listed.find { it.callId == id }?.let { apply(call, it) } ?: refresh(call)
-                if (call.mediaStarted) catchUp(call)
-                return
+                val found = listed.find { it.callId == id }
+                if (found != null) {
+                    apply(call, found)
+                    if (call.mediaStarted) catchUp(call)
+                    return
+                }
+                refreshNow(call)
+                if (current == call && call.state != "ended") {
+                    if (call.mediaStarted) catchUp(call)
+                    return
+                }
             }
             val found = listed.firstOrNull { it.callerId == me || it.calleeId == me } ?: return
             val role = if (found.callerId == me) CALLER else CALLEE
@@ -250,14 +259,18 @@ class Calls(
     }
 
     private fun refresh(call: CallSession) {
-        scope.launch {
-            val id = call.id ?: return@launch
-            try {
-                apply(call, requests.send { call(it, id) })
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-            }
+        scope.launch { refreshNow(call) }
+    }
+
+    private suspend fun refreshNow(call: CallSession) {
+        val id = call.id ?: return
+        try {
+            apply(call, requests.send { call(it, id) })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiException) {
+            if (e.status == 404) finish(call)
+        } catch (_: Exception) {
         }
     }
 
