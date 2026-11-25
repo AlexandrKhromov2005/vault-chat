@@ -198,6 +198,21 @@ class CallsTest {
     }
 
     @Test
+    fun acceptingExpiredIncomingCallReleasesPreparedMedia() = runBlocking {
+        enqueue("""{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""")
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        server.enqueue(MockResponse.Builder().code(404).body("""{"error":"not_found"}""").build())
+
+        calls.accept()
+
+        await("expired") { calls.view.value?.state == "ended" }
+        assertEquals(1, media.prepared)
+        assertEquals(1, media.closed)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
     fun permissionFailureDoesNotCreateCall() = runBlocking {
         media.prepareError = SecurityException("denied")
         calls.start("room-1")
