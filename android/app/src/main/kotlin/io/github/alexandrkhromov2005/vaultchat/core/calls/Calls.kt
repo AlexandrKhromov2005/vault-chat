@@ -291,8 +291,8 @@ class Calls(
         scope.launch {
             try {
                 val turn = runCatching { requests.send { turnCall(it, call.id!!, EmptyCallBody()) } }.getOrNull()
-                media?.start(call.role, turn?.iceServers ?: emptyList(), mediaListener(call))
                 foreground(true)
+                media?.start(call.role, turn?.iceServers ?: emptyList(), mediaListener(call))
                 schedule(call)
                 refreshTurnBeforeExpiry(call, turn?.ttl ?: 600)
             } catch (e: CancellationException) {

@@ -51,6 +51,15 @@ class CallsInstrumentedTest {
     }
 
     @Test
+    fun startsAndroidAudioAndReleasesMicrophone() = runBlocking {
+        val roomId = androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("roomId")
+            ?: error("roomId is required")
+        val calls = ApplicationProvider.getApplicationContext<VaultChatApplication>().container.chats.awaitCurrent()!!.calls
+        calls.start(roomId)
+        awaitBidirectionalAudioAndEnd(calls)
+    }
+
+    @Test
     fun acceptsBrowserAudioAndReleasesMicrophone() = runBlocking {
         val container = ApplicationProvider.getApplicationContext<VaultChatApplication>().container
         val calls = container.chats.awaitCurrent()!!.calls
@@ -61,16 +70,21 @@ class CallsInstrumentedTest {
         assertTrue("session issued an empty access token", accessToken.isNotBlank())
         val server = ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true)
         val api = container.gateway.api(server)
-        await("call visible through authenticated REST", 45_000) {
+        await("call visible through authenticated REST", 180_000) {
             call { api.activeCalls(bearer(accessToken)) }.body.calls.isNotEmpty()
         }
         calls.reconcileNow()
-        await("incoming browser call", 20_000) {
+        await("incoming browser call", 60_000) {
             if (calls.view.value?.state != "ringing") calls.reconcileNow()
             calls.view.value?.state == "ringing"
         }
         calls.accept()
-        await("active remote audio", 120_000) {
+        awaitBidirectionalAudioAndEnd(calls)
+    }
+
+    private suspend fun awaitBidirectionalAudioAndEnd(calls: Calls) {
+        await("active remote audio", 900_000) {
+            if (calls.view.value?.state != "active") calls.reconcileNow()
             calls.view.value?.state == "active" && calls.view.value?.remote == true
         }
         val before = calls.audioBytes()

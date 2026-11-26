@@ -68,6 +68,41 @@ class CallsTest {
     }
 
     @Test
+    fun foregroundStartsBeforeMediaInitialization() = runBlocking {
+        calls = Calls("alice", requests, mediaFactory = media, foreground = { active ->
+            media.events += if (active) "foreground-start" else "foreground-stop"
+        })
+        val incoming = call("call-1", "ringing", caller = "bob", callee = "alice")
+        enqueue("""{"calls":[$incoming]}""", call("call-1", "connecting", caller = "bob", callee = "alice"), turn(), call("call-1", "ended", caller = "bob", callee = "alice"))
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media") { media.started == 1 }
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+
+        assertEquals(listOf("foreground-start", "media", "foreground-stop"), media.events)
+    }
+
+    @Test
+    fun mediaInitializationFailureStopsForeground() = runBlocking {
+        calls = Calls("alice", requests, mediaFactory = media, foreground = { active ->
+            media.events += if (active) "foreground-start" else "foreground-stop"
+        })
+        media.startError = IllegalStateException("synthetic media failure")
+        val incoming = call("call-1", "ringing", caller = "bob", callee = "alice")
+        enqueue("""{"calls":[$incoming]}""", call("call-1", "connecting", caller = "bob", callee = "alice"), turn())
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("ended") { calls.view.value?.state == "ended" }
+
+        assertEquals(listOf("foreground-start", "media", "foreground-stop"), media.events)
+    }
+
+    @Test
     fun callerReconcilesSignalsWithoutDuplicatingMedia() = runBlocking {
         val id = UUID.randomUUID().toString().replace("-", "").uppercase()
         enqueue(
@@ -249,6 +284,8 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     var started = 0
     var closed = 0
     var prepareError: Exception? = null
+    var startError: Exception? = null
+    val events = mutableListOf<String>()
     var listener: CallMediaListener? = null
     var answerOnOffer = false
     var answerSent = false
@@ -262,6 +299,8 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     }
 
     override suspend fun start(role: CallRole, iceServers: List<io.github.alexandrkhromov2005.vaultchat.core.net.IceServerDto>, listener: CallMediaListener) {
+        events += "media"
+        startError?.let { throw it }
         started++
         this.listener = listener
     }

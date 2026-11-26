@@ -1,0 +1,105 @@
+services:
+  postgres:
+    network_mode: host
+    networks: !reset []
+    command: ["postgres", "-p", "15432", "-c", "listen_addresses=127.0.0.1"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth -d auth_db -p 15432"]
+  chat-postgres:
+    network_mode: host
+    networks: !reset []
+    command: ["postgres", "-p", "15433", "-c", "listen_addresses=127.0.0.1"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chat_db -p 15433"]
+  calls-postgres:
+    network_mode: host
+    networks: !reset []
+    command: ["postgres", "-p", "15434", "-c", "listen_addresses=127.0.0.1"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calls -d calls_db -p 15434"]
+  media-postgres:
+    network_mode: host
+    networks: !reset []
+    command: ["postgres", "-p", "15435", "-c", "listen_addresses=127.0.0.1"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media -d media_db -p 15435"]
+  redis:
+    network_mode: host
+    networks: !reset []
+    command: ["redis-server", "--bind", "127.0.0.1", "--port", "16379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "16379", "ping"]
+  profile-cache:
+    network_mode: host
+    networks: !reset []
+    command: ["redis-server", "--bind", "127.0.0.1", "--port", "16380", "--maxmemory", "16mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "16380", "ping"]
+  minio:
+    network_mode: host
+    networks: !reset []
+    command: ["server", "/data", "--address", "127.0.0.1:19000", "--console-address", "127.0.0.1:19001"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "-http", "http://127.0.0.1:19000/minio/health/ready", "-timeout", "2s"]
+  auth:
+    network_mode: host
+    networks: !reset []
+    environment:
+      AUTH_GRPC_ADDR: "127.0.0.1:50051"
+      AUTH_REDIS_ADDR: "127.0.0.1:16379"
+      AUTH_DATABASE_URL: "postgres://auth_app:auth-runtime@127.0.0.1:15432/auth_db?sslmode=disable"
+  auth-migrate:
+    network_mode: host
+    networks: !reset []
+    environment:
+      MIGRATION_DATABASE_URL: "postgres://auth:auth@127.0.0.1:15432/auth_db?sslmode=disable"
+  chat:
+    network_mode: host
+    networks: !reset []
+    environment:
+      CHAT_GRPC_ADDR: "127.0.0.1:50052"
+      CHAT_MEDIA_GRPC_ADDR: "passthrough:///127.0.0.1:50053"
+      CHAT_AUTH_GRPC_ADDR: "passthrough:///127.0.0.1:50051"
+      CHAT_DATABASE_URL: "postgres://chat_app:chat-runtime@127.0.0.1:15433/chat_db?sslmode=disable"
+      CHAT_REDIS_ADDR: "127.0.0.1:16379"
+  chat-migrate:
+    network_mode: host
+    networks: !reset []
+    environment:
+      MIGRATION_DATABASE_URL: "postgres://chat:chat@127.0.0.1:15433/chat_db?sslmode=disable"
+  media:
+    network_mode: host
+    networks: !reset []
+    environment:
+      MEDIA_GRPC_ADDR: "127.0.0.1:50053"
+      MEDIA_DATABASE_URL: "postgres://media_app:media-runtime@127.0.0.1:15435/media_db?sslmode=disable"
+      MEDIA_AUTH_GRPC_ADDR: "passthrough:///127.0.0.1:50051"
+      MEDIA_CHAT_GRPC_ADDR: "passthrough:///127.0.0.1:50052"
+      MEDIA_S3_ENDPOINT: "127.0.0.1:19000"
+  media-migrate:
+    network_mode: host
+    networks: !reset []
+    environment:
+      MIGRATION_DATABASE_URL: "postgres://media:media@127.0.0.1:15435/media_db?sslmode=disable"
+  s3-init:
+    network_mode: host
+    networks: !reset []
+    environment:
+      S3_ENDPOINT: "http://127.0.0.1:19000"
+  coturn:
+    environment:
+      TURN_PRIVATE_IP: "127.0.0.1"
+  calls:
+    network_mode: host
+    networks: !reset []
+    environment:
+      CALLS_DATABASE_URL: "postgres://calls_app:calls-runtime@127.0.0.1:15434/calls_db?sslmode=disable"
+      CALLS_AUTH_GRPC_ADDR: "127.0.0.1:50051"
+      CALLS_CHAT_GRPC_ADDR: "127.0.0.1:50052"
+      CALLS_REDIS_ADDR: "127.0.0.1:16379"
+      ERL_FLAGS: "-vault_calls ringing_timeout 900000 connecting_timeout 900000 heartbeat_timeout 300000"
+  calls-migrate:
+    network_mode: host
+    networks: !reset []
+    environment:
+      CALLS_DATABASE_URL: "postgres://calls:calls@127.0.0.1:15434/calls_db?sslmode=disable"

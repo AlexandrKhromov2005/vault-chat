@@ -1,0 +1,53 @@
+services:
+  minio:
+    build:
+      network: host
+  auth:
+    build:
+      network: host
+    ports:
+      - "127.0.0.1:15051:50051"
+  chat:
+    build:
+      network: host
+    ports:
+      - "127.0.0.1:15052:50052"
+  media:
+    build:
+      network: host
+    ports:
+      - "127.0.0.1:15053:50053"
+  calls:
+    build:
+      network: host
+    ports:
+      - "127.0.0.1:15054:50054"
+  coturn:
+    environment:
+      TURN_PRIVATE_IP: "127.0.0.1"
+  profile-cache:
+    ports:
+      - "127.0.0.1:16380:6379"
+  gateway:
+    build:
+      network: host
+    environment:
+      GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: "100"
+      GATEWAY_AUTH_RATE_LIMIT_BURST: "100"
+      GATEWAY_AUTH_IP_RATE_LIMIT_PER_MINUTE: "100"
+      GATEWAY_AUTH_IP_RATE_LIMIT_BURST: "100"
+  auth-migrate:
+    build:
+      network: host
+  chat-migrate:
+    build:
+      network: host
+  media-migrate:
+    build:
+      network: host
+  s3-init:
+    build:
+      network: host
+  calls-migrate:
+    build:
+      network: host

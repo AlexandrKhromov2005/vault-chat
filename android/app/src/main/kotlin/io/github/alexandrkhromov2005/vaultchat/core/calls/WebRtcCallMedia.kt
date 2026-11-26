@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import io.github.alexandrkhromov2005.vaultchat.BuildConfig
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayJson
 import io.github.alexandrkhromov2005.vaultchat.core.net.IceServerDto
 import kotlinx.coroutines.CancellationException
@@ -240,7 +241,11 @@ class WebRtcCallMedia(
         }).apply {
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-            iceTransportsType = PeerConnection.IceTransportsType.ALL
+            iceTransportsType = if (BuildConfig.CALLS_FORCE_RELAY) {
+                PeerConnection.IceTransportsType.RELAY
+            } else {
+                PeerConnection.IceTransportsType.ALL
+            }
         }
 
     private fun IceCandidate.payload() = CandidatePayload(sdp, sdpMid, sdpMLineIndex)

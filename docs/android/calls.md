@@ -61,6 +61,71 @@ GATEWAY_URL=http://127.0.0.1:8080 PROJECT=<local-project> \
 ringing/connecting/heartbeat timeouts можно увеличить через `ERL_FLAGS`
 (`-vault_calls ...`) только в disposable stack, не меняя production defaults.
 
+### Два Android-эмулятора
+
+`tests/ops/android_calls_acceptance.py` создаёт новых synthetic-пользователей,
+запускает caller и callee на двух устройствах и требует `OK (1 test)` на обоих.
+Каждая сторона проверяет рост отправленного и полученного RTP, завершение и
+отсутствие active call на сервере. `Process crashed` и JUnit failure не считаются
+успехом даже при нулевом коде `am instrument`. Debug APK собирается с
+`-Pvaultchat.callsForceRelay=true`, поэтому проверяется именно путь через TURN;
+обычные debug/release сборки сохраняют `IceTransportsType.ALL`.
+
+Стенд предназначен только для отдельного worktree и локального Docker. Нужны
+Android SDK с `platforms;android-37.0`, emulator, `platform-tools` и образ
+`system-images;android-26;default;x86_64`. Два AOSP AVD без Google Services
+используют до 3 GiB RAM; без KVM загрузка и ICE gathering могут занимать минуты.
+Не запускайте его против production и не копируйте настоящие ключи.
+
+```sh
+git worktree add --detach .tools/worktrees/android-calls <commit>
+cd .tools/worktrees/android-calls
+sh scripts/gen-jwt-keys.sh
+openssl rand -out secrets/turn_secret -hex 32
+chmod 644 secrets/turn_secret
+
+export PROJECT=vault-android-e2e
+export POSTGRES_HOST_PORT=15432 CHAT_POSTGRES_HOST_PORT=15433
+export CALLS_POSTGRES_HOST_PORT=15434 MEDIA_POSTGRES_HOST_PORT=15435
+export REDIS_HOST_PORT=16379 MINIO_HOST_PORT=19000 MINIO_CONSOLE_HOST_PORT=19001
+export GATEWAY_HOST_PORT=8080 TURN_PUBLIC_IP=10.0.2.2 TURN_PRIVATE_IP=127.0.0.1
+export CALLS_TURN_URIS='turn:10.0.2.2:3478?transport=tcp'
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  up -d --build --wait
+
+export ANDROID_HOME=/absolute/path/to/android-sdk
+tests/ops/android_calls_emulators.sh
+adb -s emulator-5554 wait-for-device
+adb -s emulator-5556 wait-for-device
+# Дождитесь sys.boot_completed=1 на обоих устройствах.
+python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" --build
+```
+
+Если Docker port forwarding на хосте не работает, вместо обычного `up` используйте
+host networking только для disposable-стенда. Все БД, Redis и MinIO слушают
+loopback; Calls gRPC в текущей реализации слушает все интерфейсы, поэтому стенд
+нельзя оставлять запущенным в недоверенной сети.
+
+```sh
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  -f tests/ops/fixtures/android-calls/host-network.yml up -d --wait \
+  postgres chat-postgres calls-postgres media-postgres redis profile-cache minio \
+  auth-migrate chat-migrate media-migrate calls-migrate s3-init auth chat media calls coturn
+tests/ops/android_calls_host_gateway.sh
+```
+
+Остановите только ресурсы этого стенда:
+
+```sh
+adb -s emulator-5554 emu kill
+adb -s emulator-5556 emu kill
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  down -v
+```
+
 24 ноября 2026 на API 26 emulator без KVM, после исправления TURN mapping и
 синхронизации acceptance, два подряд Android ↔ browser прогона завершились
 `OK (2 tests)`: Android и browser подтвердили рост sent/received RTP и корректный
