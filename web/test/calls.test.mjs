@@ -523,3 +523,21 @@ test('hanging up while this tab accepts ends the call the accept connected', asy
   assert.equal(t.mic.opened[0].track.stopped, true);
   assert.equal(t.pcs.created.length, 0);
 });
+
+// The server forgets a call whose ringing timed out: GET answers 404. When the
+// ended event was missed, the next call's event must still show the new call.
+test('a new incoming call replaces a ringing call that expired unnoticed', async () => {
+  const t = await ringingCallee();
+  assert.equal(t.calls.view.id, 'c-1');
+  const next = { ...t.server.view(), call_id: 'c-2', state: 'ringing' };
+  t.server.overrides['GET /api/v1/calls/c-1'] = () => {
+    throw apiError(404, 'not_found');
+  };
+  t.server.overrides['GET /api/v1/calls?active=true'] = () => ({ calls: [next] });
+
+  t.calls.handleEvent({ type: 'call.created', call_id: 'c-2' });
+  await flush();
+
+  assert.equal(t.calls.view.id, 'c-2');
+  assert.equal(t.calls.view.state, 'ringing');
+});

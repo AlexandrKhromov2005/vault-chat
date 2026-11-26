@@ -414,11 +414,16 @@ export class Calls extends EventTarget {
     if (current && current.state !== 'ended') {
       if (!current.id) return; // still being created
       const seen = listed.find((call) => call.id === current.id);
-      if (seen) this.#apply(current, seen);
-      else this.#refresh(current); // gone from the list: most likely ended
-      if (current.link) this.#enqueue(current, () => this.#catchUp(current));
-      this.#changed();
-      return;
+      // Gone from the list: most likely ended. A ringing call that expired
+      // unnoticed must not hide the call that replaced it.
+      if (!seen) await this.#refresh(current);
+      if (run !== this.#run || this.#call !== current) return;
+      if (seen || current.state !== 'ended') {
+        if (seen) this.#apply(current, seen);
+        if (current.link) this.#enqueue(current, () => this.#catchUp(current));
+        this.#changed();
+        return;
+      }
     }
 
     const me = this.#me;
