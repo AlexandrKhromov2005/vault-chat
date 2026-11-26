@@ -69,6 +69,10 @@ end без crash. Instrumented-тест не запускает Activity, поэ
 
 API 26 foreground-service crash, offer/answer mutex deadlock и остававшийся
 `active` после 404 на `end()` воспроизведены, покрыты regression и исправлены.
+На двух физических клиентах 25 ноября дополнительно воспроизвели истечение ringing
+через 30 секунд: `404` при refresh/accept оставлял старую панель, которая затем
+блокировала новый входящий. Теперь `404` завершает звонок и освобождает media,
+а reconcile переходит к актуальному входящему; три regression-сценария это покрывают.
 На физическом Galaxy S23 Ultra с Android 17 release 0.2.0 дополнительно
 воспроизвёл SIGABRT при инициализации WebRTC: R8 удалил `WebRtcClassLoader` и
 `JniZero`. В 0.2.1 keep-rules и проверка APK исправляют это; установка поверх
