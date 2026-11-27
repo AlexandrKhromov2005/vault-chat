@@ -170,7 +170,9 @@ func TestConsumerDeliversSignalsStoredWhileStopped(t *testing.T) {
 	r.devices.tokens[alice] = []string{"alice-phone"}
 	r.devices.tokens[bob] = []string{"bob-phone"}
 	r.publish(room, alice, bob)
-	require.EqualValues(t, 1, r.info().NumPending)
+	// The server counts a stored signal as pending for the consumer in a
+	// separate goroutine after the PubAck, so the count may lag behind.
+	require.Eventually(t, func() bool { return r.info().NumPending == 1 }, 5*time.Second, 10*time.Millisecond)
 
 	r.start()
 	r.settled()
