@@ -1,6 +1,7 @@
 package io.github.alexandrkhromov2005.vaultchat.core.calls
 
 import android.Manifest
+import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
@@ -68,14 +69,18 @@ class CallsInstrumentedTest {
         assertTrue("authorized path returned another user", me.userId == signedIn.userId)
         val accessToken = container.session.accessToken()
         assertTrue("session issued an empty access token", accessToken.isNotBlank())
-        val server = ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true)
-        val api = container.gateway.api(server)
+        val api = container.gateway.api(ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true))
         await("call visible through authenticated REST", 180_000) {
             call { api.activeCalls(bearer(accessToken)) }.body.calls.isNotEmpty()
         }
         calls.reconcileNow()
-        await("incoming browser call", 60_000) {
-            if (calls.view.value?.state != "ringing") calls.reconcileNow()
+        var lastReconcile = 0L
+        await("incoming remote call", 60_000) {
+            val now = System.currentTimeMillis()
+            if (calls.view.value?.state != "ringing" && now - lastReconcile >= 1_000) {
+                calls.reconcileNow()
+                lastReconcile = now
+            }
             calls.view.value?.state == "ringing"
         }
         calls.accept()
@@ -83,23 +88,45 @@ class CallsInstrumentedTest {
     }
 
     private suspend fun awaitBidirectionalAudioAndEnd(calls: Calls) {
-        await("active remote audio", 900_000) {
-            if (calls.view.value?.state != "active") calls.reconcileNow()
-            calls.view.value?.state == "active" && calls.view.value?.remote == true
-        }
-        val before = calls.audioBytes()
+        var before = 0L to 0L
         var after = before
+        var failure: Throwable? = null
         try {
+            var lastDiagnostics = 0L
+            var lastReconcile = 0L
+            await("active remote audio", 900_000) {
+                if (calls.view.value?.state == "ended") throw AssertionError("call ended before bidirectional audio")
+                val now = System.currentTimeMillis()
+                if (now - lastDiagnostics >= 15_000) {
+                    Log.i("CallsAcceptance", "view=${calls.view.value}, ${calls.rtcDiagnostics()}")
+                    lastDiagnostics = now
+                }
+                if (calls.view.value?.state == "ringing" && now - lastReconcile >= 1_000) {
+                    calls.reconcileNow()
+                    lastReconcile = now
+                }
+                calls.view.value?.state == "active" && calls.view.value?.remote == true
+            }
+            before = calls.audioBytes()
+            after = before
             await("bidirectional Android audio", 30_000) {
                 after = calls.audioBytes()
                 after.first > before.first && after.second > before.second
             }
+            assertTrue("Android sent no audio: $before -> $after", after.first > before.first)
+            assertTrue("Android received no audio: $before -> $after", after.second > before.second)
+        } catch (caught: Throwable) {
+            failure = caught
+            val diagnostics = runCatching { calls.rtcDiagnostics() }.getOrElse { "diagnostics failed: $it" }
+            throw AssertionError("view=${calls.view.value}, audio=$before -> $after, $diagnostics", caught)
         } finally {
-            calls.end()
-            await("ended", 15_000) { calls.view.value?.state == "ended" }
+            if (failure == null) {
+                calls.end()
+                await("ended", 15_000) { calls.view.value?.state == "ended" }
+            } else {
+                runCatching { calls.end() }
+            }
         }
-        assertTrue("Android sent no audio: $before -> $after", after.first > before.first)
-        assertTrue("Android received no audio: $before -> $after", after.second > before.second)
     }
 
     private suspend fun await(description: String, timeoutMs: Long, condition: suspend () -> Boolean) {

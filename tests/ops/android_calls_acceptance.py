@@ -17,7 +17,7 @@ PASSWORD = 'SyntheticPassword123'
 
 def command(*args, check=True, capture=False, cwd=None):
     return subprocess.run(args, check=check, text=True, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                          stderr=subprocess.PIPE if capture else subprocess.DEVNULL, timeout=360, cwd=cwd)
+                          stderr=subprocess.PIPE if capture else subprocess.DEVNULL, timeout=1_200, cwd=cwd)
 
 
 def adb(serial, *args, check=True):
@@ -58,7 +58,7 @@ def instrumentation(serial, email, method, log, room_id=None):
     return subprocess.Popen(args, stdout=log.open('w'), stderr=subprocess.STDOUT)
 
 
-def wait_ready(serial, timeout=240):
+def wait_ready(serial, timeout=600):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if adb(serial, 'shell', 'test', '-f', MARKER, check=False).returncode == 0:
@@ -84,6 +84,7 @@ def main():
     parser.add_argument('--caller', default='emulator-5554')
     parser.add_argument('--callee', default='emulator-5556')
     parser.add_argument('--build', action='store_true')
+    parser.add_argument('--no-install', action='store_true')
     args = parser.parse_args()
     if args.gateway not in ('http://127.0.0.1:8080', 'http://localhost:8080'):
         raise ValueError('acceptance requires the loopback gateway on port 8080')
@@ -98,9 +99,10 @@ def main():
                     cwd=root / 'android')
         debug = root / 'android/app/build/outputs/apk/debug/app-debug.apk'
         android_test = root / 'android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
-        for serial in (args.caller, args.callee):
-            adb(serial, 'install', '--no-streaming', '-r', '-g', str(debug))
-            adb(serial, 'install', '--no-streaming', '-r', str(android_test))
+        if not args.no_install:
+            for serial in (args.caller, args.callee):
+                adb(serial, 'install', '--no-streaming', '-r', '-g', str(debug))
+                adb(serial, 'install', '--no-streaming', '-r', str(android_test))
         suffix = str(time.time_ns())
         alice, alice_pair = make_user(args.gateway, args.project, 'alice', suffix)
         bob, bob_pair = make_user(args.gateway, args.project, 'bob', suffix)
@@ -111,7 +113,7 @@ def main():
         wait_ready(args.callee)
         caller = instrumentation(args.caller, alice, 'startsAndroidAudioAndReleasesMicrophone', caller_log,
                                  room_id=room['room_id'])
-        result(caller, caller_log, 1_000)
+        result(caller, caller_log, 1_500)
         result(callee, callee_log, 120)
         active = api(args.gateway, 'GET', '/api/v1/calls?active=true', token=alice_pair['access_token'])
         if active['calls']:

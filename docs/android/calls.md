@@ -15,6 +15,10 @@
   принявшая звонок, владеет peer; другие устройства видят state без microphone.
 - Команды и сигналы имеют UUID `command_id` и монотонный `sender_seq`; сетевые
   повторы сохраняют их. REST active/signals восстанавливает потери realtime.
+  Сигналы, полученные во время асинхронного `media.start()`, сохраняются в
+  очередь и проигрываются по порядку после готовности peer, а не отбрасываются.
+  Исходящий candidate повторяется с тем же `sender_seq` до подтверждения или
+  завершения звонка; offer/answer сохраняют ограниченное число попыток.
 - WebRTC закреплён как `io.github.webrtc-sdk:android:150.7871.08` в version
   catalog. AAR загружается из Maven Central; никаких незакреплённых версий или
   сторонних TURN/SFU нет.
@@ -69,7 +73,13 @@ ringing/connecting/heartbeat timeouts можно увеличить через `
 отсутствие active call на сервере. `Process crashed` и JUnit failure не считаются
 успехом даже при нулевом коде `am instrument`. Debug APK собирается с
 `-Pvaultchat.callsForceRelay=true`, поэтому проверяется именно путь через TURN;
-обычные debug/release сборки сохраняют `IceTransportsType.ALL`.
+обычные debug/release сборки сохраняют `IceTransportsType.ALL`. Фикстура задаёт
+`TURN_RELAY_IP=127.0.0.1`: иначе Coturn с wildcard relay address может выбрать
+LAN-интерфейс хоста, и mapping `10.0.2.2/127.0.0.1` не применится к candidates.
+Для диагностики без mapping `TURN_PUBLIC_IP`, `TURN_PRIVATE_IP` и `TURN_RELAY_IP`
+можно задать равными фактическому адресу хоста, а этот же адрес передать в
+`CALLS_TURN_URIS`; такой стенд доступен из соответствующей локальной сети и должен
+оставаться disposable.
 
 Стенд предназначен только для отдельного worktree и локального Docker. Нужны
 Android SDK с `platforms;android-37.0`, emulator, `platform-tools` и образ
@@ -82,7 +92,8 @@ git worktree add --detach .tools/worktrees/android-calls <commit>
 cd .tools/worktrees/android-calls
 sh scripts/gen-jwt-keys.sh
 openssl rand -out secrets/turn_secret -hex 32
-chmod 644 secrets/turn_secret
+chmod 755 secrets
+chmod 644 secrets/auth_jwt_private.pem secrets/auth_jwt_public.pem secrets/turn_secret
 
 export PROJECT=vault-android-e2e
 export POSTGRES_HOST_PORT=15432 CHAT_POSTGRES_HOST_PORT=15433
@@ -101,6 +112,10 @@ adb -s emulator-5556 wait-for-device
 # Дождитесь sys.boot_completed=1 на обоих устройствах.
 python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" --build
 ```
+
+Для повторного прогона на тех же тёплых AVD без изменения APK можно использовать
+`--no-install`; по умолчанию APK всегда переустанавливаются. Первый запуск
+instrumentation после загрузки без KVM может занимать несколько минут.
 
 Если Docker port forwarding на хосте не работает, вместо обычного `up` используйте
 host networking только для disposable-стенда. Все БД, Redis и MinIO слушают
@@ -134,6 +149,14 @@ end без crash. Instrumented-тест не запускает Activity, поэ
 
 API 26 foreground-service crash, offer/answer mutex deadlock и остававшийся
 `active` после 404 на `end()` воспроизведены, покрыты regression и исправлены.
+Потеря offer/candidate, пришедших до завершения асинхронного `media.start()`,
+также воспроизведена unit-регрессией: теперь они сохраняются и проигрываются
+после готовности media в исходном порядке.
+27 ноября двухэмуляторный forced-relay прогон пока не прошёл: TURN/TCP на одном
+AVD не завершил gathering; TURN/UDP через loopback mapping дал candidates и
+connectivity checks, но ICE завершился `FAILED`; при LAN relay candidate caller
+неоднократно получал client network timeout. Во всех этих прогонах RTP нулевой,
+поэтому работающий Android ↔ Android звонок ими не подтверждён.
 На двух физических клиентах 25 ноября дополнительно воспроизвели истечение ringing
 через 30 секунд: `404` при refresh/accept оставлял старую панель, которая затем
 блокировала новый входящий. Теперь `404` завершает звонок и освобождает media,

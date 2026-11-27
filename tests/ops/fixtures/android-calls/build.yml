@@ -24,7 +24,9 @@ services:
       - "127.0.0.1:15054:50054"
   coturn:
     environment:
-      TURN_PRIVATE_IP: "127.0.0.1"
+      TURN_PRIVATE_IP: "${TURN_PRIVATE_IP:-127.0.0.1}"
+      TURN_RELAY_IP: "${TURN_RELAY_IP:-127.0.0.1}"
+      TURN_VERBOSE: "true"
   profile-cache:
     ports:
       - "127.0.0.1:16380:6379"

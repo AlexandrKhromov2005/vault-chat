@@ -7,6 +7,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.Frame
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallCommand
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallDto
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.CreateCallRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmptyCallBody
@@ -90,6 +91,8 @@ class Calls(
         var owned: Boolean,
         var pending: Boolean = false,
         var mediaStarted: Boolean = false,
+        var mediaReady: Boolean = false,
+        val pendingSignals: MutableList<CallSignalDto> = mutableListOf(),
         var loopsStarted: Boolean = false,
         var connectedSent: Boolean = false,
         var remote: Boolean = false,
@@ -293,6 +296,14 @@ class Calls(
                 val turn = runCatching { requests.send { turnCall(it, call.id!!, EmptyCallBody()) } }.getOrNull()
                 foreground(true)
                 media?.start(call.role, turn?.iceServers ?: emptyList(), mediaListener(call))
+                catchUpLock.withLock {
+                    if (current == call && call.state != "ended") {
+                        call.mediaReady = true
+                        val pending = call.pendingSignals.toList()
+                        call.pendingSignals.clear()
+                        pending.forEach { signal -> media?.receive(signal.kind, signal.payload) }
+                    }
+                }
                 schedule(call)
                 refreshTurnBeforeExpiry(call, turn?.ttl ?: 600)
             } catch (e: CancellationException) {
@@ -341,8 +352,10 @@ class Calls(
             call.senderSeq++
             val seq = call.senderSeq
             var last: Exception? = null
-            repeat(3) { attempt ->
-                if (attempt > 0) delay(if (attempt == 1) 500 else 1_500)
+            var attempt = 0
+            while (current == call && call.state != "ended") {
+                attempt++
+                if (attempt > 1) delay(if (attempt == 2) 500 else if (attempt == 3) 1_500 else 1_000)
                 try {
                     val result = requests.send { signalCall(it, call.id!!, CallSignalRequest(kind, payload, seq)) }
                     call.ownSignals += result.signalSeq
@@ -352,6 +365,7 @@ class Calls(
                 } catch (e: Exception) {
                     last = e
                 }
+                if (kind != "candidate" && attempt >= 3) break
             }
             throw last ?: IllegalStateException("signal failed")
         }
@@ -365,7 +379,14 @@ class Calls(
                 for (signal in signals) {
                     if (signal.signalSeq <= call.cursor) continue
                     val own = signalLock.withLock { signal.signalSeq in call.ownSignals }
-                    if (!own) media?.receive(signal.kind, signal.payload)
+                    if (!own) {
+                        val currentMedia = media
+                        if (call.mediaReady && currentMedia != null) {
+                            currentMedia.receive(signal.kind, signal.payload)
+                        } else {
+                            call.pendingSignals += signal
+                        }
+                    }
                     call.cursor = signal.signalSeq
                 }
             } catch (e: CancellationException) {
@@ -426,6 +447,11 @@ class Calls(
     }
 
     suspend fun audioBytes(): Pair<Long, Long> = media?.audioBytes() ?: (0L to 0L)
+
+    internal suspend fun rtcDiagnostics(): String =
+        "cursor=${current?.cursor}, mediaReady=${current?.mediaReady}, pendingSignals=${current?.pendingSignals?.size}, " +
+            ((media as? WebRtcCallMedia)?.rtcDiagnostics()
+            ?: "media=${media?.javaClass?.simpleName ?: "null"}")
 
     private suspend fun <T> withRetries(request: suspend () -> T): T {
         var last: ApiException? = null

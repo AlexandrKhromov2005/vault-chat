@@ -7,7 +7,13 @@ config=/tmp/turnserver.conf
     printf '%s\n' 'max-allocate-lifetime=600' 'min-port=50000' 'max-port=50099' 'no-multicast-peers' 'pidfile=/tmp/turnserver.pid'
     printf 'static-auth-secret=%s\n' "$secret"
     public=${TURN_PUBLIC_IP:?required}
+    if [ -n "${TURN_RELAY_IP:-}" ]; then
+        printf 'relay-ip=%s\n' "$TURN_RELAY_IP"
+    fi
     printf 'external-ip=%s/%s\n' "$public" "${TURN_PRIVATE_IP:-$public}"
+    if [ "${TURN_VERBOSE:-false}" = true ]; then
+        printf '%s\n' 'verbose'
+    fi
     if [ "${TURN_ALLOW_PRIVATE:-false}" != true ]; then
         printf '%s\n' 'denied-peer-ip=10.0.0.0-10.255.255.255' 'denied-peer-ip=172.16.0.0-172.31.255.255' 'denied-peer-ip=192.168.0.0-192.168.255.255' 'denied-peer-ip=169.254.0.0-169.254.255.255' 'denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff' 'denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
     else

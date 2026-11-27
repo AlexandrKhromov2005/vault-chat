@@ -88,7 +88,7 @@ services:
       S3_ENDPOINT: "http://127.0.0.1:19000"
   coturn:
     environment:
-      TURN_PRIVATE_IP: "127.0.0.1"
+      TURN_PRIVATE_IP: "${TURN_PRIVATE_IP:-127.0.0.1}"
   calls:
     network_mode: host
     networks: !reset []
@@ -98,6 +98,8 @@ services:
       CALLS_CHAT_GRPC_ADDR: "127.0.0.1:50052"
       CALLS_REDIS_ADDR: "127.0.0.1:16379"
       ERL_FLAGS: "-vault_calls ringing_timeout 900000 connecting_timeout 900000 heartbeat_timeout 300000"
+    healthcheck:
+      timeout: 10s
   calls-migrate:
     network_mode: host
     networks: !reset []

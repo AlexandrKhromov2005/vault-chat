@@ -55,6 +55,11 @@ class WebRtcCallMedia(
     private var everConnected = false
     private var recovering = false
     private var restarts = 0
+    @Volatile private var localCandidates = 0
+    private var remoteCandidates = 0
+    private var rejectedCandidates = 0
+    private var invalidCandidates = 0
+    private var droppedSignals = 0
 
     override suspend fun prepare() {
         require(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -79,7 +84,10 @@ class WebRtcCallMedia(
     }
 
     override suspend fun receive(kind: String, payload: String): Unit = operationLock.withLock {
-        val peer = peer ?: return@withLock
+        val peer = peer ?: run {
+            droppedSignals++
+            return@withLock
+        }
         when (kind) {
             "offer" -> {
                 peer.setRemoteDescriptionSafe(SessionDescription(SessionDescription.Type.OFFER, payload))
@@ -93,8 +101,15 @@ class WebRtcCallMedia(
                 peer.setRemoteDescriptionSafe(SessionDescription(SessionDescription.Type.ANSWER, payload))
                 drainCandidates()
             }
-            "candidate" -> decodeCandidate(payload)?.let { candidate ->
-                if (peer.remoteDescription == null) pending += candidate else peer.addIceCandidate(candidate)
+            "candidate" -> {
+                val candidate = decodeCandidate(payload)
+                if (candidate == null) {
+                    invalidCandidates++
+                } else {
+                    remoteCandidates++
+                    if (peer.remoteDescription == null) pending += candidate
+                    else if (!peer.addIceCandidate(candidate)) rejectedCandidates++
+                }
             }
             "end-of-candidates" -> Unit
             else -> Unit
@@ -127,6 +142,18 @@ class WebRtcCallMedia(
             }
         }
         return@withLock (sent to received)
+    }
+
+    internal suspend fun rtcDiagnostics(): String {
+        if (!operationLock.tryLock()) return "media operation in progress"
+        return try {
+            val peer = peer ?: return "peer=null"
+            "ice=${peer.iceConnectionState()}, gathering=${peer.iceGatheringState()}, signaling=${peer.signalingState()}, " +
+                "candidates=$localCandidates/$remoteCandidates, pending=${pending.size}, rejected=$rejectedCandidates, " +
+                "invalid=$invalidCandidates, droppedSignals=$droppedSignals"
+        } finally {
+            operationLock.unlock()
+        }
     }
 
     override suspend fun restart(iceServers: List<IceServerDto>): Unit = operationLock.withLock {
@@ -167,6 +194,7 @@ class WebRtcCallMedia(
             if (stream?.audioTracks?.isNotEmpty() == true) listener?.remote()
         }
         override fun onIceCandidate(candidate: IceCandidate) {
+            localCandidates++
             scope.launch { listener?.signal("candidate", GatewayJson.encodeToString(CandidatePayload.serializer(), candidate.payload())) }
         }
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
@@ -193,7 +221,9 @@ class WebRtcCallMedia(
     private fun drainCandidates() {
         val candidates = pending.toList()
         pending.clear()
-        candidates.forEach(peer!!::addIceCandidate)
+        candidates.forEach { candidate ->
+            if (!peer!!.addIceCandidate(candidate)) rejectedCandidates++
+        }
     }
 
     private fun recover(failed: Boolean) {
