@@ -23,16 +23,21 @@
 
 | Сервис | Владеет | Принимает извне | Вызывает |
 |---|---|---|---|
-| Gateway (`cmd/gateway`) | ничем, кроме лимитов в Redis и кэша профилей | HTTPS и WebSocket клиентов | Auth, Chat, Media по gRPC |
-| Auth (`cmd/auth`) | пользователи, пароли, сессии, приглашения, push-токены — `auth_db`; JWT-ключи | gRPC от Gateway, Chat, Media | никого; SMTP и FCM наружу |
-| Chat (`cmd/chat`) | комнаты, участники, сообщения — `chat_db` | gRPC от Gateway и Media | Auth, Media |
+| Gateway (`cmd/gateway`) | ничем, кроме лимитов в Redis и кэша профилей | HTTPS и WebSocket клиентов | Auth, Chat, Media, Calls по gRPC |
+| Auth (`cmd/auth`) | пользователи, пароли, сессии, приглашения, push-токены — `auth_db`; JWT-ключи | gRPC от Gateway, Chat, Media, Calls; push-сигналы Chat из JetStream и подсказки Calls из Redis | никого; SMTP и FCM наружу |
+| Chat (`cmd/chat`) | комнаты, участники, сообщения — `chat_db` | gRPC от Gateway, Media, Calls | Auth, Media |
 | Media (`cmd/media`) | метаданные файлов — `media_db`, объекты S3 | gRPC от Gateway и Chat | Auth, Chat, Preview |
 | Preview (`cmd/preview`), opt-in | ничем | gRPC от Media | никого; отдельная internal-сеть без egress ([ADR 0006](0006-image-previews.md)) |
-| Calls (`calls/`, Erlang/OTP), прототип | состояние звонков | пока только loopback-стенд измерений | заглушки Auth и Chat; целевая схема — [ADR 0005](0005-call-control.md) |
+| Calls (`calls/`, Erlang/OTP) | звонки, участники, журнал команд и сигналов — `calls_db` | gRPC только от Gateway | Auth, Chat; события и push-подсказки в Redis ([ADR 0005](0005-call-control.md)) |
 
-- Публичный вход один — Gateway. Он завершает TLS, ограничивает частоту,
+- Публичный вход для API один — Gateway. Он завершает TLS, ограничивает частоту,
   тело и время запросов и переводит REST в gRPC. Бизнес-правил у него нет:
-  права на комнату и файл проверяет владелец данных.
+  права на комнату, файл и звонок проверяет владелец данных. Второй
+  публичный порт — coturn (`3478` и relay `50000–50099/udp`): он пересылает
+  только медиа и выдаёт relay по временным учётным данным, которые подписывает
+  Calls. Coturn работает в сети хоста; relay к частным адресам запрещён
+  `denied-peer-ip` в `deployments/turnserver-entrypoint.sh`, автотестом это
+  не проверяется.
 - Сервис не читает чужую БД и не линкует чужой код хранения. Данные другого
   сервиса доступны только через его RPC ([ADR 0010](0010-database-per-service.md)).
 - Секреты разделены так же: JWT-ключи есть только у Auth, ключи S3 — только у
@@ -43,10 +48,16 @@
   отклонять плохие запросы до RPC. Это проверяет тест границ.
 - Preview выделен из Media, потому что разбор изображений — самый опасный
   ввод: воркер без выхода в сеть, без чужих секретов и с жёстким лимитом памяти.
-- Calls выделен ради супервизии состояния звонков в Erlang/OTP, но пока это
-  прототип этапа E2: он не развёрнут, у Gateway нет его маршрутов, а в
-  матрице mTLS нет его идентичности. Его границы описывает ADR 0005 в
-  статусе «предложено».
+- Calls выделен ради супервизии состояния звонков в Erlang/OTP: у каждого
+  звонка свой процесс, и падение одного не затрагивает остальные. Он
+  развёрнут на VPS вместе с остальными сервисами: Gateway переводит
+  `/api/v1/calls` в `calls.v1.CallsService`, у Calls своя mTLS-идентичность
+  `spiffe://vault-chat/service/calls`, своя БД с журналом команд, из которого
+  после рестарта восстанавливаются незавершённые звонки, и TURN-секрет, общий
+  только с coturn. Звук идёт между клиентами напрямую или через coturn, а не
+  через сервисы. Контракт, бюджеты и поведение при сбоях описывает
+  [ADR 0005](0005-call-control.md), эксплуатацию —
+  [Calls operations](../calls/operations.md).
 
 ## Альтернативы
 
@@ -79,20 +90,32 @@
   ревью ([ADR 0009](0009-internal-grpc.md)).
 - **Масштабирование.** Chat и Media хранят состояние только в своих БД и S3.
   WebSocket-соединения Gateway и локальные квоты Auth привязаны к экземпляру;
-  две реплики Gateway — отдельная задача (#180).
+  две реплики Gateway — отдельная задача (#180). Calls держит процессы
+  звонков в одном узле и восстанавливает их из своей БД после рестарта.
+- **Второй язык.** Calls написан на Erlang и собирается отдельным образом
+  (`Dockerfile.calls`), хотя выпускается с тем же тегом. Его клиенты Auth и
+  Chat генерируются из тех же `api/proto`, а проверки Go-кода на него не
+  распространяются (см. «Проверки»).
 
 ## Проверки
 
 - `TestServicesLinkOnlyTheirOwnCodeAndData` (`tests/architecture`): ни один
-  пакет и бинарник сервиса не зависит от хранения, сервисного кода или
+  Go-пакет и бинарник сервиса не зависит от хранения, сервисного кода или
   миграций другого сервиса. `TestViolationsReportCrossServiceStorageAndMigrations`
-  показывает, что нарушение будет найдено.
-- `scripts/check-deployment.sh` (`xmake deployment`): сеть каждой БД общая
-  только с её сервисом, порты публикует только Gateway, у MinIO одна сеть
-  `objects`.
+  показывает, что нарушение будет найдено. Тест разбирает только Go-модуль:
+  внутренние границы Erlang-кода Calls он не проверяет, и автоматической
+  проверки того, что Calls не обращается к чужим БД, нет. От этого Calls
+  отделяет сеть: он подключён только к `calls-data`, `rpc` и `events`.
+- `scripts/check-deployment.sh` (`xmake deployment`): сеть каждой БД, включая
+  `calls-postgres`, общая только с её сервисом, порты в Compose публикует
+  только Gateway (coturn работает в сети хоста и в эту проверку не входит),
+  у MinIO одна сеть `objects`.
 - `TestRPCPermissions` и `TestServiceMethodMatrixAndStreams`
   (`internal/shared/rpctls`): выборка разрешённых и запрещённых пар «сервис →
-  метод» из матрицы [mTLS](../mtls.md) для unary и stream.
+  метод» из матрицы [mTLS](../mtls.md) для unary и stream, включая вызовы
+  Calls в Auth и Chat. Сам сервер Calls принимает только сертификат Gateway
+  (`vault_calls_tls:gateway_auth`); это проверяет EUnit `gateway_acl_test`
+  в `calls/test/vault_calls_tls_tests.erl` (`xmake calls`).
 - `tests/compose` проходит путь REST → Gateway → Chat → Redis → WebSocket на
   собранных контейнерах, `tests/integration` — тот же путь с сервисами в
   одном процессе и без mTLS.
