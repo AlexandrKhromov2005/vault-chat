@@ -1,5 +1,10 @@
 # Email account security (phase one)
 
+Status: accepted and implemented (`internal/auth/mail`, migration
+`migrations/auth/0006_email_accounts.up.sql`); opt-in through
+`deployments/docker-compose.email.yml` and SMTP configuration
+([mail](../mail.md)).
+
 ## Scope and rollout
 
 Verify email ownership, recover a password, change a verified email with fresh

@@ -1,8 +1,12 @@
 # ADR 0005: управление звонками на Erlang/OTP — контракт, бюджеты и gates
 
-Статус: принято для control plane; production rollout остаётся отдельной
-операцией. Дата: 2026-11-03, переработано 2026-11-04 по ревью #121,
-актуализировано 2026-11-24.
+Статус: принято для control plane. Дата: 2026-11-03, переработано 2026-11-04
+по ревью #121, актуализировано 2026-11-24 и 2026-11-27. С `v0.7.0` Calls и
+coturn входят в базовый `deployments/docker-compose.vps.yml`, а Gateway зависит
+от Calls, поэтому обновление VPS до `v0.7.x` включает звонки; отдельного
+выключателя нет. Открыты приёмка Android и фоновых звонков (#161–#163, #211) и
+наблюдаемость выпуска (#160); фраза «Production enable выполняется отдельно» в
+«Последствиях» описывает порядок, принятый до этого выпуска.
 Этап E1 из [ARCHITECTURE §12.1](../../ARCHITECTURE.md#121-erlangotp-call-control);
 владелец направления — Tagir. Erlang state machine, PostgreSQL journal,
 production gRPC/Auth/Chat, Redis events, TURN и resource gate реализованы;
