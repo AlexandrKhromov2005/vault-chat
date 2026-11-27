@@ -3,14 +3,22 @@
 > Corporate team messenger with security-first design.
 
 This document describes the target architecture, not an inventory of deployed
-features. The implementation currently contains Auth, Chat, Gateway and
-private Media uploads/downloads with message attachments. Image resizing, malware
-scanning, retention, NATS application flows, application-data caching and audit storage are planned. Internal mTLS and
-private metrics/dashboards are implemented; see [mTLS](docs/mtls.md) and
-[monitoring](docs/monitoring.md). See [Media](docs/media/files.md) for the
-implemented storage lifecycle and development S3 limitations. See [README](README.md) for implemented features and
-[requirements and acceptance criteria](docs/requirements.md) for delivery stages,
-open PRs and course coverage. Target features below are not evidence of completion.
+features. Target features below are not evidence of completion. The current
+system on `main` (v0.7.1, Android 0.2.1, 2026-11-27) is drawn in
+[C1/C2](docs/c4.md); [README](README.md) lists implemented features and
+[requirements and acceptance criteria](docs/requirements.md) the delivery stages
+and course coverage.
+
+| | Components |
+|---|---|
+| **Running in the base stack** | Auth, Chat, Media and Gateway (Go); Calls control plane (Erlang/OTP) with its PostgreSQL and coturn; web client; Gateway public profile cache in its own Redis ([ADR 0004](docs/adr/0004-public-profile-cache.md)); internal mTLS by default on the VPS ([mTLS](docs/mtls.md)); four PostgreSQL databases, Redis, MinIO; encrypted backups |
+| **Built separately** | Android client (`android/`, Kotlin and Compose) |
+| **Opt-in overlays** | Push: NATS JetStream signals Chat → Auth and FCM ([push](docs/push.md)); email account security ([mail](docs/mail.md)); image previews in isolated Zig workers ([ADR 0006](docs/adr/0006-image-previews.md)); Prometheus, Grafana and alerts ([monitoring](docs/monitoring.md)) |
+| **Target, not implemented** | TOTP, RBAC, organizations; threads, reactions, edits/deletes, message search, presence; E2EE; malware scanning, retention, avatars; audit log; circuit breakers; tracing; Kubernetes and service mesh; Gateway replicas behind a load balancer; video and group calls |
+
+Sections 2–5 mix both: rows marked *(target)* are not implemented. See
+[Media](docs/media/files.md) for the implemented storage lifecycle and
+development S3 limitations.
 
 ---
 
@@ -22,7 +30,7 @@ open PRs and course coverage. Target features below are not evidence of completi
 
 | Criterion | Decision |
 |-----------|----------|
-| Bounded Contexts | Each service owns exactly one domain: auth, chat, media, presence. |
+| Bounded Contexts | Each service owns exactly one domain: auth, chat, media, calls; presence is a target domain. |
 | Team Size | 3 developers → 4 core services + gateway. Each service fits "two-pizza team" rule. |
 | Independent Deploy | Services deploy independently; chat can be updated without touching auth. |
 | Separate Databases | Every service owns its data exclusively; no cross-service table access. |
@@ -38,12 +46,16 @@ A modular monolith would be easier for 3 people short-term, but:
 
 ## 2. Service Catalog
 
+The sketch below is the original target layout. The implemented containers,
+including Calls, coturn, the profile cache, NATS and preview workers, are in
+[C2](docs/c4.md#c2-контейнеры-и-связи).
+
 ```
                     ┌─────────────┐
     Clients  ──────▶│   Gateway   │◀───── mTLS
     (Web/Mobile)    │  (Public)   │
                     └──────┬──────┘
-                           │ gRPC / NATS
+                           │ gRPC
            ┌───────────────┼───────────────┐
            ▼               ▼               ▼
     ┌──────────┐   ┌──────────┐   ┌──────────┐
@@ -75,6 +87,7 @@ A modular monolith would be easier for 3 people short-term, but:
 | Auth | Validates JWT via Auth service; rejects unauthorized requests at the edge |
 | Rate Limiting | Redis-backed token bucket per client IP / user ID |
 | Routing | REST → gRPC translation to backend services |
+| Cache | Public profiles in a dedicated Redis `profile-cache` ([ADR 0004](docs/adr/0004-public-profile-cache.md)) |
 | Security | TLS termination, CORS, request size limits |
 
 ### 2.2 Auth Service (`cmd/auth/`)
@@ -83,10 +96,10 @@ A modular monolith would be easier for 3 people short-term, but:
 
 | Aspect | Detail |
 |--------|--------|
-| Features | Registration, login (password + TOTP), JWT issuance/refresh, RBAC, org/team management |
-| DB | PostgreSQL (`auth_db`) — users, credentials (hashed), sessions, roles, orgs |
-| Cache | Redis — revoked token blacklist, session metadata |
-| Crypto | Argon2id for passwords, RS256 for JWT, TOTP for 2FA |
+| Features | Registration by invitation, password login, JWT issuance/refresh, sessions and revocation, optional email verification and recovery, push tokens and dispatch; *(target)* TOTP, RBAC, org/team management |
+| DB | PostgreSQL (`auth_db`) — users, credentials (hashed), sessions, invitations, push tokens; *(target)* roles, orgs |
+| Cache | None: sessions are checked in `auth_db` on every call; Auth only publishes revocations to Redis |
+| Crypto | Argon2id for passwords, RS256 for JWT; *(target)* TOTP for 2FA |
 | API | gRPC internally; REST via Gateway |
 
 ### 2.3 Chat Service (`cmd/chat/`)
@@ -95,11 +108,11 @@ A modular monolith would be easier for 3 people short-term, but:
 
 | Aspect | Detail |
 |--------|--------|
-| Features | Direct messages, channels (public/private), threads, message history with pagination, full-text search, reactions, edits, deletes |
-| DB | PostgreSQL (`chat_db`) — messages, rooms, memberships, threads |
-| Cache | Redis — recent message lists, unread counters, presence cache |
+| Features | Direct messages, channels, attachments, message history with pagination; *(target)* threads, full-text search, reactions, edits, deletes |
+| DB | PostgreSQL (`chat_db`) — messages, rooms, memberships |
+| Cache | None; *(target)* recent message lists, unread counters, presence |
 | Real-time | WebSocket hub (via Gateway) + Redis Pub/Sub for multi-instance broadcast |
-| Search | PostgreSQL `tsvector` (MVP) → Elasticsearch (future) |
+| Search | *(target)* PostgreSQL `tsvector`, then Elasticsearch |
 | API | gRPC internally; WebSocket for real-time; REST via Gateway |
 
 ### 2.4 Media Service (`cmd/media/`)
@@ -108,11 +121,24 @@ A modular monolith would be easier for 3 people short-term, but:
 
 | Aspect | Detail |
 |--------|--------|
-| Features | Upload (multipart), download, image resizing/thumbnails, virus scanning (ClamAV), retention policies |
+| Features | Upload, download, image previews in isolated workers (opt-in); *(target)* avatars, virus scanning (ClamAV), retention policies |
 | Storage | MinIO (S3-compatible) for blob storage |
-| DB | PostgreSQL (`media_db`) — file metadata, ownership, retention rules |
-| Cache | Redis — presigned URL cache |
-| Security | File type validation, size limits, malware scanning, access control via Auth service |
+| DB | PostgreSQL (`media_db`) — file metadata and ownership |
+| Cache | None; *(target)* presigned URL cache |
+| Security | File type and content validation, size limits, access via `Auth.ValidateToken` and current membership from `Chat.GetRoom`; *(target)* malware scanning |
+
+### 2.5 Calls Service (`calls/`, Erlang/OTP)
+
+**Responsibility:** One-to-one audio call control. Media flows between clients
+directly or through coturn, never through the services.
+
+| Aspect | Detail |
+|--------|--------|
+| Features | Invite, accept, reject, cancel, end, WebRTC signals ordered by `signal_seq`, heartbeats, TURN credentials; one supervised process per call; *(target)* video and group calls |
+| DB | PostgreSQL (`calls_db`) — calls, participants, command and signal journal; recovery after restart |
+| Events | Redis Pub/Sub call events to clients and best-effort push hints to Auth |
+| Security | Accepts gRPC only from Gateway; checks the caller's token and direct room via Auth and Chat, re-checks sessions and membership of ongoing calls |
+| Details | [ADR 0005](docs/adr/0005-call-control.md), [operations](docs/calls/operations.md) |
 
 ---
 
@@ -124,29 +150,46 @@ Used for request/response operations requiring immediate consistency.
 
 **Implementation:** the official [`google.golang.org/grpc`](https://pkg.go.dev/google.golang.org/grpc) (grpc-go) library for servers and clients; `.proto` sources in `api/proto/`, code generated with [`buf`](https://buf.build). Connect-RPC was considered and rejected: grpc-go is the reference implementation with the most mature interceptor / mTLS / load-balancing ecosystem, and the team already knows it.
 
+Calls uses `grpcbox` generated from the same `.proto` files.
+
 | Call | From | To | Purpose |
 |------|------|-----|---------|
-| `ValidateToken` | Gateway | Auth | JWT verification on every request |
-| `GetUser` | Chat | Auth | Resolve sender info for messages |
-| `SearchUsers` | Gateway | Auth | Find conversation partners by username prefix |
-| `CheckPermission` | Chat | Auth | Verify room membership / admin rights |
-| `GetFileACL` | Gateway | Media | Verify download permissions |
+| Any `AuthService`, `ChatService`, `MediaService`, `CallsService` method | Gateway | Auth, Chat, Media, Calls | REST → gRPC for client requests, including `ValidateToken` on every request |
+| `ValidateToken`, `GetUser` | Chat | Auth | Verify the caller; check that an added user exists |
+| `GetFile` | Chat | Media | Verify an attachment before storing a message |
+| `ValidateToken` | Media | Auth | Verify the caller |
+| `GetRoom` | Media | Chat | Current membership for uploads and every download |
+| `Decode` | Media | Preview (opt-in) | Decode an image in an isolated worker |
+| `ValidateToken`, `ValidateSession` | Calls | Auth | Verify the caller; re-check sessions of ongoing calls |
+| `GetRoom`, `CheckMembership` | Calls | Chat | Resolve the direct room and callee; re-check membership |
 
-### 3.2 Asynchronous (NATS / Redis Streams)
+The enforced matrix is in [mTLS](docs/mtls.md#матрица-rpc). Every other pair is
+denied.
+
+### 3.2 Asynchronous (Redis Pub/Sub, NATS JetStream)
 
 Used for events, notifications, decoupled side effects.
+
+Implemented:
+
+| Event | Publisher | Subscribers | Purpose |
+|-------|-----------|-------------|---------|
+| `chat:user:<id>` (Redis) | Chat, Calls, Auth | Gateway | Live message, room and call events to WebSockets, and Auth's session-revoked hint that makes Gateway re-check the user's sockets; lost events are recovered by catch-up |
+| `push.signal.v1` (JetStream, opt-in) | Chat | Auth | Durable push signal with ACK and retries ([ADR 0003](docs/adr/0003-push-signals-jetstream.md)) |
+| `push:signal:v1` (Redis) | Calls | Auth | Best-effort push hint for an incoming call |
+
+*(target)*:
 
 | Event | Publisher | Subscribers | Purpose |
 |-------|-----------|-------------|---------|
 | `user.registered` | Auth | Chat, Media | Pre-provision user workspace |
-| `message.sent` | Chat | Media (scan), Notification | Trigger file scan, send push |
 | `file.scanned` | Media | Chat | Approve/reject attachment in message |
 | `user.presence_changed` | Gateway | Chat | Update online status |
 
 ### 3.3 Service Mesh (Future)
 
-Current implementation: direct gRPC with optional mTLS, verified service identities
-and unary/stream RPC ACLs; enabled on the VPS via a persistent Compose overlay.
+Current implementation: direct gRPC with mTLS, verified service identities
+and unary/stream RPC ACLs; on by default on the VPS.
 Local plaintext remains for development. See [ADR 0001](docs/adr/0001-internal-mtls.md).
 Linkerd or Istio remain future options
 for managing mTLS, retries and circuit breakers.
@@ -159,9 +202,10 @@ for managing mTLS, retries and circuit breakers.
 
 | Service | Primary DB | Purpose |
 |---------|-----------|---------|
-| Auth | PostgreSQL | Users, passwords, sessions, orgs, roles |
-| Chat | PostgreSQL | Messages, rooms, memberships, threads |
-| Media | PostgreSQL | File metadata, retention rules |
+| Auth | PostgreSQL | Users, passwords, sessions, invitations, push tokens; *(target)* orgs, roles |
+| Chat | PostgreSQL | Messages, rooms, memberships; *(target)* threads |
+| Media | PostgreSQL | File metadata; *(target)* retention rules |
+| Calls | PostgreSQL | Calls, participants, command and signal journal |
 
 **Rule:** No service queries another service's database directly. All data access via API.
 
@@ -169,20 +213,20 @@ for managing mTLS, retries and circuit breakers.
 
 | Key Pattern | TTL | Purpose |
 |-------------|-----|---------|
-| `token:blacklist:<jti>` | until expiry | Revoked JWT tokens |
-| `session:<id>` | 24h | Active sessions |
-| `room:recent:<room_id>` | 1h | Last 50 messages (pagination cache) |
-| `unread:<user_id>` | 5m | Unread message counters |
-| `presence:<user_id>` | 2m | Online/away/last seen |
-| `rate:<ip>` | 1m | Rate limit buckets |
+| `rate:*` | window | Rate limit buckets (shared Redis) |
+| `cache:profile:v1:<user_id>` | 10m, 1m for a missing account | Public profiles (separate `profile-cache` Redis) |
+| *(target)* `room:recent:<room_id>` | 1h | Last 50 messages (pagination cache) |
+| *(target)* `unread:<user_id>` | 5m | Unread message counters |
+| *(target)* `presence:<user_id>` | 2m | Online/away/last seen |
+
+Sessions are not cached: Auth checks them in `auth_db` on every call.
 
 ### 4.3 Blob Storage (MinIO)
 
 | Bucket | Content | Lifecycle |
 |--------|---------|-----------|
-| `vault-chat-avatars` | User/org avatars | Keep forever |
-| `vault-chat-attachments` | Message attachments | 90 days default, configurable |
-| `vault-chat-exports` | Data export archives | 7 days |
+| `vault-chat-media` | Message attachments | Kept; unpublished uploads are collected ([Media](docs/media/files.md)) |
+| *(target)* avatars, exports | User/org avatars, data export archives | — |
 
 ---
 
@@ -211,8 +255,8 @@ for managing mTLS, retries and circuit breakers.
 
 ### 5.2 Authentication & Authorization
 
-- **AuthN:** JWT (RS256, short-lived access tokens + long-lived refresh tokens). Optional TOTP 2FA.
-- **AuthZ:** RBAC with permissions: `message:read`, `message:write`, `room:admin`, `org:owner`, etc.
+- **AuthN:** JWT (RS256, short-lived access tokens + long-lived refresh tokens). *(target)* Optional TOTP 2FA.
+- **AuthZ:** implemented as room membership and channel ownership checked by the data owner; *(target)* RBAC with permissions: `message:read`, `message:write`, `room:admin`, `org:owner`, etc.
 - **Service-to-service:** mTLS with internal CA; each service has its own certificate.
 
 ### 5.3 Encryption
@@ -222,10 +266,10 @@ for managing mTLS, retries and circuit breakers.
 | Transport | TLS 1.3 | Client ↔ Gateway, Gateway ↔ Services |
 | Service mesh | mTLS | Service ↔ Service |
 | Database | At-rest encryption (planned) | Select and verify a storage-level or database-supported mechanism; not implemented |
-| Backup | AES-256-GCM | Encrypted before upload to backup storage |
-| End-to-end (DMs) | Signal Protocol / Double Ratchet | Optional; server sees only ciphertext |
+| Backup | age (X25519, ChaCha20-Poly1305) | Streamed encryption before upload to backup storage (`scripts/vps/encrypted_backup.py`) |
+| End-to-end (DMs) | *(target)* Signal Protocol / Double Ratchet | Optional; server sees only ciphertext |
 
-### 5.4 Audit & Compliance
+### 5.4 Audit & Compliance *(target)*
 
 - All admin actions logged to immutable audit log (append-only table).
 - Message edits/deletes soft-deleted with tombstones (compliance retention).
@@ -236,6 +280,10 @@ for managing mTLS, retries and circuit breakers.
 ## 6. High Availability & Resilience
 
 ### 6.1 Deployment Topology
+
+Implemented: one VPS with Docker Compose, one instance of each service
+([deployment](docs/deployment.md)). The topology below is the target; two
+Gateway replicas behind a load balancer are tracked in #180.
 
 ```
                     ┌─────────┐
@@ -269,11 +317,11 @@ for managing mTLS, retries and circuit breakers.
 
 | Pattern | Implementation | Purpose |
 |---------|---------------|---------|
-| Circuit Breaker | `github.com/sony/gobreaker` | Fail fast when downstream is unhealthy |
-| Retry + Backoff | gRPC interceptor with exponential backoff | Transient network failures |
+| Circuit Breaker | *(target)* `github.com/sony/gobreaker` | Fail fast when downstream is unhealthy |
+| Retry + Backoff | *(target)* gRPC interceptor with exponential backoff; today the client retries and sends are idempotent | Transient network failures |
 | Timeout | Context deadlines per request | Prevent cascading hangs |
-| Health Checks | `/health` and `/ready` probes | Kubernetes / orchestrator decisions |
-| Graceful Degradation | Chat works without Media (attachments show as placeholders) | Partial outages |
+| Health Checks | `/health` and `/ready` probes, gRPC health in Compose healthchecks | Orchestrator decisions |
+| Graceful Degradation | Chat works without Redis (events are lost and recovered by catch-up); Calls' monitor does not end calls while Auth or Chat is unavailable, though without Auth Gateway rejects heartbeats and a call ends within 45 s | Partial outages |
 
 ### 6.3 Scaling Strategy
 
@@ -305,9 +353,10 @@ for managing mTLS, retries and circuit breakers.
 | DB query duration | pg_stat_statements + Prometheus | Slow query detection |
 | Cache hit ratio | Redis INFO + Prometheus | Cache effectiveness |
 
-### 7.3 Tracing
+### 7.3 Tracing *(target)*
 
-- OpenTelemetry / Jaeger for distributed tracing.
+- OpenTelemetry / Jaeger for distributed tracing; today a request ID is
+  propagated instead.
 - Trace spans: Gateway → Auth (validate) → Chat (save) → Redis (publish).
 
 ---
@@ -345,17 +394,18 @@ PR → independent approval of latest push → guarded merge to main
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Go 1.26+ (toolchain go1.27.4) |
+| Language | Go 1.26+ (toolchain go1.27.4); Erlang/OTP 28 for Calls; Zig 0.17.1 for the preview decoder; JavaScript modules for the web client; Kotlin and Jetpack Compose for Android |
 | API (external) | HTTP/2, REST, WebSocket |
-| API (internal) | gRPC (grpc-go) + Protocol Buffers (codegen via buf) |
-| Message Bus | NATS (or Redis Streams as fallback) |
+| API (internal) | gRPC (grpc-go, grpcbox in Calls) + Protocol Buffers (codegen via buf) |
+| Message Bus | Redis Pub/Sub for live events; NATS JetStream for push signals (opt-in) |
 | Primary DB | PostgreSQL 16+ |
 | Cache | Redis 7+ |
 | Blob Storage | MinIO (S3-compatible) |
-| Auth | JWT (RS256), Argon2id, TOTP |
-| Encryption | TLS 1.3, mTLS, AES-256 |
-| Container | Docker, Docker Compose (local), Kubernetes (future) |
-| Observability | slog, Prometheus, Grafana, Jaeger |
+| Calls media | WebRTC, coturn |
+| Auth | JWT (RS256), Argon2id; *(target)* TOTP |
+| Encryption | TLS 1.3, mTLS, age for backups |
+| Container | Docker, Docker Compose; *(target)* Kubernetes |
+| Observability | slog, Prometheus, Grafana, Alertmanager; *(target)* Jaeger |
 | Build | xmake |
 
 ---
@@ -365,54 +415,36 @@ PR → independent approval of latest push → guarded merge to main
 ```
 vault-chat/
 ├── cmd/
-│   ├── gateway/          # API Gateway entry point
-│   ├── auth/             # Auth service entry point
-│   ├── chat/             # Chat service entry point
-│   └── media/            # Media service entry point
+│   ├── gateway/ auth/ chat/ media/   # Go service entry points
+│   ├── preview/          # Isolated preview worker (opt-in)
+│   ├── migrate/          # One-shot migration job for each Go service
+│   └── healthcheck/ invite/ s3-init/ # Container healthcheck, invitation and S3 setup tools
 ├── internal/
-│   ├── gateway/
-│   │   ├── handler/      # HTTP handlers
-│   │   ├── middleware/   # Auth, rate limit, logging
-│   │   ├── ratelimit/    # Redis token bucket
-│   │   ├── response/     # JSON responses, gRPC → HTTP error mapping
-│   │   └── router/       # Route definitions
-│   ├── auth/
-│   │   ├── service/      # Business logic
-│   │   ├── repository/   # DB operations
-│   │   ├── handler/      # gRPC handlers
-│   │   └── domain/       # User, Session, Org models
-│   ├── chat/
-│   │   ├── service/
-│   │   ├── repository/
-│   │   ├── handler/
-│   │   └── domain/       # Message, Room, Membership
-│   ├── media/
-│   │   ├── service/
-│   │   ├── repository/
-│   │   ├── handler/
-│   │   └── domain/       # File, Upload
-│   └── shared/
-│       ├── logger/       # slog wrapper
-│       ├── config/       # Env/config parsing
-│       ├── eventbus/     # Pub/Sub channel names shared by Chat and Gateway
-│       ├── grpc/         # gRPC client/server helpers
-│       ├── jwt/          # JWT utilities
-│       ├── requestid/    # Correlation id across HTTP and gRPC
-│       ├── validator/    # Input validation
-│       └── errors/       # Domain errors
+│   ├── gateway/          # handler, middleware, router, response, ratelimit,
+│   │                     # realtime (WebSocket hub), profilecache
+│   ├── auth/             # domain, service, repository, handler, validator,
+│   │                     # events, mail, push
+│   ├── chat/             # domain, service, repository, handler, validator,
+│   │                     # events, media (client of Media)
+│   ├── media/            # domain, service, handler, validator, storage (S3), preview
+│   └── shared/           # config, eventbus, jwt, logger, migration, probe,
+│                         # pushbus, ratelimit, requestid, rpctls, telemetry, transfer
+├── calls/                # Calls control plane (Erlang/OTP, rebar3); migrations in priv/
+├── web/                  # Web client served by Gateway
+├── android/              # Android client (Kotlin, Gradle)
+├── tools/preview/        # Zig preview decoder and Go reference decoder
 ├── api/
 │   └── proto/            # .proto files for all services
 ├── migrations/
-│   ├── auth/             # Auth DB migrations
-│   ├── chat/             # Chat DB migrations
-│   └── media/            # Media DB migrations
-├── deployments/
-│   ├── docker-compose.yml
-│   └── k8s/              # Kubernetes manifests (future)
-├── docs/
-│   └── api/              # OpenAPI specs
+│   ├── auth/ chat/ media/ # Go service DB migrations
+├── deployments/          # Compose files: base, VPS and opt-in overlays
+│                         # (mtls, push, email, preview, monitoring)
+├── docs/                 # API, ADRs, C4, operations and per-service docs
+├── scripts/              # VPS operations, monitoring and development tools
 ├── tests/
-│   └── integration/      # Docker-based integration tests
+│   ├── integration/      # PostgreSQL/S3-backed integration tests
+│   ├── compose/          # Tests against a running Compose stack
+│   └── ops/ dev/         # Tests of operations and development scripts
 ├── xmake.lua
 ├── go.mod
 ├── go.sum
@@ -431,31 +463,38 @@ files; fuzz crash corpora live in package `testdata/fuzz/` directories.
 
 ### 11.1 Send a Message
 
+Implemented:
+
 ```
-Client → Gateway (WebSocket/REST)
+Client → Gateway (REST)
        → Gateway validates JWT (calls Auth via gRPC)
        → Gateway routes to Chat service (gRPC)
+       → Chat validates the token in Auth and attachments in Media
        → Chat saves to PostgreSQL
        → Chat publishes to Redis Pub/Sub
-       → Gateway WebSocket hubs broadcast to room members
-       → (async) Chat emits `message.sent` to NATS
-       → Media subscriber scans attachments
-       → Notification subscriber sends push/email
+       → Gateway WebSocket hubs deliver to room members
+       → (push, opt-in) Chat stores a push signal in NATS JetStream
+       → Auth consumes it and sends FCM pushes without message content
 ```
 
+*(target)* Media scans attachments for malware after `message.sent`.
+
 ### 11.2 Upload a File
+
+Implemented:
 
 ```
 Client → Gateway (multipart upload)
        → Gateway streams to Media service
-       → Media validates file type & size
-       → Media uploads to MinIO
-       → Media saves metadata to PostgreSQL
-       → Media emits `file.uploaded` to NATS
-       → Chat subscriber updates message with file reference
-       → (async) Media runs virus scan (ClamAV)
-       → Media emits `file.scanned` → Chat approves/rejects
+       → Media validates the token in Auth and membership in Chat
+       → Media validates file type, size and content
+       → Media writes a pending row, uploads to MinIO,
+         re-checks membership and publishes the row
+       → (previews, opt-in) Media queues an image for an isolated worker
+       → Client attaches the file id to a message; Chat checks it in Media
 ```
+
+*(target)* virus scan (ClamAV) and `file.scanned` approval of attachments.
 
 ---
 
@@ -463,27 +502,29 @@ Client → Gateway (multipart upload)
 
 These tracks describe planning priorities, not release numbers or delivery dates.
 Released features are recorded in [CHANGELOG](CHANGELOG.md); assign future
-versions under [VERSIONING](VERSIONING.md) after the scope is agreed. In
-particular, the released `v0.4.0` contains internal mTLS, not calls.
+versions under [VERSIONING](VERSIONING.md) after the scope is agreed. Calls
+were first released in `v0.7.0`.
 
 | Track | Feature | Architecture direction |
 |-------|---------|------------------------|
-| MVP baseline | Auth, DM, channels, file upload | Existing four services and Docker Compose |
-| Collaboration | Search, threads, reactions | Add Elasticsearch, Chat sharding |
-| Account and message security | E2EE DMs, TOTP 2FA | Add Signal Protocol client lib |
-| Calls | Personal audio first; video and groups later | WebRTC infrastructure; evaluate Erlang/OTP call control against Go (§12.1) |
-| Media processing | Image previews; voice messages and waveforms later | Evaluate an isolated Zig worker against Go (§12.2) |
-| Enterprise identity | SSO (SAML/OIDC) | Extend Auth with identity providers |
-| Deployment scale | Kubernetes, auto-scaling | Helm charts, HPA, service mesh |
+| MVP baseline | Auth, DM, channels, file upload | Implemented: four Go services and Docker Compose |
+| Collaboration | Search, threads, reactions | *(target)* Add Elasticsearch, Chat sharding |
+| Account and message security | E2EE DMs, TOTP 2FA | *(target)* Add Signal Protocol client lib |
+| Calls | Personal audio implemented (`v0.7.0`); video and groups later | Erlang/OTP call control, WebRTC P2P with coturn (§12.1) |
+| Media processing | Image previews implemented (opt-in); voice messages and waveforms later | Isolated Zig worker (§12.2) |
+| Enterprise identity | SSO (SAML/OIDC) | *(target)* Extend Auth with identity providers |
+| Deployment scale | Kubernetes, auto-scaling | *(target)* Helm charts, HPA, service mesh |
 
 **Planning decision, 2026-10-31:** add the Erlang and Zig investigations below.
-Implementation has not started and is deferred until separately authorized.
-Neither language is an adopted dependency. Auth, Chat, Media and Gateway remain
-on Go; these tracks do not require rewriting them or introducing both languages.
+Both have since been implemented: Calls runs in the base stack, Zig previews as
+an opt-in overlay. Auth, Chat, Media and Gateway remain on Go and were not
+rewritten. The remaining gates are E4–E5 and Z4.
 
 ### 12.1 Erlang/OTP: call control
 
-**Candidate scope.** Start with one-to-one audio calls: invite, ring, accept,
+**Implemented scope.** One-to-one audio calls in direct rooms, released in
+`v0.7.0` ([ADR 0005](docs/adr/0005-call-control.md)). The original candidate
+scope was to start with one-to-one audio calls: invite, ring, accept,
 reject, cancel, connect and end. **Erlang/OTP is the selected direction for the
 new Calls control plane** (architecture owner, review of #121, 2026-11-03);
 Auth, Chat, Media and Gateway stay on Go and are not rewritten. The choice
@@ -522,26 +563,29 @@ depth, setup/ringing/idle timeouts and shutdown. Specify overload responses and
 bounded dependency deadlines. Queues and recovery attempts must remain bounded
 during Redis, Auth, Chat or media-server outages.
 
-Future work, in order, after implementation is authorized:
+Implementation and remaining rollout stages:
 
-- [ ] **E1 — design:** agree on the first client scenario, an owner able to
+- [x] **E1 — design:** agree on the first client scenario, an owner able to
   maintain OTP, contracts, threat model and budgets. Write an ADR comparing Go
   and Erlang/OTP, including deployment, observability and state recovery.
-- [ ] **E2 — prototype and measure:** implement the call-control contract in
+- [x] **E2 — prototype and measure:** implement the call-control contract in
   Erlang/OTP, optionally with a Go reference baseline, on a disposable test stack.
   Measure setup p95/p99, throughput, errors, CPU, peak memory and recovery under
   the same workload, including a crash of one call process while other calls
   continue; report media-server and TURN costs separately. Commit fixtures and
   commands.
-- [ ] **E3 — acceptance:** cover malformed/oversized signaling, expired or revoked
+- [x] **E3 — acceptance:** cover malformed/oversized signaling, expired or revoked
   sessions, nonmembers, removal during a call, two devices accepting together,
   duplicate/reordered commands, lost `accepted`/`ended` events, reconnect,
   process/node restart and dependency outages. Verify bounded overload behavior.
-- [ ] **E4 — client acceptance:** test browser and Android devices, permissions,
+  E1–E3 are recorded in ADR 0005; the 200-call load and crash/`kill -9`
+  recovery run in `xmake ci` (`scripts/dev/calls-load`).
+- [ ] **E4 — client acceptance** (#161–#163, #211): test browser and Android devices, permissions,
   background incoming calls, delayed/missed push, network loss, Wi-Fi/mobile
   handover and TURN fallback. Depend on reviewed session and push behavior;
   an open client or push PR does not satisfy this gate.
-- [ ] **E5 — rollout decision:** record the gate results in ADR 0005. A failed
+- [ ] **E5 — rollout decision** (#160; Calls is already in the base VPS
+  Compose since `v0.7.0`, so this gate records evidence after the fact): record the gate results in ADR 0005. A failed
   correctness, security, SLO, resource or operability gate blocks rollout and
   requires rework; changing the runtime needs a separate explicit architecture
   decision. Add pinned tooling, CI, metrics, deployment and rollback acceptance
