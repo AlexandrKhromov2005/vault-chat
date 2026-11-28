@@ -80,6 +80,7 @@ class Calls(
     private val commandLock = Mutex()
     private val signalLock = Mutex()
     private val catchUpLock = Mutex()
+    internal var heartbeatIntervalMs: Long = 15_000
     private var current: CallSession? = null
     private var media: CallMedia? = null
     private val ended = mutableSetOf<String>()
@@ -425,9 +426,9 @@ class Calls(
         call.loopsStarted = true
         scope.launch {
             while (current == call && call.state in setOf("connecting", "active")) {
-                delay(15_000)
+                delay(heartbeatIntervalMs)
                 if (current != call) break
-                runCatching { requests.send { heartbeatCall(it, call.id!!, CallCommand(newId())) } }
+                runCatching { apply(call, requests.send { heartbeatCall(it, call.id!!, CallCommand(newId())) }) }
                 catchUp(call)
             }
         }

@@ -139,6 +139,43 @@ class CallsTest {
     }
 
     @Test
+    fun callerAppliesActiveStateFromHeartbeatWhenConnectedRacesAccept() = runBlocking {
+        calls.heartbeatIntervalMs = 100
+        val id = UUID.randomUUID().toString().replace("-", "").uppercase()
+        val gets = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): MockResponse {
+                val body = when {
+                    request.method == "POST" && request.url.encodedPath == "/api/v1/calls" -> call(id, "ringing")
+                    request.method == "GET" && request.url.encodedPath == "/api/v1/calls/$id" ->
+                        if (gets.incrementAndGet() == 1) call(id, "ringing") else call(id, "connecting")
+                    request.url.encodedPath.endsWith("/turn") -> turn()
+                    // The caller's connected command lands before the callee's
+                    // accept completes server-side, so it still says "connecting".
+                    request.url.encodedPath.endsWith("/connected") -> call(id, "connecting")
+                    // Only the heartbeat carries the real "active" state afterwards.
+                    request.url.encodedPath.endsWith("/heartbeat") -> call(id, "active")
+                    request.url.encodedPath.endsWith("/signals") -> """{"signals":[]}"""
+                    request.url.encodedPath.endsWith("/end") -> call(id, "ended")
+                    else -> return MockResponse.Builder().code(404).body("""{"error":"unexpected"}""").build()
+                }
+                return MockResponse.Builder().body(body).build()
+            }
+        }
+
+        calls.start("room-1")
+        await("created") { calls.view.value?.state == "ringing" }
+        calls.onEvent(Frame.CallEvent("call.accepted", id))
+        await("media") { media.started == 1 }
+        media.listener!!.connected()
+        await("active via heartbeat") { calls.view.value?.state == "active" }
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertEquals(1, media.closed)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
     fun calleeAnswersOfferDuringSignalCatchUp() = runBlocking {
         media.answerOnOffer = true
         enqueue(
