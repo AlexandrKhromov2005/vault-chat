@@ -1,8 +1,6 @@
 package io.github.alexandrkhromov2005.vaultchat.ui.chat
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -35,15 +33,16 @@ import io.github.alexandrkhromov2005.vaultchat.core.calls.Calls
 @Composable
 fun rememberCallStarter(context: Context, calls: Calls, onDenied: () -> Unit): (String) -> Unit {
     var pendingRoom by remember { mutableStateOf<String?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) pendingRoom?.let(calls::start) else onDenied()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        if (canProceedWithCall(results)) pendingRoom?.let(calls::start) else onDenied()
         pendingRoom = null
     }
     return remember(calls, context) {
         { roomId ->
-            if (hasMicrophone(context)) calls.start(roomId) else {
+            val missing = missingCallPermissions(context)
+            if (missing.isEmpty()) calls.start(roomId) else {
                 pendingRoom = roomId
-                launcher.launch(Manifest.permission.RECORD_AUDIO)
+                launcher.launch(missing.toTypedArray())
             }
         }
     }
@@ -117,9 +116,9 @@ private fun connectionText(view: CallView): String? = when {
 private fun CallPanelView(view: CallView, calls: Calls) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var denied by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        denied = !granted
-        if (granted) calls.accept()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        denied = !canProceedWithCall(results)
+        if (!denied) calls.accept()
     }
     Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -132,7 +131,8 @@ private fun CallPanelView(view: CallView, calls: Calls) {
                         TextButton(
                             enabled = !view.pending,
                             onClick = {
-                                if (hasMicrophone(context)) calls.accept() else launcher.launch(Manifest.permission.RECORD_AUDIO)
+                                val missing = missingCallPermissions(context)
+                                if (missing.isEmpty()) calls.accept() else launcher.launch(missing.toTypedArray())
                             },
                         ) { Text(stringResource(R.string.call_accept)) }
                         TextButton(enabled = !view.pending, onClick = calls::reject) { Text(stringResource(R.string.call_reject)) }
@@ -159,6 +159,4 @@ private fun statusText(view: CallView): String = when {
     else -> stringResource(R.string.call_ended)
 }
 
-private fun hasMicrophone(context: Context): Boolean =
-    androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
