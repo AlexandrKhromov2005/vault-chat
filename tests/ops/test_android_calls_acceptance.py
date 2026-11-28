@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from tests.ops.android_calls_acceptance import result
+from tests.ops.android_calls_acceptance import instrumentation, result, wait_marker
 
 
 class Process:
@@ -12,8 +13,26 @@ class Process:
     def wait(self, timeout):
         return self.code
 
+    def poll(self):
+        return self.code
+
 
 class InstrumentationResultTest(unittest.TestCase):
+    @patch('tests.ops.android_calls_acceptance.subprocess.Popen')
+    @patch('tests.ops.android_calls_acceptance.adb')
+    def test_forwards_the_device_gateway(self, adb, popen):
+        with tempfile.TemporaryDirectory() as folder:
+            instrumentation('tablet', 'alice@example.test', 'startsAndroidAudioAndReleasesMicrophone',
+                            Path(folder) / 'caller.log', gateway='http://127.0.0.1:8080')
+        adb.assert_called_once_with('tablet', 'reverse', 'tcp:8080', 'tcp:8080')
+        args = popen.call_args.args[0]
+        index = args.index('gateway')
+        self.assertEqual(args[index + 1], 'http://127.0.0.1:8080')
+
+    def test_missing_marker_fails_when_instrumentation_already_exited(self):
+        with self.assertRaisesRegex(AssertionError, 'instrumentation exited before calls-test-ready'):
+            wait_marker('tablet', '/sdcard/calls-test-ready', 1, process=Process())
+
     def test_accepts_only_a_real_pass(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / 'caller.log'

@@ -51,26 +51,31 @@ def make_user(base, project, role, suffix):
     return email, pair
 
 
-def instrumentation(serial, email, method, log, room_id=None):
+def instrumentation(serial, email, method, log, room_id=None, gateway='http://10.0.2.2:8080'):
+    if gateway == 'http://127.0.0.1:8080':
+        adb(serial, 'reverse', 'tcp:8080', 'tcp:8080')
     args = [ADB, '-s', serial, 'shell', 'am', 'instrument', '-w', '-r',
-            '-e', 'email', email, '-e', 'password', PASSWORD, '-e', 'coordinate', 'true']
+            '-e', 'email', email, '-e', 'password', PASSWORD, '-e', 'coordinate', 'true',
+            '-e', 'gateway', gateway]
     if room_id:
         args += ['-e', 'roomId', room_id]
     args += ['-e', 'class', f'{TEST}#{method}', RUNNER]
     return subprocess.Popen(args, stdout=log.open('w'), stderr=subprocess.STDOUT)
 
 
-def wait_marker(serial, marker, timeout):
+def wait_marker(serial, marker, timeout, process=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise AssertionError(f'{serial}: instrumentation exited before {marker.rsplit("/", 1)[-1]}')
         if adb(serial, 'shell', 'test', '-f', marker, check=False).returncode == 0:
             return
         time.sleep(2)
     raise TimeoutError(f'{serial}: marker {marker.rsplit("/", 1)[-1]} was not written')
 
 
-def wait_ready(serial, timeout=600):
-    wait_marker(serial, MARKER, timeout)
+def wait_ready(serial, timeout=600, process=None):
+    wait_marker(serial, MARKER, timeout, process=process)
 
 
 def result(process, log, timeout):
@@ -89,6 +94,8 @@ def main():
     parser.add_argument('--gateway', default='http://127.0.0.1:8080')
     parser.add_argument('--caller', default='emulator-5554')
     parser.add_argument('--callee', default='emulator-5556')
+    parser.add_argument('--caller-device-gateway', default='http://10.0.2.2:8080')
+    parser.add_argument('--callee-device-gateway', default='http://10.0.2.2:8080')
     parser.add_argument('--build', action='store_true')
     parser.add_argument('--no-install', action='store_true')
     args = parser.parse_args()
@@ -116,11 +123,12 @@ def main():
                    body={'peer_user_id': bob_pair['user_id']})
         adb(args.callee, 'shell', 'rm', '-f', MARKER, CALLEE_RTP)
         adb(args.caller, 'shell', 'rm', '-f', CALLER_RELEASE)
-        callee = instrumentation(args.callee, bob, 'acceptsBrowserAudioAndReleasesMicrophone', callee_log)
-        wait_ready(args.callee)
+        callee = instrumentation(args.callee, bob, 'acceptsBrowserAudioAndReleasesMicrophone', callee_log,
+                                 gateway=args.callee_device_gateway)
+        wait_ready(args.callee, process=callee)
         caller = instrumentation(args.caller, alice, 'startsAndroidAudioAndReleasesMicrophone', caller_log,
-                                 room_id=room['room_id'])
-        wait_marker(args.callee, CALLEE_RTP, 1_500)
+                                 room_id=room['room_id'], gateway=args.caller_device_gateway)
+        wait_marker(args.callee, CALLEE_RTP, 1_500, process=callee)
         adb(args.caller, 'shell', 'touch', CALLER_RELEASE)
         result(caller, caller_log, 1_500)
         result(callee, callee_log, 120)

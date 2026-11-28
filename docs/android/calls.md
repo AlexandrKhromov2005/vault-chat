@@ -115,6 +115,32 @@ adb -s emulator-5556 wait-for-device
 python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" --build
 ```
 
+### Физическое Android-устройство
+
+Для USB-устройства не нужен cleartext по LAN: `adb reverse` отображает loopback
+устройства на loopback Gateway хоста. Доверие к сертификатам и сетевые правила
+приложения не меняются. В `CALLS_TURN_URIS` и параметры coturn при этом нужно
+задать фактический LAN-адрес хоста, как описано выше.
+
+```sh
+adb -s DEVICE_SERIAL reverse tcp:8080 tcp:8080
+python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" \
+  --caller DEVICE_SERIAL --caller-device-gateway http://127.0.0.1:8080 \
+  --callee emulator-5556 --callee-device-gateway http://10.0.2.2:8080
+```
+
+`--gateway` по-прежнему задаёт только loopback API хоста для создания
+synthetic-пользователей и комнаты. Параметры `--caller-device-gateway` и
+`--callee-device-gateway` передаются в instrumentation и позволяют проверить
+два физических устройства, эмулятор с физическим устройством или два AVD.
+
+На Android 16+ приложению нужно разрешение `ACCESS_LOCAL_NETWORK` (объявлено в
+манифесте): без него система отклоняет UDP/TCP к локальным адресам, и ICE не
+собирает host/relay-кандидатов. На тестовом устройстве его можно выдать через
+`adb shell pm grant <package> android.permission.ACCESS_LOCAL_NETWORK`. Активный
+VPN на устройстве тоже ломает ICE: туннель подменяет host-кандидаты, поэтому
+перед прогоном VPN отключают.
+
 Для повторного прогона на тех же тёплых AVD без изменения APK можно использовать
 `--no-install`; по умолчанию APK всегда переустанавливаются. Первый запуск
 instrumentation после загрузки без KVM может занимать несколько минут. Только эта

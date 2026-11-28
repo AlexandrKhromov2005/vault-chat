@@ -30,7 +30,7 @@ class CallsInstrumentedTest {
         val password = arguments.getString("password") ?: error("password is required")
         val container = ApplicationProvider.getApplicationContext<VaultChatApplication>().container
         container.session.login(
-            ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true),
+            gateway(),
             email,
             password,
         )
@@ -41,7 +41,7 @@ class CallsInstrumentedTest {
     fun sessionProbe() = runBlocking {
         val container = ApplicationProvider.getApplicationContext<VaultChatApplication>().container
         val token = container.session.accessToken()
-        val api = container.gateway.api(ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true))
+        val api = container.gateway.api(gateway())
         val direct = call { api.me(bearer(token)) }.body
         val authorized = try {
             container.session.authorized { me(it) }.body
@@ -69,7 +69,7 @@ class CallsInstrumentedTest {
         assertTrue("authorized path returned another user", me.userId == signedIn.userId)
         val accessToken = container.session.accessToken()
         assertTrue("session issued an empty access token", accessToken.isNotBlank())
-        val api = container.gateway.api(ServerAddress.parse("http://10.0.2.2:8080", allowLocalCleartext = true))
+        val api = container.gateway.api(gateway())
         await("call visible through authenticated REST", 180_000) {
             call { api.activeCalls(bearer(accessToken)) }.body.calls.isNotEmpty()
         }
@@ -135,6 +135,11 @@ class CallsInstrumentedTest {
                 runCatching { calls.end() }
             }
         }
+    }
+
+    private fun gateway(): ServerAddress {
+        val configured = androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("gateway")
+        return ServerAddress.parse(configured ?: "http://10.0.2.2:8080", allowLocalCleartext = true)
     }
 
     private fun testFile(name: String): File =
