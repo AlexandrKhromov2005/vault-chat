@@ -64,6 +64,8 @@ task("calls")
     end)
 
 check("calls-load", "Measure 200 Calls and verify crash and kill -9 recovery.", {{"sh", "scripts/dev/calls-load"}})
+-- Not part of ci: builds the images and runs about 15 minutes (docs/load/chat.md).
+check("chat-load", "Measure Chat/Web load on a disposable stand with the VPS configuration.", {{"python3", "tests/load/chat_load.py"}})
 
 task("setup")
     set_menu({usage = "xmake setup", description = "Download modules and install commit/push security hooks.", options = {}})

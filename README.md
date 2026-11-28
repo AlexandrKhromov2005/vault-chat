@@ -444,6 +444,10 @@ S3, проверяет покрытие пакетов `service` и `handler` (�
 БД. Нужны xmake 2.8+, Docker и инструменты ниже; список отдельных команд — в
 [CONTRIBUTING](CONTRIBUTING.md#individual-commands).
 
+Нагрузочная приёмка Chat/Web не входит в `xmake ci`: `xmake chat-load` собирает
+образы и поднимает одноразовый стенд с конфигурацией VPS, см.
+[docs/load/chat.md](docs/load/chat.md).
+
 Базовые ручные проверки без xmake (не заменяют полный `xmake ci`):
 
 ```sh

@@ -1,0 +1,2098 @@
+{
+  "profile": {
+    "seed": 181,
+    "users": 120,
+    "group_size": 10,
+    "min_text_bytes": 32,
+    "max_text_bytes": 512,
+    "send_rate": 40,
+    "retry_share": 0.02,
+    "read_rate": 20,
+    "warmup_seconds": 20,
+    "series": 3,
+    "series_seconds": 60,
+    "reconnect": {
+      "users": 20,
+      "offline_seconds": 10,
+      "seconds": 40
+    },
+    "ramp": {
+      "send_rates": [
+        60,
+        80,
+        100,
+        120,
+        140
+      ],
+      "step_seconds": 30
+    },
+    "gates": {
+      "send_p95_ms": 100,
+      "send_p99_ms": 250,
+      "read_p95_ms": 100,
+      "read_p99_ms": 250,
+      "delivery_p95_ms": 150,
+      "delivery_p99_ms": 300,
+      "max_error_rate": 0.001,
+      "min_throughput_ratio": 0.98,
+      "min_delivery_ratio": 0.999,
+      "max_throughput_cv": 0.05,
+      "max_p95_spread": 1.5,
+      "max_memory_ratio": 0.9,
+      "max_reconnect_ms": 3000
+    }
+  },
+  "stand": {
+    "commit": "2bd4ac3323db143a3dde5834dbaf93afc6dc781c",
+    "dirty": false,
+    "docker": "29.1.3",
+    "compose": "5.0.0-desktop.1",
+    "os": "Docker Desktop (containerized)",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "host_cpus": 8,
+    "host_memory_bytes": 4107964416,
+    "cgroup": "2",
+    "stand_cpuset": "0,1",
+    "generator_cpuset": "2-5",
+    "configuration": "deployments/docker-compose.vps.yml + tests/load/stack.yml"
+  },
+  "setup": {
+    "users": 120,
+    "direct_rooms": 60,
+    "channels": 12,
+    "connections": 120,
+    "account_seconds": 29.642190426,
+    "room_seconds": 1.0697968979999999,
+    "connect_seconds": 45.410754999,
+    "connect_retries": 178,
+    "connect": {
+      "count": 120,
+      "p50_ms": 6.300649,
+      "p95_ms": 14.693284,
+      "p99_ms": 31.791508,
+      "max_ms": 32.616868
+    },
+    "access_ttl_seconds": 871
+  },
+  "warmup": {
+    "name": "warmup",
+    "seconds": 20.000613661,
+    "target_send_rate": 40,
+    "target_read_rate": 20,
+    "sends": 800,
+    "acknowledged": 800,
+    "retries": 14,
+    "reads": 400,
+    "requests": 1214,
+    "throughput": 40,
+    "throughput_ratio": 1,
+    "read_throughput": 20,
+    "send": {
+      "count": 814,
+      "p50_ms": 19.657243,
+      "p95_ms": 60.465936,
+      "p99_ms": 104.223975,
+      "max_ms": 118.957708
+    },
+    "read": {
+      "count": 400,
+      "p50_ms": 13.883357,
+      "p95_ms": 44.148,
+      "p99_ms": 85.01144,
+      "max_ms": 94.8993
+    },
+    "delivery": {
+      "count": 4824,
+      "p50_ms": 30.224998,
+      "p95_ms": 76.563184,
+      "p99_ms": 126.194463,
+      "max_ms": 147.330017
+    },
+    "expected_deliveries": 4824,
+    "deliveries": 4824,
+    "delivery_ratio": 1,
+    "deliveries_per_second": 241.2,
+    "live_duplicates": 0,
+    "errors": {},
+    "error_rate": 0,
+    "unexpected_closes": {},
+    "max_in_flight": 13,
+    "integrity": {
+      "rooms": 72,
+      "messages": 800,
+      "stored_duplicates": 0,
+      "sequence_gaps": 0,
+      "missing_acknowledged": 0,
+      "view_missing": 0,
+      "view_conflicts": 0
+    },
+    "catch_up": {
+      "requests": 360,
+      "recovered": 0,
+      "seconds": 0.952006923
+    },
+    "server": {
+      "event_queue_max": 0,
+      "event_queue_capacity": 1024,
+      "events_published": 800,
+      "events_dropped": 0,
+      "events_publish_failures": 0,
+      "websockets_min": 120,
+      "websockets_max": 120,
+      "gateway_5xx": 0,
+      "gateway_429": 0,
+      "auth_rpcs": 9656,
+      "chat_rpcs": 1218,
+      "scrapes": 20,
+      "scrape_errors": 0
+    },
+    "resources": {
+      "containers": {
+        "auth": {
+          "cpu_cores": 0.4450563913224173,
+          "memory_peak_bytes": 24051712,
+          "memory_limit_bytes": 536870912,
+          "memory_ratio": 0.0447998046875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "chat": {
+          "cpu_cores": 0.1380992745106838,
+          "memory_peak_bytes": 19759104,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.0736083984375,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "chat-postgres": {
+          "cpu_cores": 0.08754783260744636,
+          "memory_peak_bytes": 41373696,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.102752685546875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "gateway": {
+          "cpu_cores": 0.2732216373902116,
+          "memory_peak_bytes": 46518272,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.1732940673828125,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "loadgen": {
+          "cpu_cores": 0.11976203296399937,
+          "memory_peak_bytes": 30425088,
+          "memory_limit_bytes": 536870912,
+          "memory_ratio": 0.056671142578125,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "media": {
+          "cpu_cores": 0.009319653193555915,
+          "memory_peak_bytes": 14782464,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.0550689697265625,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "media-postgres": {
+          "cpu_cores": 0.009961484138194714,
+          "memory_peak_bytes": 37388288,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.09285481770833333,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "minio": {
+          "cpu_cores": 0.011220507920876617,
+          "memory_peak_bytes": 286040064,
+          "memory_limit_bytes": 805306368,
+          "memory_ratio": 0.355194091796875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "postgres": {
+          "cpu_cores": 0.10645237069240712,
+          "memory_peak_bytes": 49627136,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.12325032552083333,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "profile-cache": {
+          "cpu_cores": 0.01104204700447795,
+          "memory_peak_bytes": 5599232,
+          "memory_limit_bytes": 33554432,
+          "memory_ratio": 0.1668701171875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "redis": {
+          "cpu_cores": 0.04426893141686097,
+          "memory_peak_bytes": 11866112,
+          "memory_limit_bytes": 134217728,
+          "memory_ratio": 0.088409423828125,
+          "restarts": 0,
+          "oom_killed": false
+        }
+      },
+      "stand_cpu_cores": 1.1361901301971322,
+      "busiest": "auth",
+      "postgres": {
+        "auth": {
+          "transactions_per_second": 418.6411166016428,
+          "inserts_per_second": 0,
+          "fetches_per_second": 7.937108165055339,
+          "cache_hit_ratio": 0.999888417763892,
+          "deadlocks": 0,
+          "temp_bytes": 0,
+          "backends": 5
+        },
+        "chat": {
+          "transactions_per_second": 49.482908716516874,
+          "inserts_per_second": 31.996467290379336,
+          "fetches_per_second": 282.8421565901491,
+          "cache_hit_ratio": 0.9994391143911439,
+          "deadlocks": 0,
+          "temp_bytes": 0,
+          "backends": 5
+        }
+      },
+      "redis": {
+        "redis": {
+          "commands_per_second": 785.0709435550309,
+          "input_bytes_per_second": 140212.24018589463,
+          "output_bytes_per_second": 109688.31315565818,
+          "used_memory_bytes": 1428192,
+          "clients": 9,
+          "pubsub_channels": 120,
+          "rejected_connections": 0
+        }
+      }
+    }
+  },
+  "series": [
+    {
+      "name": "series-1",
+      "seconds": 60.012535093,
+      "target_send_rate": 40,
+      "target_read_rate": 20,
+      "sends": 2400,
+      "acknowledged": 2400,
+      "retries": 36,
+      "reads": 1200,
+      "requests": 3636,
+      "throughput": 40,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 2436,
+        "p50_ms": 16.538983,
+        "p95_ms": 44.344484,
+        "p99_ms": 82.5692,
+        "max_ms": 162.10266
+      },
+      "read": {
+        "count": 1200,
+        "p50_ms": 11.073593,
+        "p95_ms": 36.230282,
+        "p99_ms": 71.46304,
+        "max_ms": 105.747341
+      },
+      "delivery": {
+        "count": 14360,
+        "p50_ms": 25.103811,
+        "p95_ms": 65.189382,
+        "p99_ms": 120.979863,
+        "max_ms": 207.940508
+      },
+      "expected_deliveries": 14360,
+      "deliveries": 14360,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 239.33333333333334,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 12,
+      "integrity": {
+        "rooms": 72,
+        "messages": 3200,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.947649019
+      },
+      "server": {
+        "event_queue_max": 0,
+        "event_queue_capacity": 1024,
+        "events_published": 2400,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 28863,
+        "chat_rpcs": 3648,
+        "scrapes": 61,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.46930867753051697,
+            "memory_peak_bytes": 24797184,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0461883544921875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.14872389619981627,
+            "memory_peak_bytes": 21741568,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.08099365234375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.09288032040274267,
+            "memory_peak_bytes": 43937792,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.10912068684895833,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.2750694630129333,
+            "memory_peak_bytes": 58724352,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.2187652587890625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.11509274629300253,
+            "memory_peak_bytes": 50610176,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.094268798828125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.007876926562458022,
+            "memory_peak_bytes": 15314944,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0570526123046875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.008358910318104906,
+            "memory_peak_bytes": 38699008,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.09611002604166667,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.008044200372064322,
+            "memory_peak_bytes": 146427904,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.18182881673177084,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.10287755164899767,
+            "memory_peak_bytes": 49741824,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12353515625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.012282164716568704,
+            "memory_peak_bytes": 5632000,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.1678466796875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.04568056852537145,
+            "memory_peak_bytes": 12337152,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.0919189453125,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.171102679289574,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 465.7630718805271,
+            "inserts_per_second": 0,
+            "fetches_per_second": 4.8438977062598,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 58.66852419226508,
+            "inserts_per_second": 38.01822344452594,
+            "fetches_per_second": 737.3718886598184,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 904.7572353843552,
+            "input_bytes_per_second": 158572.14572385573,
+            "output_bytes_per_second": 123206.78483495678,
+            "used_memory_bytes": 1516488,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "series-2",
+      "seconds": 60.000650681,
+      "target_send_rate": 40,
+      "target_read_rate": 20,
+      "sends": 2400,
+      "acknowledged": 2400,
+      "retries": 42,
+      "reads": 1200,
+      "requests": 3642,
+      "throughput": 40,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 2442,
+        "p50_ms": 14.858571,
+        "p95_ms": 36.440771,
+        "p99_ms": 61.762497,
+        "max_ms": 136.424265
+      },
+      "read": {
+        "count": 1200,
+        "p50_ms": 9.542943,
+        "p95_ms": 29.107945,
+        "p99_ms": 51.472599,
+        "max_ms": 128.022373
+      },
+      "delivery": {
+        "count": 14384,
+        "p50_ms": 22.774612,
+        "p95_ms": 52.309955,
+        "p99_ms": 83.455288,
+        "max_ms": 191.790771
+      },
+      "expected_deliveries": 14384,
+      "deliveries": 14384,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 239.73333333333332,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 15,
+      "integrity": {
+        "rooms": 72,
+        "messages": 5600,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.760843306
+      },
+      "server": {
+        "event_queue_max": 1,
+        "event_queue_capacity": 1024,
+        "events_published": 2400,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 28885,
+        "chat_rpcs": 3653,
+        "scrapes": 60,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.44761174920483865,
+            "memory_peak_bytes": 23990272,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.04468536376953125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.13806359287991712,
+            "memory_peak_bytes": 22716416,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.084625244140625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.08703875587574096,
+            "memory_peak_bytes": 45604864,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.11326090494791667,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.2575297319297645,
+            "memory_peak_bytes": 63893504,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.2380218505859375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.10691192425897142,
+            "memory_peak_bytes": 56344576,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.104949951171875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.007873974253226985,
+            "memory_peak_bytes": 15527936,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0578460693359375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.007970007582048189,
+            "memory_peak_bytes": 38051840,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.09450276692708333,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.008405410329562983,
+            "memory_peak_bytes": 147062784,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.1826171875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.0922375828461318,
+            "memory_peak_bytes": 51249152,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12727864583333334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.01079712288598415,
+            "memory_peak_bytes": 6664192,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.1986083984375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.041936862001130754,
+            "memory_peak_bytes": 12374016,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.092193603515625,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.099464789788346,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 472.0145460971584,
+            "inserts_per_second": 0,
+            "fetches_per_second": 4.907401573650347,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 59.56681515384796,
+            "inserts_per_second": 38.37136033081209,
+            "fetches_per_second": 556.5380810959518,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 918.07152071264,
+            "input_bytes_per_second": 160672.83135367767,
+            "output_bytes_per_second": 124788.78105336291,
+            "used_memory_bytes": 1540632,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "series-3",
+      "seconds": 60.032734439,
+      "target_send_rate": 40,
+      "target_read_rate": 20,
+      "sends": 2400,
+      "acknowledged": 2400,
+      "retries": 46,
+      "reads": 1200,
+      "requests": 3646,
+      "throughput": 40,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 2446,
+        "p50_ms": 15.446074,
+        "p95_ms": 43.813437,
+        "p99_ms": 70.147325,
+        "max_ms": 107.577974
+      },
+      "read": {
+        "count": 1200,
+        "p50_ms": 10.609587,
+        "p95_ms": 37.662865,
+        "p99_ms": 65.36939,
+        "max_ms": 98.594838
+      },
+      "delivery": {
+        "count": 14456,
+        "p50_ms": 23.942141,
+        "p95_ms": 67.604854,
+        "p99_ms": 100.158361,
+        "max_ms": 164.979582
+      },
+      "expected_deliveries": 14456,
+      "deliveries": 14456,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 240.93333333333334,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 9,
+      "integrity": {
+        "rooms": 72,
+        "messages": 8000,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.880228843
+      },
+      "server": {
+        "event_queue_max": 0,
+        "event_queue_capacity": 1024,
+        "events_published": 2400,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 28960,
+        "chat_rpcs": 3658,
+        "scrapes": 61,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.4652674494364793,
+            "memory_peak_bytes": 23863296,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0444488525390625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.14669350873258596,
+            "memory_peak_bytes": 24670208,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0919036865234375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.0935102627390021,
+            "memory_peak_bytes": 48709632,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.1209716796875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.27083310630696783,
+            "memory_peak_bytes": 64933888,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.2418975830078125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.11281396699419548,
+            "memory_peak_bytes": 60887040,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.11341094970703125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.007841535420598952,
+            "memory_peak_bytes": 15577088,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0580291748046875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.009293709223442947,
+            "memory_peak_bytes": 39149568,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.09722900390625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.00791594635121846,
+            "memory_peak_bytes": 102400000,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.12715657552083334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.10104993093976118,
+            "memory_peak_bytes": 50077696,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12436930338541667,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.011836238515059255,
+            "memory_peak_bytes": 5861376,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.1746826171875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.04433893623370474,
+            "memory_peak_bytes": 12345344,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.09197998046875,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.1585806238988208,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 469.678698988307,
+            "inserts_per_second": 0,
+            "fetches_per_second": 4.900546557264049,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 60.466941237820556,
+            "inserts_per_second": 38.15655822711844,
+            "fetches_per_second": 616.6789754872901,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 918.6590368597489,
+            "input_bytes_per_second": 160184.72952495283,
+            "output_bytes_per_second": 124282.47107483266,
+            "used_memory_bytes": 1538976,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    }
+  ],
+  "reconnect": {
+    "name": "reconnect",
+    "seconds": 40.001066683,
+    "target_send_rate": 40,
+    "target_read_rate": 20,
+    "sends": 1600,
+    "acknowledged": 1600,
+    "retries": 40,
+    "reads": 800,
+    "requests": 2440,
+    "throughput": 40,
+    "throughput_ratio": 1,
+    "read_throughput": 20,
+    "send": {
+      "count": 1640,
+      "p50_ms": 16.102308,
+      "p95_ms": 41.491623,
+      "p99_ms": 58.545076,
+      "max_ms": 83.29809
+    },
+    "read": {
+      "count": 800,
+      "p50_ms": 10.971945,
+      "p95_ms": 31.836059,
+      "p99_ms": 48.290194,
+      "max_ms": 86.133746
+    },
+    "delivery": {
+      "count": 9012,
+      "p50_ms": 24.553408,
+      "p95_ms": 59.044126,
+      "p99_ms": 84.849506,
+      "max_ms": 133.012971
+    },
+    "expected_deliveries": 9014,
+    "deliveries": 9012,
+    "delivery_ratio": 0.9997781229199024,
+    "deliveries_per_second": 225.3,
+    "live_duplicates": 0,
+    "errors": {},
+    "error_rate": 0,
+    "unexpected_closes": {},
+    "max_in_flight": 11,
+    "integrity": {
+      "rooms": 72,
+      "messages": 9600,
+      "stored_duplicates": 0,
+      "sequence_gaps": 0,
+      "missing_acknowledged": 0,
+      "view_missing": 0,
+      "view_conflicts": 0
+    },
+    "catch_up": {
+      "requests": 360,
+      "recovered": 0,
+      "seconds": 0.980161704
+    },
+    "server": {
+      "event_queue_max": 0,
+      "event_queue_capacity": 1024,
+      "events_published": 1600,
+      "events_dropped": 0,
+      "events_publish_failures": 0,
+      "websockets_min": 100,
+      "websockets_max": 120,
+      "gateway_5xx": 0,
+      "gateway_429": 0,
+      "auth_rpcs": 18822,
+      "chat_rpcs": 2508,
+      "scrapes": 43,
+      "scrape_errors": 0
+    },
+    "resources": {
+      "containers": {
+        "auth": {
+          "cpu_cores": 0.44067896731570605,
+          "memory_peak_bytes": 23875584,
+          "memory_limit_bytes": 536870912,
+          "memory_ratio": 0.04447174072265625,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "chat": {
+          "cpu_cores": 0.14233155874123785,
+          "memory_peak_bytes": 26202112,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.0976104736328125,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "chat-postgres": {
+          "cpu_cores": 0.09010444922571888,
+          "memory_peak_bytes": 49815552,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.12371826171875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "gateway": {
+          "cpu_cores": 0.2660117540182144,
+          "memory_peak_bytes": 64471040,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.24017333984375,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "loadgen": {
+          "cpu_cores": 0.11176361824882584,
+          "memory_peak_bytes": 64086016,
+          "memory_limit_bytes": 536870912,
+          "memory_ratio": 0.1193695068359375,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "media": {
+          "cpu_cores": 0.007388602846976227,
+          "memory_peak_bytes": 15912960,
+          "memory_limit_bytes": 268435456,
+          "memory_ratio": 0.0592803955078125,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "media-postgres": {
+          "cpu_cores": 0.008893971939281585,
+          "memory_peak_bytes": 37609472,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.09340413411458333,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "minio": {
+          "cpu_cores": 0.010087550625640401,
+          "memory_peak_bytes": 101806080,
+          "memory_limit_bytes": 805306368,
+          "memory_ratio": 0.1264190673828125,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "postgres": {
+          "cpu_cores": 0.09724807552041803,
+          "memory_peak_bytes": 50601984,
+          "memory_limit_bytes": 402653184,
+          "memory_ratio": 0.12567138671875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "profile-cache": {
+          "cpu_cores": 0.012663282655108058,
+          "memory_peak_bytes": 5865472,
+          "memory_limit_bytes": 33554432,
+          "memory_ratio": 0.1748046875,
+          "restarts": 0,
+          "oom_killed": false
+        },
+        "redis": {
+          "cpu_cores": 0.04501562362462948,
+          "memory_peak_bytes": 12365824,
+          "memory_limit_bytes": 134217728,
+          "memory_ratio": 0.092132568359375,
+          "restarts": 0,
+          "oom_killed": false
+        }
+      },
+      "stand_cpu_cores": 1.120423836512931,
+      "busiest": "auth",
+      "postgres": {
+        "auth": {
+          "transactions_per_second": 436.80210425496284,
+          "inserts_per_second": 0,
+          "fetches_per_second": 5.956185662267111,
+          "cache_hit_ratio": 1,
+          "deadlocks": 0,
+          "temp_bytes": 0,
+          "backends": 5
+        },
+        "chat": {
+          "transactions_per_second": 57.6522398454557,
+          "inserts_per_second": 35.64617984135431,
+          "fetches_per_second": 675.3678002085165,
+          "cache_hit_ratio": 1,
+          "deadlocks": 0,
+          "temp_bytes": 0,
+          "backends": 5
+        }
+      },
+      "redis": {
+        "redis": {
+          "commands_per_second": 880.8107384906077,
+          "input_bytes_per_second": 150375.77394819164,
+          "output_bytes_per_second": 110298.57844417264,
+          "used_memory_bytes": 1473632,
+          "clients": 19,
+          "pubsub_channels": 120,
+          "rejected_connections": 0
+        }
+      }
+    },
+    "reconnect": {
+      "users": 20,
+      "reconnected": 20,
+      "reconnect": {
+        "count": 20,
+        "p50_ms": 47.34006,
+        "p95_ms": 93.048992,
+        "p99_ms": 111.633597,
+        "max_ms": 111.633597
+      },
+      "recovered": 492
+    }
+  },
+  "ramp": [
+    {
+      "name": "ramp-60",
+      "seconds": 30.000707481,
+      "target_send_rate": 60,
+      "target_read_rate": 20,
+      "sends": 1800,
+      "acknowledged": 1800,
+      "retries": 36,
+      "reads": 600,
+      "requests": 2436,
+      "throughput": 60,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 1836,
+        "p50_ms": 21.160494,
+        "p95_ms": 60.334198,
+        "p99_ms": 91.890072,
+        "max_ms": 147.801489
+      },
+      "read": {
+        "count": 600,
+        "p50_ms": 15.561005,
+        "p95_ms": 53.891821,
+        "p99_ms": 81.971361,
+        "max_ms": 125.588268
+      },
+      "delivery": {
+        "count": 11112,
+        "p50_ms": 31.759043,
+        "p95_ms": 85.423741,
+        "p99_ms": 134.196081,
+        "max_ms": 228.171219
+      },
+      "expected_deliveries": 11112,
+      "deliveries": 11112,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 370.4,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 13,
+      "integrity": {
+        "rooms": 72,
+        "messages": 11400,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.925330772
+      },
+      "server": {
+        "event_queue_max": 0,
+        "event_queue_capacity": 1024,
+        "events_published": 1800,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 19590,
+        "chat_rpcs": 2442,
+        "scrapes": 30,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.5648617884001966,
+            "memory_peak_bytes": 24567808,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0457611083984375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.17924237854156663,
+            "memory_peak_bytes": 28532736,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.106292724609375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.1210791667393078,
+            "memory_peak_bytes": 50016256,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12421671549479167,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.3194838667784591,
+            "memory_peak_bytes": 68395008,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.254791259765625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.14948335847527014,
+            "memory_peak_bytes": 67670016,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.12604522705078125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.008529901587534227,
+            "memory_peak_bytes": 18034688,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0671844482421875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.00820448888046194,
+            "memory_peak_bytes": 37605376,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.09339396158854167,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.007799761104511546,
+            "memory_peak_bytes": 101830656,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.1264495849609375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.12632796355320927,
+            "memory_peak_bytes": 50102272,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12443033854166667,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.011408892341899901,
+            "memory_peak_bytes": 5361664,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.1597900390625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.05401129042696945,
+            "memory_peak_bytes": 12627968,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.094085693359375,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.4009494983541162,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 619.8648439077278,
+            "inserts_per_second": 0,
+            "fetches_per_second": 6.4099271043116275,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 77.85260978149365,
+            "inserts_per_second": 54.2043350277226,
+            "fetches_per_second": 849.7198512841841,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 1235.9957496964391,
+            "input_bytes_per_second": 234435.64708011074,
+            "output_bytes_per_second": 186209.19140017856,
+            "used_memory_bytes": 1545576,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ramp-80",
+      "seconds": 30.00249582,
+      "target_send_rate": 80,
+      "target_read_rate": 20,
+      "sends": 2400,
+      "acknowledged": 2400,
+      "retries": 47,
+      "reads": 600,
+      "requests": 3047,
+      "throughput": 80,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 2447,
+        "p50_ms": 29.840605,
+        "p95_ms": 101.089634,
+        "p99_ms": 134.065061,
+        "max_ms": 179.711916
+      },
+      "read": {
+        "count": 600,
+        "p50_ms": 22.263067,
+        "p95_ms": 81.00427,
+        "p99_ms": 132.486102,
+        "max_ms": 153.847872
+      },
+      "delivery": {
+        "count": 14632,
+        "p50_ms": 45.178258,
+        "p95_ms": 144.534662,
+        "p99_ms": 195.341741,
+        "max_ms": 265.85271
+      },
+      "expected_deliveries": 14632,
+      "deliveries": 14632,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 487.73333333333335,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 19,
+      "integrity": {
+        "rooms": 72,
+        "messages": 13800,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.906000953
+      },
+      "server": {
+        "event_queue_max": 0,
+        "event_queue_capacity": 1024,
+        "events_published": 2400,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 24332,
+        "chat_rpcs": 3052,
+        "scrapes": 30,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.6399857306798394,
+            "memory_peak_bytes": 24719360,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.04604339599609375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.2047635012463079,
+            "memory_peak_bytes": 28254208,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.105255126953125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.15242454290542454,
+            "memory_peak_bytes": 51326976,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.127471923828125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.34672011645292933,
+            "memory_peak_bytes": 68603904,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.2555694580078125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.17950814788568514,
+            "memory_peak_bytes": 76451840,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.14240264892578125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.007764349913939239,
+            "memory_peak_bytes": 16896000,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0629425048828125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.007971765703241025,
+            "memory_peak_bytes": 37605376,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.09339396158854167,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.007154283470312448,
+            "memory_peak_bytes": 102203392,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.12691243489583334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.14285012001011088,
+            "memory_peak_bytes": 52355072,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.13002522786458334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.012502822206456063,
+            "memory_peak_bytes": 5615616,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.1673583984375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.05989929323118233,
+            "memory_peak_bytes": 12341248,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.091949462890625,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.5820365258197433,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 760.0092932487399,
+            "inserts_per_second": 0,
+            "fetches_per_second": 6.801531323057511,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 95.40693483161581,
+            "inserts_per_second": 72.52905674496782,
+            "fetches_per_second": 869.1120388808761,
+            "cache_hit_ratio": 0.9999794730738045,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 1563.208310398895,
+            "input_bytes_per_second": 307316.8359551117,
+            "output_bytes_per_second": 246244.8041435769,
+            "used_memory_bytes": 1560520,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ramp-100",
+      "seconds": 30.067430256,
+      "target_send_rate": 100,
+      "target_read_rate": 20,
+      "sends": 3000,
+      "acknowledged": 3000,
+      "retries": 50,
+      "reads": 600,
+      "requests": 3650,
+      "throughput": 100,
+      "throughput_ratio": 1,
+      "read_throughput": 20,
+      "send": {
+        "count": 3050,
+        "p50_ms": 68.985391,
+        "p95_ms": 165.716683,
+        "p99_ms": 274.531382,
+        "max_ms": 401.691815
+      },
+      "read": {
+        "count": 600,
+        "p50_ms": 57.210817,
+        "p95_ms": 141.714293,
+        "p99_ms": 266.285243,
+        "max_ms": 372.790551
+      },
+      "delivery": {
+        "count": 17960,
+        "p50_ms": 103.926359,
+        "p95_ms": 257.8434,
+        "p99_ms": 469.100481,
+        "max_ms": 725.585545
+      },
+      "expected_deliveries": 17960,
+      "deliveries": 17960,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 598.6666666666666,
+      "live_duplicates": 0,
+      "errors": {},
+      "error_rate": 0,
+      "unexpected_closes": {},
+      "max_in_flight": 39,
+      "integrity": {
+        "rooms": 72,
+        "messages": 16800,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.934522265
+      },
+      "server": {
+        "event_queue_max": 0,
+        "event_queue_capacity": 1024,
+        "events_published": 3000,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 0,
+        "auth_rpcs": 28871,
+        "chat_rpcs": 3656,
+        "scrapes": 31,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.7005220599769849,
+            "memory_peak_bytes": 25600000,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0476837158203125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.21989472519411396,
+            "memory_peak_bytes": 27598848,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.102813720703125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.17919417611442226,
+            "memory_peak_bytes": 53317632,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.132415771484375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.37129140936319965,
+            "memory_peak_bytes": 67960832,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.253173828125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.21339173100595502,
+            "memory_peak_bytes": 78827520,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.14682769775390625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.007985834709695336,
+            "memory_peak_bytes": 15900672,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.059234619140625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.008285106437161233,
+            "memory_peak_bytes": 37908480,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.094146728515625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.009990886600449545,
+            "memory_peak_bytes": 101941248,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.1265869140625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.1586950618123509,
+            "memory_peak_bytes": 50880512,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12636311848958334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.011513344879356494,
+            "memory_peak_bytes": 5595136,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.166748046875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.06760356634699519,
+            "memory_peak_bytes": 14131200,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.10528564453125,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.7349761714347292,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 908.1176724940593,
+            "inserts_per_second": 0,
+            "fetches_per_second": 6.431251393487907,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 117.04253142808817,
+            "inserts_per_second": 91.91069952635144,
+            "fetches_per_second": 952.8242355788879,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 1908.2709231823048,
+            "input_bytes_per_second": 376415.7430584633,
+            "output_bytes_per_second": 301775.888172321,
+            "used_memory_bytes": 1632376,
+            "clients": 19,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ramp-120",
+      "seconds": 30.074139273,
+      "target_send_rate": 120,
+      "target_read_rate": 20,
+      "sends": 3600,
+      "acknowledged": 3582,
+      "retries": 66,
+      "reads": 600,
+      "requests": 4266,
+      "throughput": 119.4,
+      "throughput_ratio": 0.995,
+      "read_throughput": 20,
+      "send": {
+        "count": 3666,
+        "p50_ms": 166.031504,
+        "p95_ms": 278.452494,
+        "p99_ms": 327.373295,
+        "max_ms": 385.184477
+      },
+      "read": {
+        "count": 600,
+        "p50_ms": 148.16521,
+        "p95_ms": 269.285277,
+        "p99_ms": 320.712673,
+        "max_ms": 422.533352
+      },
+      "delivery": {
+        "count": 21364,
+        "p50_ms": 261.103359,
+        "p95_ms": 501.544758,
+        "p99_ms": 651.267116,
+        "max_ms": 1083.663159
+      },
+      "expected_deliveries": 21364,
+      "deliveries": 21364,
+      "delivery_ratio": 1,
+      "deliveries_per_second": 712.1333333333333,
+      "live_duplicates": 0,
+      "errors": {
+        "http_429": 23
+      },
+      "error_rate": 0.005391467416783873,
+      "unexpected_closes": {},
+      "max_in_flight": 58,
+      "integrity": {
+        "rooms": 72,
+        "messages": 20382,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 0,
+        "seconds": 0.979246978
+      },
+      "server": {
+        "event_queue_max": 1,
+        "event_queue_capacity": 1024,
+        "events_published": 3582,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 120,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 23,
+        "auth_rpcs": 33491,
+        "chat_rpcs": 4249,
+        "scrapes": 31,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.7374122482216243,
+            "memory_peak_bytes": 28041216,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0522308349609375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.22344990545743726,
+            "memory_peak_bytes": 23801856,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0886688232421875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.20669474085051903,
+            "memory_peak_bytes": 55574528,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.13802083333333334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.3779451335109644,
+            "memory_peak_bytes": 71000064,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.264495849609375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.2389132858548071,
+            "memory_peak_bytes": 82182144,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.153076171875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.008715188702578694,
+            "memory_peak_bytes": 16023552,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0596923828125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.008626792700716032,
+            "memory_peak_bytes": 37613568,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.093414306640625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.007166646961673255,
+            "memory_peak_bytes": 102158336,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.12685648600260416,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.16518572026056222,
+            "memory_peak_bytes": 50069504,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12434895833333333,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.011928160210674457,
+            "memory_peak_bytes": 5611520,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.167236328125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.07049733021061001,
+            "memory_peak_bytes": 12660736,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.094329833984375,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.8176218670873598,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 1047.486423194432,
+            "inserts_per_second": 0,
+            "fetches_per_second": 6.818765922084715,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 136.15835770780978,
+            "inserts_per_second": 110.03008647000335,
+            "fetches_per_second": 1098.8441283439518,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 2223.444595239051,
+            "input_bytes_per_second": 443314.53478743293,
+            "output_bytes_per_second": 356315.26414073847,
+            "used_memory_bytes": 1818080,
+            "clients": 23,
+            "pubsub_channels": 120,
+            "rejected_connections": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ramp-140",
+      "seconds": 30.249957172,
+      "target_send_rate": 140,
+      "target_read_rate": 20,
+      "sends": 4200,
+      "acknowledged": 4040,
+      "retries": 77,
+      "reads": 600,
+      "requests": 4877,
+      "throughput": 134.66666666666666,
+      "throughput_ratio": 0.9619047619047618,
+      "read_throughput": 20,
+      "send": {
+        "count": 4277,
+        "p50_ms": 335.092064,
+        "p95_ms": 580.761506,
+        "p99_ms": 654.780262,
+        "max_ms": 897.491115
+      },
+      "read": {
+        "count": 600,
+        "p50_ms": 324.095624,
+        "p95_ms": 569.350735,
+        "p99_ms": 655.628346,
+        "max_ms": 687.251166
+      },
+      "delivery": {
+        "count": 23840,
+        "p50_ms": 3839.483366,
+        "p95_ms": 7162.504869,
+        "p99_ms": 8110.000137,
+        "max_ms": 9754.617991
+      },
+      "expected_deliveries": 24109,
+      "deliveries": 23840,
+      "delivery_ratio": 0.9888423410344684,
+      "deliveries_per_second": 794.6666666666666,
+      "live_duplicates": 0,
+      "errors": {
+        "http_429": 192
+      },
+      "error_rate": 0.03936846421980726,
+      "unexpected_closes": {
+        "4002": 4
+      },
+      "max_in_flight": 103,
+      "integrity": {
+        "rooms": 72,
+        "messages": 24422,
+        "stored_duplicates": 0,
+        "sequence_gaps": 0,
+        "missing_acknowledged": 0,
+        "view_missing": 0,
+        "view_conflicts": 0
+      },
+      "catch_up": {
+        "requests": 360,
+        "recovered": 368,
+        "seconds": 1.167479873
+      },
+      "server": {
+        "event_queue_max": 1,
+        "event_queue_capacity": 1024,
+        "events_published": 4040,
+        "events_dropped": 0,
+        "events_publish_failures": 0,
+        "websockets_min": 116,
+        "websockets_max": 120,
+        "gateway_5xx": 0,
+        "gateway_429": 192,
+        "auth_rpcs": 37311,
+        "chat_rpcs": 4692,
+        "scrapes": 35,
+        "scrape_errors": 0
+      },
+      "resources": {
+        "containers": {
+          "auth": {
+            "cpu_cores": 0.7177027411908026,
+            "memory_peak_bytes": 31793152,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.0592193603515625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat": {
+            "cpu_cores": 0.21318906897983267,
+            "memory_peak_bytes": 22323200,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.083160400390625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "chat-postgres": {
+            "cpu_cores": 0.20907956764457614,
+            "memory_peak_bytes": 59224064,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.14708455403645834,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "gateway": {
+            "cpu_cores": 0.368899127986024,
+            "memory_peak_bytes": 77086720,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.28717041015625,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "loadgen": {
+            "cpu_cores": 0.2446609340373583,
+            "memory_peak_bytes": 94056448,
+            "memory_limit_bytes": 536870912,
+            "memory_ratio": 0.17519378662109375,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media": {
+            "cpu_cores": 0.009477043624704338,
+            "memory_peak_bytes": 17477632,
+            "memory_limit_bytes": 268435456,
+            "memory_ratio": 0.0651092529296875,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "media-postgres": {
+            "cpu_cores": 0.008947931170098834,
+            "memory_peak_bytes": 40542208,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.10068766276041667,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "minio": {
+            "cpu_cores": 0.0075351895631177584,
+            "memory_peak_bytes": 102109184,
+            "memory_limit_bytes": 805306368,
+            "memory_ratio": 0.12679545084635416,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "postgres": {
+            "cpu_cores": 0.1597141108837276,
+            "memory_peak_bytes": 50339840,
+            "memory_limit_bytes": 402653184,
+            "memory_ratio": 0.12502034505208334,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "profile-cache": {
+            "cpu_cores": 0.01095528229296615,
+            "memory_peak_bytes": 6918144,
+            "memory_limit_bytes": 33554432,
+            "memory_ratio": 0.2061767578125,
+            "restarts": 0,
+            "oom_killed": false
+          },
+          "redis": {
+            "cpu_cores": 0.06868027792804154,
+            "memory_peak_bytes": 14204928,
+            "memory_limit_bytes": 134217728,
+            "memory_ratio": 0.1058349609375,
+            "restarts": 0,
+            "oom_killed": false
+          }
+        },
+        "stand_cpu_cores": 1.7741803412638917,
+        "busiest": "auth",
+        "postgres": {
+          "auth": {
+            "transactions_per_second": 1013.7582704133181,
+            "inserts_per_second": 0,
+            "fetches_per_second": 6.325345579732726,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          },
+          "chat": {
+            "transactions_per_second": 130.5616202996114,
+            "inserts_per_second": 107.4497806813572,
+            "fetches_per_second": 1082.336910309822,
+            "cache_hit_ratio": 1,
+            "deadlocks": 0,
+            "temp_bytes": 0,
+            "backends": 5
+          }
+        },
+        "redis": {
+          "redis": {
+            "commands_per_second": 2178.000296563269,
+            "input_bytes_per_second": 436087.97592681693,
+            "output_bytes_per_second": 349428.74116151745,
+            "used_memory_bytes": 1463376,
+            "clients": 23,
+            "pubsub_channels": 116,
+            "rejected_connections": 0
+          }
+        }
+      }
+    }
+  ],
+  "repeatability": {
+    "throughput_cv": 0,
+    "send_p95_spread": 1.2168920355719148,
+    "read_p95_spread": 1.2939032624941402,
+    "delivery_p95_spread": 1.292389832872156
+  },
+  "capacity": {
+    "highest_passing_rate": 60,
+    "first_failing_rate": 80,
+    "failing_gates": [
+      "send_p95_ms"
+    ],
+    "measured_rate": 140,
+    "busiest": "auth",
+    "busiest_cpu_cores": 0.7177027411908026,
+    "stand_cpu_cores": 1.7741803412638917
+  },
+  "violations": null,
+  "passed": true
+}
