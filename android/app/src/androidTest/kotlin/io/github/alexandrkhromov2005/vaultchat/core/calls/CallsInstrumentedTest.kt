@@ -115,6 +115,14 @@ class CallsInstrumentedTest {
             }
             assertTrue("Android sent no audio: $before -> $after", after.first > before.first)
             assertTrue("Android received no audio: $before -> $after", after.second > before.second)
+            if (androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("coordinate") == "true") {
+                if (calls.view.value?.role == CallRole.CALLEE) {
+                    testFile("calls-test-callee-rtp").writeText("passed")
+                    await("caller ended", 120_000) { calls.view.value?.state == "ended" }
+                } else {
+                    await("callee bidirectional audio", 900_000) { testFile("calls-test-caller-release").exists() }
+                }
+            }
         } catch (caught: Throwable) {
             failure = caught
             val diagnostics = runCatching { calls.rtcDiagnostics() }.getOrElse { "diagnostics failed: $it" }
@@ -128,6 +136,9 @@ class CallsInstrumentedTest {
             }
         }
     }
+
+    private fun testFile(name: String): File =
+        File(ApplicationProvider.getApplicationContext<VaultChatApplication>().getExternalFilesDir(null), name)
 
     private suspend fun await(description: String, timeoutMs: Long, condition: suspend () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs

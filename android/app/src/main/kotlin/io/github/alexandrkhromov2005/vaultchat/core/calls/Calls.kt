@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 enum class CallRole { CALLER, CALLEE }
 enum class CallConnection { UNKNOWN, DIRECT, RELAY, RECOVERING }
@@ -99,7 +100,8 @@ class Calls(
         var connection: CallConnection = CallConnection.UNKNOWN,
         var cursor: Long = 0,
         var senderSeq: Long = 0,
-        val ownSignals: MutableSet<Long> = mutableSetOf(),
+        val ownSignals: MutableSet<Long> = ConcurrentHashMap.newKeySet(),
+        val inFlightSignals: MutableSet<CallSignalRequest> = ConcurrentHashMap.newKeySet(),
     )
 
     fun start(roomId: String) {
@@ -351,23 +353,29 @@ class Calls(
             if (current != call || call.state == "ended") return@withLock
             call.senderSeq++
             val seq = call.senderSeq
+            val signal = CallSignalRequest(kind, payload, seq)
+            call.inFlightSignals += signal
             var last: Exception? = null
             var attempt = 0
-            while (current == call && call.state != "ended") {
-                attempt++
-                if (attempt > 1) delay(if (attempt == 2) 500 else if (attempt == 3) 1_500 else 1_000)
-                try {
-                    val result = requests.send { signalCall(it, call.id!!, CallSignalRequest(kind, payload, seq)) }
-                    call.ownSignals += result.signalSeq
-                    return@withLock
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    last = e
+            try {
+                while (current == call && call.state != "ended") {
+                    attempt++
+                    if (attempt > 1) delay(if (attempt == 2) 500 else if (attempt == 3) 1_500 else 1_000)
+                    try {
+                        val result = requests.send { signalCall(it, call.id!!, signal) }
+                        call.ownSignals += result.signalSeq
+                        return@withLock
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        last = e
+                    }
+                    if (kind != "candidate" && attempt >= 3) break
                 }
-                if (kind != "candidate" && attempt >= 3) break
+                throw last ?: IllegalStateException("signal failed")
+            } finally {
+                call.inFlightSignals -= signal
             }
-            throw last ?: IllegalStateException("signal failed")
         }
     }
 
@@ -378,7 +386,8 @@ class Calls(
                 val signals = requests.send { callSignals(it, call.id!!, call.cursor) }.signals.sortedBy { it.signalSeq }
                 for (signal in signals) {
                     if (signal.signalSeq <= call.cursor) continue
-                    val own = signalLock.withLock { signal.signalSeq in call.ownSignals }
+                    val own = signal.signalSeq in call.ownSignals ||
+                        CallSignalRequest(signal.kind, signal.payload, signal.senderSeq) in call.inFlightSignals
                     if (!own) {
                         val currentMedia = media
                         if (call.mediaReady && currentMedia != null) {
@@ -450,6 +459,7 @@ class Calls(
 
     internal suspend fun rtcDiagnostics(): String =
         "cursor=${current?.cursor}, mediaReady=${current?.mediaReady}, pendingSignals=${current?.pendingSignals?.size}, " +
+            "inFlight=${current?.inFlightSignals?.size}, " +
             ((media as? WebRtcCallMedia)?.rtcDiagnostics()
             ?: "media=${media?.javaClass?.simpleName ?: "null"}")
 

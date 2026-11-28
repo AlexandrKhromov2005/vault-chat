@@ -41,12 +41,13 @@ class AppContainer(
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // Gateway answers within its 10 s request budget; the margin covers a
-    // slow mobile network.
+    // slow mobile network. The forced-relay emulator fixture uses a larger
+    // budget because software CPU emulation can stall an otherwise local call.
     private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .writeTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(if (BuildConfig.CALLS_FORCE_RELAY) 30 else 10, TimeUnit.SECONDS)
+        .readTimeout(if (BuildConfig.CALLS_FORCE_RELAY) 120 else 20, TimeUnit.SECONDS)
+        .writeTimeout(if (BuildConfig.CALLS_FORCE_RELAY) 120 else 20, TimeUnit.SECONDS)
+        .callTimeout(if (BuildConfig.CALLS_FORCE_RELAY) 120 else 30, TimeUnit.SECONDS)
         .build()
 
     val allowLocalCleartext: Boolean = BuildConfig.DEBUG

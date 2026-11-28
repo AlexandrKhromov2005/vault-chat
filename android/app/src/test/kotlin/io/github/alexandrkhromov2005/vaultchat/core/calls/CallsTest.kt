@@ -8,6 +8,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
 import io.github.alexandrkhromov2005.vaultchat.core.net.call
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -20,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class CallsTest {
     private val server = MockWebServer()
@@ -212,6 +214,34 @@ class CallsTest {
     }
 
     @Test
+    fun stalledOutgoingCandidateDoesNotBlockIncomingSignals() = runBlocking {
+        enqueue(
+            """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
+            call("call-1", "connecting", caller = "bob", callee = "alice"),
+            turn(),
+        )
+        server.enqueue(MockResponse.Builder().headersDelay(5, TimeUnit.SECONDS)
+            .body("""{"state":"connecting","signal_seq":2}""").build())
+        enqueue(
+            """{"signals":[{"signal_seq":1,"sender_device":"device-bob","sender_seq":1,"kind":"candidate","payload":"remote-candidate"},{"signal_seq":2,"sender_device":"device-alice","sender_seq":1,"kind":"candidate","payload":"local-candidate"}]}""",
+            call("call-1", "ended", caller = "bob", callee = "alice"),
+        )
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media") { media.started == 1 }
+        launch { media.listener!!.signal("candidate", "local-candidate") }
+        await("outgoing candidate") { signalRequests.isNotEmpty() }
+        calls.onEvent(Frame.CallEvent("call.signal", "call-1"))
+
+        await("incoming candidate", 40) { media.receivedPayloads == listOf("remote-candidate") }
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertSingleBearerPrefix()
+    }
+
+    @Test
     fun serverEndedDuringLocalEndReleasesMedia() = runBlocking {
         enqueue(
             """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
@@ -348,6 +378,7 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     var answerSent = false
     var candidateOnStart = false
     val received = mutableListOf<String>()
+    val receivedPayloads = mutableListOf<String>()
 
     override fun create(): CallMedia = this
 
@@ -368,6 +399,7 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     override suspend fun receive(kind: String, payload: String) {
         if (started == 0) return
         received += kind
+        receivedPayloads += payload
         if (kind == "offer" && answerOnOffer) {
             listener!!.signal("answer", "synthetic-answer")
             answerSent = true

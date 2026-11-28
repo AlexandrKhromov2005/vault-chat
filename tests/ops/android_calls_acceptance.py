@@ -12,6 +12,8 @@ APP = 'io.github.alexandrkhromov2005.vaultchat.debug'
 RUNNER = APP + '.test/androidx.test.runner.AndroidJUnitRunner'
 TEST = 'io.github.alexandrkhromov2005.vaultchat.core.calls.CallsInstrumentedTest'
 MARKER = '/sdcard/Android/data/' + APP + '/files/calls-test-ready'
+CALLEE_RTP = '/sdcard/Android/data/' + APP + '/files/calls-test-callee-rtp'
+CALLER_RELEASE = '/sdcard/Android/data/' + APP + '/files/calls-test-caller-release'
 PASSWORD = 'SyntheticPassword123'
 
 
@@ -51,20 +53,24 @@ def make_user(base, project, role, suffix):
 
 def instrumentation(serial, email, method, log, room_id=None):
     args = [ADB, '-s', serial, 'shell', 'am', 'instrument', '-w', '-r',
-            '-e', 'email', email, '-e', 'password', PASSWORD]
+            '-e', 'email', email, '-e', 'password', PASSWORD, '-e', 'coordinate', 'true']
     if room_id:
         args += ['-e', 'roomId', room_id]
     args += ['-e', 'class', f'{TEST}#{method}', RUNNER]
     return subprocess.Popen(args, stdout=log.open('w'), stderr=subprocess.STDOUT)
 
 
-def wait_ready(serial, timeout=600):
+def wait_marker(serial, marker, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if adb(serial, 'shell', 'test', '-f', MARKER, check=False).returncode == 0:
+        if adb(serial, 'shell', 'test', '-f', marker, check=False).returncode == 0:
             return
         time.sleep(2)
-    raise TimeoutError(f'{serial}: instrumented login did not become ready')
+    raise TimeoutError(f'{serial}: marker {marker.rsplit("/", 1)[-1]} was not written')
+
+
+def wait_ready(serial, timeout=600):
+    wait_marker(serial, MARKER, timeout)
 
 
 def result(process, log, timeout):
@@ -108,11 +114,14 @@ def main():
         bob, bob_pair = make_user(args.gateway, args.project, 'bob', suffix)
         room = api(args.gateway, 'POST', '/api/v1/rooms/direct', token=alice_pair['access_token'],
                    body={'peer_user_id': bob_pair['user_id']})
-        adb(args.callee, 'shell', 'rm', '-f', MARKER)
+        adb(args.callee, 'shell', 'rm', '-f', MARKER, CALLEE_RTP)
+        adb(args.caller, 'shell', 'rm', '-f', CALLER_RELEASE)
         callee = instrumentation(args.callee, bob, 'acceptsBrowserAudioAndReleasesMicrophone', callee_log)
         wait_ready(args.callee)
         caller = instrumentation(args.caller, alice, 'startsAndroidAudioAndReleasesMicrophone', caller_log,
                                  room_id=room['room_id'])
+        wait_marker(args.callee, CALLEE_RTP, 1_500)
+        adb(args.caller, 'shell', 'touch', CALLER_RELEASE)
         result(caller, caller_log, 1_500)
         result(callee, callee_log, 120)
         active = api(args.gateway, 'GET', '/api/v1/calls?active=true', token=alice_pair['access_token'])
