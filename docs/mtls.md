@@ -4,7 +4,7 @@ VPS Compose требует mTLS по умолчанию; `scripts/vps.sh init` �
 Для локального Compose overlay остаётся отдельным выбором.
 
 Публичный HTTPS и внутренний mTLS используют разные CA и ключи. У Auth, Chat,
-Media, Gateway и Preview отдельные EC P-256 сертификаты с DNS SAN `<service>.vault.internal`
+Media, Gateway, Calls и Preview отдельные EC P-256 сертификаты с DNS SAN `<service>.vault.internal`
 и URI SAN `spiffe://vault-chat/service/<service>`. TLS 1.3 проверяет доверенный CA,
 срок и назначение сертификата. Клиент дополнительно проверяет точную идентичность
 сервера; сервер требует клиентский сертификат и известный service URI.
@@ -17,9 +17,10 @@ JWT, права комнаты и доступ к файлам проверяю�
 
 | Вызывающий сервис | Разрешённые прикладные RPC |
 |---|---|
-| Gateway | AuthService, ChatService и MediaService |
+| Gateway | AuthService, ChatService, MediaService и CallsService |
 | Chat | Auth.ValidateToken, Auth.GetUser, Media.GetFile |
 | Media | Auth.ValidateToken, Chat.GetRoom, Preview.Decode |
+| Calls | Auth.ValidateToken, Auth.ValidateSession, Chat.GetRoom, Chat.CheckMembership |
 | Auth | Не вызывает другие сервисы |
 | Preview | Не вызывает другие сервисы |
 
