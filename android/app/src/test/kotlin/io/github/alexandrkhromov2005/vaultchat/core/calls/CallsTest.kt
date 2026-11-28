@@ -371,6 +371,48 @@ class CallsTest {
     }
 
     @Test
+    fun serverErrorDuringReconcileRefreshKeepsCurrentCall() = runBlocking {
+        refreshFailureKeepsCurrentCall(MockResponse.Builder().code(500).body("""{"error":"internal"}""").build())
+    }
+
+    @Test
+    fun networkFailureDuringReconcileRefreshKeepsCurrentCall() = runBlocking {
+        refreshFailureKeepsCurrentCall(*Array(6) { MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build() })
+    }
+
+    private suspend fun refreshFailureKeepsCurrentCall(vararg failures: MockResponse) {
+        enqueue("""{"calls":[${call("old-call", "ringing", caller = "bob", callee = "alice")}]}""")
+        calls.reconcile()
+        await("old incoming") { calls.view.value?.callId == "old-call" }
+        enqueue("""{"calls":[${call("new-call", "ringing", caller = "bob", callee = "alice")}]}""")
+        failures.forEach(server::enqueue)
+
+        calls.onEvent(Frame.CallEvent("call.created", "new-call"))
+
+        await("refresh attempted") { server.requestCount >= 3 }
+        delay(500)
+        assertTrue("refresh must fail, not wait for a response", server.requestCount <= 2 + failures.size)
+        assertEquals("old-call", calls.view.value?.callId)
+        assertEquals("ringing", calls.view.value?.state)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun serverErrorOnAcceptKeepsRingingCall() = runBlocking {
+        enqueue("""{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""")
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        server.enqueue(MockResponse.Builder().code(500).body("""{"error":"internal"}""").build())
+
+        calls.accept()
+
+        await("error shown") { calls.view.value?.error != null }
+        assertEquals("ringing", calls.view.value?.state)
+        assertEquals(0, media.closed)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
     fun permissionFailureDoesNotCreateCall() = runBlocking {
         media.prepareError = SecurityException("denied")
         calls.start("room-1")
