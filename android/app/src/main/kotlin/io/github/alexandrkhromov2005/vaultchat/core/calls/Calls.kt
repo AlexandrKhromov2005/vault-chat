@@ -7,6 +7,7 @@ import io.github.alexandrkhromov2005.vaultchat.core.chat.Frame
 import io.github.alexandrkhromov2005.vaultchat.core.net.ApiException
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallCommand
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallDto
+import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalDto
 import io.github.alexandrkhromov2005.vaultchat.core.net.CallSignalRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.CreateCallRequest
 import io.github.alexandrkhromov2005.vaultchat.core.net.EmptyCallBody
@@ -24,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 enum class CallRole { CALLER, CALLEE }
 enum class CallConnection { UNKNOWN, DIRECT, RELAY, RECOVERING }
@@ -78,6 +80,7 @@ class Calls(
     private val commandLock = Mutex()
     private val signalLock = Mutex()
     private val catchUpLock = Mutex()
+    internal var heartbeatIntervalMs: Long = 15_000
     private var current: CallSession? = null
     private var media: CallMedia? = null
     private val ended = mutableSetOf<String>()
@@ -90,13 +93,16 @@ class Calls(
         var owned: Boolean,
         var pending: Boolean = false,
         var mediaStarted: Boolean = false,
+        var mediaReady: Boolean = false,
+        val pendingSignals: MutableList<CallSignalDto> = mutableListOf(),
         var loopsStarted: Boolean = false,
         var connectedSent: Boolean = false,
         var remote: Boolean = false,
         var connection: CallConnection = CallConnection.UNKNOWN,
         var cursor: Long = 0,
         var senderSeq: Long = 0,
-        val ownSignals: MutableSet<Long> = mutableSetOf(),
+        val ownSignals: MutableSet<Long> = ConcurrentHashMap.newKeySet(),
+        val inFlightSignals: MutableSet<CallSignalRequest> = ConcurrentHashMap.newKeySet(),
     )
 
     fun start(roomId: String) {
@@ -291,8 +297,16 @@ class Calls(
         scope.launch {
             try {
                 val turn = runCatching { requests.send { turnCall(it, call.id!!, EmptyCallBody()) } }.getOrNull()
-                media?.start(call.role, turn?.iceServers ?: emptyList(), mediaListener(call))
                 foreground(true)
+                media?.start(call.role, turn?.iceServers ?: emptyList(), mediaListener(call))
+                catchUpLock.withLock {
+                    if (current == call && call.state != "ended") {
+                        call.mediaReady = true
+                        val pending = call.pendingSignals.toList()
+                        call.pendingSignals.clear()
+                        pending.forEach { signal -> media?.receive(signal.kind, signal.payload) }
+                    }
+                }
                 schedule(call)
                 refreshTurnBeforeExpiry(call, turn?.ttl ?: 600)
             } catch (e: CancellationException) {
@@ -340,20 +354,29 @@ class Calls(
             if (current != call || call.state == "ended") return@withLock
             call.senderSeq++
             val seq = call.senderSeq
+            val signal = CallSignalRequest(kind, payload, seq)
+            call.inFlightSignals += signal
             var last: Exception? = null
-            repeat(3) { attempt ->
-                if (attempt > 0) delay(if (attempt == 1) 500 else 1_500)
-                try {
-                    val result = requests.send { signalCall(it, call.id!!, CallSignalRequest(kind, payload, seq)) }
-                    call.ownSignals += result.signalSeq
-                    return@withLock
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    last = e
+            var attempt = 0
+            try {
+                while (current == call && call.state != "ended") {
+                    attempt++
+                    if (attempt > 1) delay(if (attempt == 2) 500 else if (attempt == 3) 1_500 else 1_000)
+                    try {
+                        val result = requests.send { signalCall(it, call.id!!, signal) }
+                        call.ownSignals += result.signalSeq
+                        return@withLock
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        last = e
+                    }
+                    if (kind != "candidate" && attempt >= 3) break
                 }
+                throw last ?: IllegalStateException("signal failed")
+            } finally {
+                call.inFlightSignals -= signal
             }
-            throw last ?: IllegalStateException("signal failed")
         }
     }
 
@@ -364,8 +387,16 @@ class Calls(
                 val signals = requests.send { callSignals(it, call.id!!, call.cursor) }.signals.sortedBy { it.signalSeq }
                 for (signal in signals) {
                     if (signal.signalSeq <= call.cursor) continue
-                    val own = signalLock.withLock { signal.signalSeq in call.ownSignals }
-                    if (!own) media?.receive(signal.kind, signal.payload)
+                    val own = signal.signalSeq in call.ownSignals ||
+                        CallSignalRequest(signal.kind, signal.payload, signal.senderSeq) in call.inFlightSignals
+                    if (!own) {
+                        val currentMedia = media
+                        if (call.mediaReady && currentMedia != null) {
+                            currentMedia.receive(signal.kind, signal.payload)
+                        } else {
+                            call.pendingSignals += signal
+                        }
+                    }
                     call.cursor = signal.signalSeq
                 }
             } catch (e: CancellationException) {
@@ -395,9 +426,9 @@ class Calls(
         call.loopsStarted = true
         scope.launch {
             while (current == call && call.state in setOf("connecting", "active")) {
-                delay(15_000)
+                delay(heartbeatIntervalMs)
                 if (current != call) break
-                runCatching { requests.send { heartbeatCall(it, call.id!!, CallCommand(newId())) } }
+                runCatching { apply(call, requests.send { heartbeatCall(it, call.id!!, CallCommand(newId())) }) }
                 catchUp(call)
             }
         }
@@ -426,6 +457,12 @@ class Calls(
     }
 
     suspend fun audioBytes(): Pair<Long, Long> = media?.audioBytes() ?: (0L to 0L)
+
+    internal suspend fun rtcDiagnostics(): String =
+        "cursor=${current?.cursor}, mediaReady=${current?.mediaReady}, pendingSignals=${current?.pendingSignals?.size}, " +
+            "inFlight=${current?.inFlightSignals?.size}, " +
+            ((media as? WebRtcCallMedia)?.rtcDiagnostics()
+            ?: "media=${media?.javaClass?.simpleName ?: "null"}")
 
     private suspend fun <T> withRetries(request: suspend () -> T): T {
         var last: ApiException? = null

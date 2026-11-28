@@ -6,7 +6,9 @@ import io.github.alexandrkhromov2005.vaultchat.core.net.Gateway
 import io.github.alexandrkhromov2005.vaultchat.core.net.GatewayApi
 import io.github.alexandrkhromov2005.vaultchat.core.net.ServerAddress
 import io.github.alexandrkhromov2005.vaultchat.core.net.call
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -19,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class CallsTest {
     private val server = MockWebServer()
@@ -26,13 +29,16 @@ class CallsTest {
     private lateinit var media: FakeCallMedia
     private lateinit var calls: Calls
     private val authorization = mutableListOf<String>()
+    private val signalRequests = mutableListOf<String>()
 
     @Before
     fun setUp() {
         server.start()
         val http = OkHttpClient.Builder().addInterceptor { chain ->
-            chain.request().header("Authorization")?.let(authorization::add)
-            chain.proceed(chain.request())
+            val request = chain.request()
+            request.header("Authorization")?.let(authorization::add)
+            if (request.method == "POST" && request.url.encodedPath.endsWith("/signal")) signalRequests += request.url.encodedPath
+            chain.proceed(request)
         }.build()
         val api = Gateway(http).api(ServerAddress.parse("http://127.0.0.1:${server.port}", allowLocalCleartext = true))
         requests = object : ChatRequests {
@@ -68,11 +74,46 @@ class CallsTest {
     }
 
     @Test
+    fun foregroundStartsBeforeMediaInitialization() = runBlocking {
+        calls = Calls("alice", requests, mediaFactory = media, foreground = { active ->
+            media.events += if (active) "foreground-start" else "foreground-stop"
+        })
+        val incoming = call("call-1", "ringing", caller = "bob", callee = "alice")
+        enqueue("""{"calls":[$incoming]}""", call("call-1", "connecting", caller = "bob", callee = "alice"), turn(), call("call-1", "ended", caller = "bob", callee = "alice"))
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media") { media.started == 1 }
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+
+        assertEquals(listOf("foreground-start", "media", "foreground-stop"), media.events)
+    }
+
+    @Test
+    fun mediaInitializationFailureStopsForeground() = runBlocking {
+        calls = Calls("alice", requests, mediaFactory = media, foreground = { active ->
+            media.events += if (active) "foreground-start" else "foreground-stop"
+        })
+        media.startError = IllegalStateException("synthetic media failure")
+        val incoming = call("call-1", "ringing", caller = "bob", callee = "alice")
+        enqueue("""{"calls":[$incoming]}""", call("call-1", "connecting", caller = "bob", callee = "alice"), turn())
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("ended") { calls.view.value?.state == "ended" }
+
+        assertEquals(listOf("foreground-start", "media", "foreground-stop"), media.events)
+    }
+
+    @Test
     fun callerReconcilesSignalsWithoutDuplicatingMedia() = runBlocking {
         val id = UUID.randomUUID().toString().replace("-", "").uppercase()
         enqueue(
             call(id, "ringing"), call(id, "ringing"), call(id, "connecting"), turn(),
-            call(id, "connecting"), """{"state":"connecting","signal_seq":1}""",
+            call(id, "active"), """{"state":"connecting","signal_seq":1}""",
             """{"signals":[{"signal_seq":1,"sender_device":"device-alice","sender_seq":1,"kind":"offer","payload":"synthetic-offer"},{"signal_seq":2,"sender_device":"device-bob","sender_seq":1,"kind":"answer","payload":"synthetic-answer"}]}""",
             call(id, "ended"),
         )
@@ -85,11 +126,49 @@ class CallsTest {
         media.listener!!.remote()
         media.listener!!.connection(CallConnection.RELAY)
         await("relay transport") { calls.view.value?.connection == CallConnection.RELAY }
+        await("active") { calls.view.value?.state == "active" }
         media.listener!!.signal("offer", "synthetic-offer")
         calls.onEvent(Frame.CallEvent("call.signal", id))
         await("answer") { media.received.contains("answer") }
         assertEquals(1, media.started)
         assertEquals(listOf("answer"), media.received)
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertEquals(1, media.closed)
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun callerAppliesActiveStateFromHeartbeatWhenConnectedRacesAccept() = runBlocking {
+        calls.heartbeatIntervalMs = 100
+        val id = UUID.randomUUID().toString().replace("-", "").uppercase()
+        val gets = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): MockResponse {
+                val body = when {
+                    request.method == "POST" && request.url.encodedPath == "/api/v1/calls" -> call(id, "ringing")
+                    request.method == "GET" && request.url.encodedPath == "/api/v1/calls/$id" ->
+                        if (gets.incrementAndGet() == 1) call(id, "ringing") else call(id, "connecting")
+                    request.url.encodedPath.endsWith("/turn") -> turn()
+                    // The caller's connected command lands before the callee's
+                    // accept completes server-side, so it still says "connecting".
+                    request.url.encodedPath.endsWith("/connected") -> call(id, "connecting")
+                    // Only the heartbeat carries the real "active" state afterwards.
+                    request.url.encodedPath.endsWith("/heartbeat") -> call(id, "active")
+                    request.url.encodedPath.endsWith("/signals") -> """{"signals":[]}"""
+                    request.url.encodedPath.endsWith("/end") -> call(id, "ended")
+                    else -> return MockResponse.Builder().code(404).body("""{"error":"unexpected"}""").build()
+                }
+                return MockResponse.Builder().body(body).build()
+            }
+        }
+
+        calls.start("room-1")
+        await("created") { calls.view.value?.state == "ringing" }
+        calls.onEvent(Frame.CallEvent("call.accepted", id))
+        await("media") { media.started == 1 }
+        media.listener!!.connected()
+        await("active via heartbeat") { calls.view.value?.state == "active" }
         calls.end()
         await("ended") { calls.view.value?.state == "ended" }
         assertEquals(1, media.closed)
@@ -115,6 +194,85 @@ class CallsTest {
         calls.onEvent(Frame.CallEvent("call.signal", "call-1"))
         await("answer") { media.answerSent }
         assertEquals(listOf("offer"), media.received)
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun mediaStartCatchesUpPendingSignals() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        media.startGate = gate
+        enqueue(
+            """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
+            call("call-1", "connecting", caller = "bob", callee = "alice"),
+            turn(),
+            """{"signals":[{"signal_seq":1,"sender_device":"device-bob","sender_seq":1,"kind":"offer","payload":"synthetic-offer"}]}""",
+            call("call-1", "ended", caller = "bob", callee = "alice"),
+        )
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media start") { media.events.contains("media") }
+        calls.onEvent(Frame.CallEvent("call.signal", "call-1"))
+        await("pending signal fetched") { calls.rtcDiagnostics().contains("cursor=1") }
+        gate.complete(Unit)
+
+        await("pending offer") { media.received == listOf("offer") }
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun candidateSignalRetriesPastTransientOutage() = runBlocking {
+        media.candidateOnStart = true
+        enqueue(
+            """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
+            call("call-1", "connecting", caller = "bob", callee = "alice"),
+            turn(),
+        )
+        repeat(10) {
+            server.enqueue(MockResponse.Builder().code(500).body("""{"error":"synthetic outage"}""").build())
+        }
+        enqueue("""{"state":"connecting","signal_seq":1}""", call("call-1", "ended", caller = "bob", callee = "alice"))
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+
+        await("media after candidate retry", 300) { media.started == 1 }
+        assertTrue("candidate was not retried past three failures: $signalRequests", signalRequests.size > 3)
+        calls.end()
+        await("ended") { calls.view.value?.state == "ended" }
+        calls.dismiss()
+        assertSingleBearerPrefix()
+    }
+
+    @Test
+    fun stalledOutgoingCandidateDoesNotBlockIncomingSignals() = runBlocking {
+        enqueue(
+            """{"calls":[${call("call-1", "ringing", caller = "bob", callee = "alice")}]}""",
+            call("call-1", "connecting", caller = "bob", callee = "alice"),
+            turn(),
+        )
+        server.enqueue(MockResponse.Builder().headersDelay(5, TimeUnit.SECONDS)
+            .body("""{"state":"connecting","signal_seq":2}""").build())
+        enqueue(
+            """{"signals":[{"signal_seq":1,"sender_device":"device-bob","sender_seq":1,"kind":"candidate","payload":"remote-candidate"},{"signal_seq":2,"sender_device":"device-alice","sender_seq":1,"kind":"candidate","payload":"local-candidate"}]}""",
+            call("call-1", "ended", caller = "bob", callee = "alice"),
+        )
+
+        calls.reconcile()
+        await("incoming") { calls.view.value?.state == "ringing" }
+        calls.accept()
+        await("media") { media.started == 1 }
+        launch { media.listener!!.signal("candidate", "local-candidate") }
+        await("outgoing candidate") { signalRequests.isNotEmpty() }
+        calls.onEvent(Frame.CallEvent("call.signal", "call-1"))
+
+        await("incoming candidate", 40) { media.receivedPayloads == listOf("remote-candidate") }
         calls.end()
         await("ended") { calls.view.value?.state == "ended" }
         assertSingleBearerPrefix()
@@ -230,8 +388,8 @@ class CallsTest {
         bodies.forEach { body -> server.enqueue(MockResponse.Builder().body(body).build()) }
     }
 
-    private suspend fun await(description: String, condition: () -> Boolean) {
-        repeat(100) {
+    private suspend fun await(description: String, attempts: Int = 100, condition: suspend () -> Boolean) {
+        repeat(attempts) {
             if (condition()) return
             delay(50)
         }
@@ -249,10 +407,15 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     var started = 0
     var closed = 0
     var prepareError: Exception? = null
+    var startError: Exception? = null
+    var startGate: CompletableDeferred<Unit>? = null
+    val events = mutableListOf<String>()
     var listener: CallMediaListener? = null
     var answerOnOffer = false
     var answerSent = false
+    var candidateOnStart = false
     val received = mutableListOf<String>()
+    val receivedPayloads = mutableListOf<String>()
 
     override fun create(): CallMedia = this
 
@@ -262,12 +425,18 @@ private class FakeCallMedia : CallMediaFactory, CallMedia {
     }
 
     override suspend fun start(role: CallRole, iceServers: List<io.github.alexandrkhromov2005.vaultchat.core.net.IceServerDto>, listener: CallMediaListener) {
-        started++
+        events += "media"
+        startError?.let { throw it }
+        startGate?.await()
         this.listener = listener
+        if (candidateOnStart) listener.signal("candidate", "synthetic-candidate")
+        started++
     }
 
     override suspend fun receive(kind: String, payload: String) {
+        if (started == 0) return
         received += kind
+        receivedPayloads += payload
         if (kind == "offer" && answerOnOffer) {
             listener!!.signal("answer", "synthetic-answer")
             answerSent = true

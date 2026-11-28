@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Audio calls own the microphone only while the call is active. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- ICE host candidates and LAN TURN peers need local network access on
+         Android 16+. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 

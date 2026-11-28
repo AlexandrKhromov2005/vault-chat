@@ -20,6 +20,9 @@ val defaultServer = providers.gradleProperty("vaultchat.defaultServer").orElse("
         "vaultchat.defaultServer must look like https://host[:port]"
     }
 }
+val callsForceRelay = providers.gradleProperty("vaultchat.callsForceRelay").orElse("false").get().also {
+    require(it in setOf("true", "false")) { "vaultchat.callsForceRelay must be true or false" }
+}
 
 // The Firebase project for push (docs/android/push.md), kept outside the
 // repository like the signing key. Without it the build has no push.
@@ -72,6 +75,7 @@ android {
             applicationIdSuffix = ".debug"
             // The emulator reaches the host's Compose stack at 10.0.2.2.
             buildConfigField("String", "DEFAULT_SERVER", "\"${defaultServer.ifEmpty { "http://10.0.2.2:8080" }}\"")
+            buildConfigField("boolean", "CALLS_FORCE_RELAY", callsForceRelay)
         }
         release {
             isMinifyEnabled = true
@@ -79,6 +83,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
             buildConfigField("String", "DEFAULT_SERVER", "\"$defaultServer\"")
+            buildConfigField("boolean", "CALLS_FORCE_RELAY", "false")
         }
     }
 

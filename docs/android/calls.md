@@ -15,6 +15,12 @@
   принявшая звонок, владеет peer; другие устройства видят state без microphone.
 - Команды и сигналы имеют UUID `command_id` и монотонный `sender_seq`; сетевые
   повторы сохраняют их. REST active/signals восстанавливает потери realtime.
+  Сигналы, полученные во время асинхронного `media.start()`, сохраняются в
+  очередь и проигрываются по порядку после готовности peer, а не отбрасываются.
+  Исходящий candidate повторяется с тем же `sender_seq` до подтверждения или
+  завершения звонка; offer/answer сохраняют ограниченное число попыток. Такой retry
+  не удерживает lock, нужный входящим сигналам. Подтверждённые и незавершённые own
+  signals распознаются без ожидания сети, поэтому они не применяются к своему peer.
 - WebRTC закреплён как `io.github.webrtc-sdk:android:150.7871.08` в version
   catalog. AAR загружается из Maven Central; никаких незакреплённых версий или
   сторонних TURN/SFU нет.
@@ -61,6 +67,112 @@ GATEWAY_URL=http://127.0.0.1:8080 PROJECT=<local-project> \
 ringing/connecting/heartbeat timeouts можно увеличить через `ERL_FLAGS`
 (`-vault_calls ...`) только в disposable stack, не меняя production defaults.
 
+### Два Android-эмулятора
+
+`tests/ops/android_calls_acceptance.py` создаёт новых synthetic-пользователей,
+запускает caller и callee на двух устройствах и требует `OK (1 test)` на обоих.
+Каждая сторона проверяет рост отправленного и полученного RTP, завершение и
+отсутствие active call на сервере. `Process crashed` и JUnit failure не считаются
+успехом даже при нулевом коде `am instrument`. Debug APK собирается с
+`-Pvaultchat.callsForceRelay=true`, поэтому проверяется именно путь через TURN;
+обычные debug/release сборки сохраняют `IceTransportsType.ALL`. Фикстура задаёт
+`TURN_RELAY_IP=127.0.0.1`: иначе Coturn с wildcard relay address может выбрать
+LAN-интерфейс хоста, и mapping `10.0.2.2/127.0.0.1` не применится к candidates.
+Для диагностики без mapping `TURN_PUBLIC_IP`, `TURN_PRIVATE_IP` и `TURN_RELAY_IP`
+можно задать равными фактическому адресу хоста, а этот же адрес передать в
+`CALLS_TURN_URIS`; такой стенд доступен из соответствующей локальной сети и должен
+оставаться disposable.
+
+Стенд предназначен только для отдельного worktree и локального Docker. Нужны
+Android SDK с `platforms;android-37.0`, emulator, `platform-tools` и образ
+`system-images;android-26;default;x86_64`. Два AOSP AVD без Google Services
+используют до 3 GiB RAM; без KVM загрузка и ICE gathering могут занимать минуты.
+Не запускайте его против production и не копируйте настоящие ключи.
+
+```sh
+git worktree add --detach .tools/worktrees/android-calls <commit>
+cd .tools/worktrees/android-calls
+sh scripts/gen-jwt-keys.sh
+openssl rand -out secrets/turn_secret -hex 32
+chmod 755 secrets
+chmod 644 secrets/auth_jwt_private.pem secrets/auth_jwt_public.pem secrets/turn_secret
+
+export PROJECT=vault-android-e2e
+export POSTGRES_HOST_PORT=15432 CHAT_POSTGRES_HOST_PORT=15433
+export CALLS_POSTGRES_HOST_PORT=15434 MEDIA_POSTGRES_HOST_PORT=15435
+export REDIS_HOST_PORT=16379 MINIO_HOST_PORT=19000 MINIO_CONSOLE_HOST_PORT=19001
+export GATEWAY_HOST_PORT=8080 TURN_PUBLIC_IP=10.0.2.2 TURN_PRIVATE_IP=127.0.0.1
+export CALLS_TURN_URIS='turn:10.0.2.2:3478?transport=tcp'
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  up -d --build --wait
+
+export ANDROID_HOME=/absolute/path/to/android-sdk
+tests/ops/android_calls_emulators.sh
+adb -s emulator-5554 wait-for-device
+adb -s emulator-5556 wait-for-device
+# Дождитесь sys.boot_completed=1 на обоих устройствах.
+python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" --build
+```
+
+### Физическое Android-устройство
+
+Для USB-устройства не нужен cleartext по LAN: `adb reverse` отображает loopback
+устройства на loopback Gateway хоста. Доверие к сертификатам и сетевые правила
+приложения не меняются. В `CALLS_TURN_URIS` и параметры coturn при этом нужно
+задать фактический LAN-адрес хоста, как описано выше.
+
+```sh
+adb -s DEVICE_SERIAL reverse tcp:8080 tcp:8080
+python3 tests/ops/android_calls_acceptance.py --project "$PROJECT" \
+  --caller DEVICE_SERIAL --caller-device-gateway http://127.0.0.1:8080 \
+  --callee emulator-5556 --callee-device-gateway http://10.0.2.2:8080
+```
+
+`--gateway` по-прежнему задаёт только loopback API хоста для создания
+synthetic-пользователей и комнаты. Параметры `--caller-device-gateway` и
+`--callee-device-gateway` передаются в instrumentation и позволяют проверить
+два физических устройства, эмулятор с физическим устройством или два AVD.
+
+На Android 16+ приложению нужно разрешение `ACCESS_LOCAL_NETWORK` (объявлено в
+манифесте): без него система отклоняет UDP/TCP к локальным адресам, и ICE не
+собирает host/relay-кандидатов. На тестовом устройстве его можно выдать через
+`adb shell pm grant <package> android.permission.ACCESS_LOCAL_NETWORK`. Активный
+VPN на устройстве тоже ломает ICE: туннель подменяет host-кандидаты, поэтому
+перед прогоном VPN отключают.
+
+Для повторного прогона на тех же тёплых AVD без изменения APK можно использовать
+`--no-install`; по умолчанию APK всегда переустанавливаются. Первый запуск
+instrumentation после загрузки без KVM может занимать несколько минут. Только эта
+forced-relay фикстура увеличивает HTTP budget до 120 секунд; обычные клиенты
+сохраняют production-таймауты. Callee отмечает проверенный RTP marker-файлом, host
+после этого разрешает caller завершить звонок: ранний `end` не может скрыть, что
+вторая сторона ещё не проверила свои counters.
+
+Если Docker port forwarding на хосте не работает, вместо обычного `up` используйте
+host networking только для disposable-стенда. Все БД, Redis и MinIO слушают
+loopback; Calls gRPC в текущей реализации слушает все интерфейсы, поэтому стенд
+нельзя оставлять запущенным в недоверенной сети.
+
+```sh
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  -f tests/ops/fixtures/android-calls/host-network.yml up -d --wait \
+  postgres chat-postgres calls-postgres media-postgres redis profile-cache minio \
+  auth-migrate chat-migrate media-migrate calls-migrate s3-init auth chat media calls coturn
+tests/ops/android_calls_host_gateway.sh
+```
+
+Остановите только ресурсы этого стенда:
+
+```sh
+adb -s emulator-5554 emu kill
+adb -s emulator-5556 emu kill
+docker compose --project-name "$PROJECT" --env-file /dev/null \
+  -f deployments/docker-compose.yml -f tests/ops/fixtures/android-calls/build.yml \
+  down -v
+```
+
 24 ноября 2026 на API 26 emulator без KVM, после исправления TURN mapping и
 синхронизации acceptance, два подряд Android ↔ browser прогона завершились
 `OK (2 tests)`: Android и browser подтвердили рост sent/received RTP и корректный
@@ -69,6 +181,16 @@ end без crash. Instrumented-тест не запускает Activity, поэ
 
 API 26 foreground-service crash, offer/answer mutex deadlock и остававшийся
 `active` после 404 на `end()` воспроизведены, покрыты regression и исправлены.
+Потеря offer/candidate, пришедших до завершения асинхронного `media.start()`,
+также воспроизведена unit-регрессией: теперь они сохраняются и проигрываются
+после готовности media в исходном порядке.
+27–28 ноября двухэмуляторный forced-relay прогон пока не завершён успешно. После
+исправления outgoing retry lock обе стороны получили `candidates=1/1`, а Coturn
+подтвердил permissions и пакеты через relay. В отдельных прогонах caller получил
+`OK (1 test)`, callee — `active`, `RELAY` и рост sent/received RTP, но были также
+`ICE FAILED`, `RECOVERING`, network timeout и нулевой RTP на одной из сторон.
+Ни в одном прогоне обе стороны одновременно не вернули `OK (1 test)`, поэтому
+стабильно работающий Android ↔ Android звонок по-прежнему не подтверждён.
 На двух физических клиентах 25 ноября дополнительно воспроизвели истечение ringing
 через 30 секунд: `404` при refresh/accept оставлял старую панель, которая затем
 блокировала новый входящий. Теперь `404` завершает звонок и освобождает media,
